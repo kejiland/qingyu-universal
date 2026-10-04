@@ -22,6 +22,7 @@ import {
   type PostRow
 } from '../seo/meta.js';
 import { injectAppContent, renderPostContent } from '../ssr/post.js';
+import { HOME_POSTS_SQL, renderHomeContent } from '../ssr/list.js';
 
 export interface SeoDeps {
   config: AppConfig;
@@ -68,7 +69,17 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
     const shell = await loadShell();
     const site = readSiteIdentity(db);
     const meta = buildHomeMeta(site, config.siteUrl);
-    const html = injectHead(shell, meta, renderHeadBlock(meta));
+
+    // 把最新文章列表渲染进 #app，让爬虫与首屏无需等待 JS
+    let withList = shell;
+    try {
+      const posts = db.native.prepare(HOME_POSTS_SQL).all() as unknown as PostRow[];
+      if (posts.length) withList = injectAppContent(shell, renderHomeContent(posts, site));
+    } catch {
+      /* 查询失败时回落到原始外壳，不影响页面可用性 */
+    }
+
+    const html = injectHead(withList, meta, renderHeadBlock(meta));
     return htmlResponse(c, html, {
       'Cache-Control': 'no-cache',
       ETag: `W/"home-${config.siteUrl}"`,

@@ -139,6 +139,7 @@ export interface PostRow {
   seo?: string | null;
   status?: string | null;
   protected?: number | null;
+  pinned?: number | null;
   updated_at?: string | null;
 }
 
