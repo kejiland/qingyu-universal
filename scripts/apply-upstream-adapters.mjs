@@ -33,9 +33,12 @@ function insertAfter(lines, match, ...added) {
   lines.splice(i + 1, 0, ...added);
 }
 function replaceLine(lines, match, ...replacement) {
+  // 先判断补丁是否已经存在，再找锚点。
+  // 顺序反了会导致脚本不幂等：已打过补丁的文件里锚点已被替换掉，
+  // 第二次执行就会误报「锚点缺失」。
+  if (replacement.some((r) => lines.includes(r))) return;
   const i = lines.findIndex((l) => l.includes(match));
   if (i < 0) throw new Error('锚点缺失: ' + match);
-  if (replacement.some((r) => lines.includes(r))) return;
   lines.splice(i, 1, ...replacement);
 }
 
@@ -70,6 +73,40 @@ edit('app/functions/_lib/subscribe.js', (l) => {
     '  if (env.MAIL_SEND) return env.MAIL_SEND(to, subject, html);');
   replaceLine(l, "'邮件服务未配置（RESEND_API_KEY / BLOG_MAIL_FROM / SITE_URL）'",
     "  if (!mailConfigured(env)) throw new Error('邮件服务未配置（SMTP / RESEND_API_KEY / BLOG_MAIL_FROM / SITE_URL）');");
+});
+
+
+/* ---------- 4. 响应头消毒：非 ASCII 头值会让 Headers 构造直接抛错 ---------- */
+edit('app/functions/_lib/api-core.js', (l) => {
+  // 用显式标记判断是否已打过补丁。原先依赖 replacement.some(r => lines.includes(r))
+  // 判断，实测在部分情况下会误判成「已存在」而静默跳过，不可靠。
+  if (l.some((line) => line.includes('safeHeaders'))) return;
+
+  const i = l.findIndex((line) =>
+    line.includes('return new Response(JSON.stringify(data), { status, headers });')
+  );
+  if (i < 0) throw new Error('锚点缺失: api-core.js json() 的 return');
+
+  l.splice(
+    i,
+    1,
+    '  // [self-host] HTTP 头值必须是 ByteString（每个字符 <= 0xFF）。',
+    "  // 上游把文章 ID 直接拼进 Cache-Tag（'posts,post:' + id），中文 ID 会让",
+    '  // new Headers() 抛 ByteString 错误，导致整个接口 500。这里逐字符检查，',
+    '  // 把非 ASCII 百分号编码 —— 保留信息同时保证是合法头值。',
+    '  const safeHeaders = {};',
+    '  for (const hk of Object.keys(headers)) {',
+    '    const hv = headers[hk];',
+    "    if (typeof hv !== 'string') { safeHeaders[hk] = hv; continue; }",
+    "    let acc = '';",
+    '    for (const ch of hv) {',
+    '      const code = ch.codePointAt(0);',
+    '      acc += (code >= 32 && code <= 126) || code === 9 ? ch : encodeURIComponent(ch);',
+    '    }',
+    '    safeHeaders[hk] = acc;',
+    '  }',
+    '  return new Response(JSON.stringify(data), { status, headers: safeHeaders });'
+  );
 });
 
 for (const line of log) console.log(line);

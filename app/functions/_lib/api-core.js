@@ -128,7 +128,24 @@ export function json(data, status = 200, request, env, extra) {
     securityHeaders(),
     extra || {}
   );
-  return new Response(JSON.stringify(data), { status, headers });
+  // [self-host] HTTP 头值必须是 ByteString（每个字符 <= 0xFF）。
+  // 上游把文章 ID 直接拼进 Cache-Tag（'posts,post:' + id），中文 ID 会让
+  // new Headers() 抛 ByteString 错误，导致整个接口 500。这里逐字符检查，
+  // 把非 ASCII 百分号编码 —— 保留信息同时保证是合法头值。
+  const safeHeaders = {};
+  for (const hk of Object.keys(headers)) {
+    const hv = headers[hk];
+    if (typeof hv !== 'string') { safeHeaders[hk] = hv; continue; }
+    let acc = '';
+    // 必须按**码点**遍历：emoji 是代理对，用下标遍历会拿到孤立代理项，
+    // encodeURIComponent 对孤立代理项会抛 URIError，反而让接口 500。
+    for (const ch of hv) {
+      const code = ch.codePointAt(0);
+      acc += (code >= 32 && code <= 126) || code === 9 ? ch : encodeURIComponent(ch);
+    }
+    safeHeaders[hk] = acc;
+  }
+  return new Response(JSON.stringify(data), { status, headers: safeHeaders });
 }
 
 export function corsPreflight(request, env) {

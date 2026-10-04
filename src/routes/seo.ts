@@ -24,6 +24,7 @@ import {
 } from '../seo/meta.js';
 import { injectAppContent, renderPostContent } from '../ssr/post.js';
 import { HOME_POSTS_SQL, renderHomeContent } from '../ssr/list.js';
+import { weakEtag } from '../etag.js';
 import { readChrome, wrapWithChrome } from '../ssr/chrome.js';
 import {
   ARCHIVE_POSTS_SQL,
@@ -105,7 +106,7 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
     const html = injectHead(withList, meta, renderHeadBlock(meta));
     return htmlResponse(c, html, {
       'Cache-Control': 'no-cache',
-      ETag: `W/"home-${config.siteUrl}"`,
+      ETag: weakEtag('home', config.siteUrl),
       ...security()
     });
   };
@@ -139,7 +140,7 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
 
     const site = readSiteIdentity(db);
     const meta = buildArticleMeta(row, site, config.siteUrl);
-    const etag = `W/"post-${row.id}-${row.updated_at || row.date || ''}"`;
+    const etag = weakEtag('post', row.id, row.updated_at ?? row.date);
 
     if (c.req.header('if-none-match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, ...security() } });
