@@ -38,8 +38,40 @@ curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/depl
   | bash -s -- --domain blog.example.com
 ```
 
-脚本会自动：安装 Docker → 生成 `.env` 与随机密钥 → 构建镜像 → 启动应用与 Caddy →
-等待健康检查 → 输出后台地址与初始化密钥。
+脚本会自动：安装 Docker → 生成 `.env` 与随机密钥 → 构建镜像 → 启动容器 →
+等待健康检查 → 输出访问地址与初始化密钥。
+
+### 两种部署模式
+
+**域名不是必需的。** 不给 `--domain` 时走 IP + 端口模式：
+
+```bash
+# 无域名：直接用 http://<服务器IP>:8080 访问，普通 HTTP，不涉及证书
+curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh | bash -s -- --port 8080
+
+# 有域名：启用 Caddy + Let's Encrypt 自动 HTTPS
+curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh | bash -s -- --domain blog.example.com
+```
+
+| | 有域名 | 无域名 |
+| --- | --- | --- |
+| 访问方式 | `https://blog.example.com` | `http://<IP>:<端口>` |
+| 反向代理 | Caddy（自动申请并续期证书） | **不启动**，app 直接对外 |
+| 占用端口 | 80 / 443 | 仅 `--port`（默认 8080） |
+| 证书 | Let's Encrypt | 无（所以不会有任何证书警告） |
+| 脚本探测 | — | 自动探测公网 IP 写入 `SITE_URL` |
+| `TRUST_PROXY` | `1`（信任 Caddy 注入的客户端 IP） | `0`（没有反代时**不能**信任转发头，否则限流可被伪造绕过） |
+
+无域名模式刻意**不启动 Caddy**：Caddy 在没有域名时会用自签证书并强制 HTTPS，
+浏览器会报证书错误——对 IP 访问来说这是纯负担。
+
+以后有了域名，改一条命令即可切换，数据完全保留：
+
+```bash
+./deploy/install.sh upgrade --domain your.domain.com
+```
+
+可用选项：`--port <端口>`、`--ip <地址>`（不填自动探测公网 IP）。
 
 从已克隆的仓库运行（推荐，可用本地最新代码）：
 

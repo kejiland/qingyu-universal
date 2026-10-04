@@ -27,8 +27,11 @@ services:
       TRUST_PROXY: "1"
     volumes:
       - qingyu-data:/data
-    expose:
-      - "8787"
+    # 两种部署模式共用同一个服务：
+    #   有域名 → APP_BIND=127.0.0.1:8787，只有 Caddy 能访问，走自动 HTTPS
+    #   无域名 → APP_BIND=0.0.0.0:8080，直接用 http://<IP>:<端口> 访问，不启 Caddy
+    ports:
+      - "${APP_BIND:-127.0.0.1:8787}:8787"
     networks:
       - qingyu
 
@@ -36,6 +39,11 @@ services:
     image: caddy:2-alpine
     container_name: qingyu-caddy
     restart: unless-stopped
+    # 仅在配置了域名时启动（COMPOSE_PROFILES=domain）。
+    # 不配域名时应直接用 http://<IP>:<端口> 访问，不需要也不应该经过 Caddy ——
+    # 否则 Caddy 会用自签证书强制 HTTPS，浏览器报证书错误。
+    profiles:
+      - domain
     environment:
       SITE_DOMAIN: ${SITE_DOMAIN:-localhost}
     ports:

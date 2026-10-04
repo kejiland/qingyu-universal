@@ -19,6 +19,8 @@ REPO="${QINGYU_REPO:-kejiland/qingyu-universal}"
 REF="${QINGYU_REF:-main}"
 INSTALL_DIR="${QINGYU_DIR:-/opt/qingyu-universal}"
 DOMAIN="${SITE_DOMAIN:-}"
+IP_ADDR=""
+APP_PORT=""
 EMAIL="${ACME_EMAIL:-}"
 IMAGE="${QINGYU_IMAGE:-}"
 
@@ -81,6 +83,8 @@ while [ $# -gt 0 ]; do
     --dir)      INSTALL_DIR="${2:-}"; shift ;;
     --ref)      REF="${2:-}"; shift ;;
     --repo)     REPO="${2:-}"; shift ;;
+    --port)     APP_PORT="${2:-}"; shift ;;
+    --ip)       IP_ADDR="${2:-}"; shift ;;
     --image)    IMAGE="${2:-}"; shift ;;
     -h|--help)  COMMAND="help" ;;
     *)          ARGS+=("$1") ;;
@@ -101,7 +105,10 @@ usage() {
   uninstall               停止并删除容器（数据卷保留，需手动删除）
 
 选项：
-  --domain <域名>         对外域名，用于自动 HTTPS（如 blog.example.com）
+  --domain <域名>         对外域名，启用 Caddy + Let's Encrypt 自动 HTTPS
+                          （不填则用 http://<服务器IP>:<端口> 直接访问，无证书）
+  --port   <端口>         无域名模式下的对外端口（默认 8080）
+  --ip     <地址>         无域名模式下写入 SITE_URL 的地址（默认自动探测公网 IP）
   --email  <邮箱>         ACME 证书通知邮箱（可选）
   --dir    <目录>         安装目录，默认 /opt/qingyu-universal
   --ref    <分支/标签>     下载的代码版本，默认 main
@@ -186,6 +193,16 @@ fetch_source() {
 
 # ---------- 配置生成 ----------
 rand() { head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
+
+# 探测对外 IP：云主机通常在 NAT 后，本地网卡看到的只是内网地址，
+# 所以优先问外部回显服务，失败再退回第一块网卡。
+detect_ip() {
+  local ip=""
+  ip=$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)
+  [ -z "$ip" ] && ip=$(curl -fsS --max-time 5 https://ifconfig.me 2>/dev/null || true)
+  [ -z "$ip" ] && ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  printf '%s' "${ip:-127.0.0.1}"
+}
 rand_short() { head -c 9 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 
 ensure_env() {
@@ -194,21 +211,38 @@ ensure_env() {
     log "已存在 .env，保持不覆盖（如需重配请手动编辑）"
     return
   fi
-  local setup_key write_token port site_url
+  local setup_key write_token site_url app_bind compose_profiles trust_proxy
   setup_key="qy-$(rand_short)"
   write_token="$(rand)"
-  port="8787"
-  if [ -n "$DOMAIN" ]; then site_url="https://$DOMAIN"; else site_url="http://localhost"; fi
+
+  if [ -n "$DOMAIN" ]; then
+    # 有域名：Caddy 反代 + 自动 HTTPS，app 只绑本机，不对外暴露
+    site_url="https://$DOMAIN"
+    app_bind="127.0.0.1:8787"
+    compose_profiles="domain"
+    trust_proxy="1"
+  else
+    # 无域名：不启 Caddy，app 直接对外；普通 HTTP，不涉及任何证书
+    [ -n "$APP_PORT" ] || APP_PORT=8080
+    [ -n "$IP_ADDR" ] || IP_ADDR="$(detect_ip)"
+    site_url="http://${IP_ADDR}:${APP_PORT}"
+    app_bind="0.0.0.0:${APP_PORT}"
+    compose_profiles=""
+    # 没有反向代理时不能信任 X-Forwarded-For —— 否则限流标识可被伪造绕过
+    trust_proxy="0"
+  fi
 
   log "生成 .env 与随机密钥"
   cat > "$env_file" <<EOF
 # 由 deploy/install.sh 于 $(date -u +"%Y-%m-%dT%H:%M:%SZ") 生成
-PORT=$port
-HOST=127.0.0.1
+PORT=8787
+HOST=0.0.0.0
 SITE_URL=$site_url
 SITE_DOMAIN=$DOMAIN
 DATA_DIR=./data
-TRUST_PROXY=1
+APP_BIND=$app_bind
+COMPOSE_PROFILES=$compose_profiles
+TRUST_PROXY=$trust_proxy
 
 # 首次打开 /admin 时需要填写的安装密钥
 BLOG_ADMIN_SETUP_KEY=$setup_key
@@ -244,6 +278,19 @@ EOF
   SETUP_KEY_SHOWN="$setup_key"
 }
 
+# 读取 .env 中的值（install.sh 生成的配置以 .env 为准，避免两处真值）
+env_value() {
+  local key="$1"
+  [ -f "$INSTALL_DIR/.env" ] || return 0
+  grep -E "^${key}=" "$INSTALL_DIR/.env" 2>/dev/null | head -n1 | cut -d= -f2-
+}
+
+# app 在本机的监听端口：从 APP_BIND（形如 127.0.0.1:8787 / 0.0.0.0:8080）里取
+local_health_port() {
+  local bind; bind="$(env_value APP_BIND)"
+  printf '%s' "${bind##*:}"
+}
+
 compose() {
   cd "$INSTALL_DIR"
   if [ -n "$IMAGE" ]; then export QINGYU_IMAGE="$IMAGE"; fi
@@ -258,7 +305,7 @@ wait_healthy() {
       log "服务已健康"
       return 0
     fi
-    if curl -fsS "http://127.0.0.1${HEALTH_PORT:-:8787}/healthz" >/dev/null 2>&1; then
+    if curl -fsS "http://127.0.0.1:$(local_health_port)/healthz" >/dev/null 2>&1; then
       log "服务已响应"
       return 0
     fi
@@ -269,16 +316,16 @@ wait_healthy() {
 }
 
 summary() {
-  local domain_display="${DOMAIN:-localhost}"
-  local scheme="https"
-  [ -z "$DOMAIN" ] && scheme="http"
+  # 以 .env 的 SITE_URL 为准：两种模式（域名 / IP+端口）共用同一段输出
+  local site_url; site_url="$(env_value SITE_URL)"
+  [ -n "$site_url" ] || site_url="http://localhost:8787"
   echo
   echo "  ┌──────────────────────────────────────────────────────────┐"
   echo "  │  轻语博客 · 自托管通用版 部署完成                          │"
   echo "  └──────────────────────────────────────────────────────────┘"
   echo
-  echo "    访问地址    ${scheme}://${domain_display}"
-  echo "    管理后台    ${scheme}://${domain_display}/admin"
+  echo "    访问地址    ${site_url}"
+  echo "    管理后台    ${site_url}/admin"
   echo "    安装目录    ${INSTALL_DIR}"
   echo "    数据目录    ${INSTALL_DIR}/data（SQLite + 上传 + 备份）"
   echo
@@ -294,7 +341,13 @@ summary() {
   echo "      ${INSTALL_DIR}/deploy/install.sh upgrade"
   echo "      ${INSTALL_DIR}/deploy/install.sh backup"
   echo
-  echo "    未配置域名？在 .env 里设置 SITE_DOMAIN 后执行 deploy/install.sh upgrade 即可启用自动 HTTPS。"
+  if [ -z "$(env_value SITE_DOMAIN)" ]; then
+    echo "    当前为 IP + 端口模式（普通 HTTP，无证书）。"
+    echo "    有域名后执行：./deploy/install.sh upgrade --domain your.domain.com"
+    echo "    届时会自动启用 Caddy 与 Let's Encrypt HTTPS。"
+  else
+    echo "    已启用自动 HTTPS。证书首次签发通常需要十几秒，可通过 deploy/install.sh logs 查看。"
+  fi
   echo
 }
 
@@ -346,7 +399,7 @@ cmd_restore() {
 }
 
 cmd_logs()     { compose logs -f app; }
-cmd_status()   { compose ps; echo; curl -fsS "http://127.0.0.1:${PORT:-8787}/healthz" || true; echo; }
+cmd_status()   { compose ps; echo; curl -fsS "http://127.0.0.1:$(local_health_port)/healthz" || true; echo; }
 cmd_uninstall() {
   warn "将停止并删除容器（数据卷 qingyu-data 会保留）"
   compose down
