@@ -6,10 +6,7 @@
 # ============================================================
 FROM node:24-alpine
 
-# 非 root 运行；uid/gid 固定 1000，便于宿主目录直接挂载。
-RUN addgroup -g 1000 -S qingyu \
- && adduser -u 1000 -S qingyu -G qingyu
-
+# 非 root 运行：直接使用镜像内置的 node 用户（uid/gid 1000）
 WORKDIR /app
 
 COPY package.json ./
@@ -18,14 +15,14 @@ COPY scripts ./scripts
 COPY app ./app
 
 RUN mkdir -p /data \
- && chown -R qingyu:qingyu /data /app
+ && chown -R node:node /data
 
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8787 \
     DATA_DIR=/data
 
-USER qingyu
+USER node
 EXPOSE 8787
 VOLUME ["/data"]
 

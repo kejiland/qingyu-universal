@@ -135,6 +135,32 @@ async function handleLocalDownload(req, res, url) {
 }
 
 /** 公开对象：/media/* /music/* /og/* —— 由本地存储直接提供，支持 Range。 */
+/** 前端配置注入：把 config.js / config.min.js 里硬编码的 siteUrl
+ *  替换为本站 SITE_URL，避免自托管后仍生成原作者域名的分享/RSS 链接。 */
+async function handleConfigJs(req, res, pathname) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+  const file = pathname === '/config.min.js' ? 'config.min.js' : (pathname === '/config.js' ? 'config.js' : null);
+  if (!file) return false;
+  const source = await fsp.readFile(path.join(config.publicDir, file), 'utf8').catch(() => null);
+  if (source === null) return false;
+  const overridden = source.replace(/(siteUrl\s*:\s*)(["'])[^"']*\2/, function (_m, prefix, quote) {
+    return prefix + quote + config.siteUrl + quote;
+  });
+  const body = Buffer.from(overridden, 'utf8');
+  const etag = 'W/"cfg-' + Buffer.byteLength(body).toString(16) + '-' + config.siteUrl.length.toString(16) + '"';
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304, { ETag: etag }); res.end(); return true;
+  }
+  res.writeHead(200, {
+    'Content-Type': 'text/javascript; charset=utf-8',
+    'Content-Length': body.length,
+    'ETag': etag,
+    'Cache-Control': 'no-cache'
+  });
+  if (req.method === 'HEAD') res.end(); else res.end(body);
+  return true;
+}
+
 async function handlePublicObject(req, res, pathname) {
   if (!bindings.storage) return false;
   const relative = decodeURIComponent(pathname).replace(/^\/+/, '');
@@ -173,6 +199,7 @@ async function handle(req, res) {
   const pathname = url.pathname;
 
   if (pathname === '/healthz' || pathname === '/api/health') return handleHealth(res);
+  if (await handleConfigJs(req, res, pathname)) return;
   if (pathname === '/api/local-upload') return handleLocalUpload(req, res, url);
   if (pathname === '/api/local-download') return handleLocalDownload(req, res, url);
   if (/^\/(media|music|og)\//.test(pathname)) {
