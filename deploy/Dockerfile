@@ -1,11 +1,24 @@
 # ============================================================
 # 轻语博客 · 自托管通用版 镜像（多阶段构建）
 # ------------------------------------------------------------
-# 构建阶段：安装依赖 + TypeScript 编译 + 裁剪 devDependencies
-# 运行阶段：只带编译产物与生产依赖
+#   1) admin-build  后台 SPA（Vue + Vite + Tailwind）
+#   2) server-build 服务端 TypeScript
+#   3) 运行阶段      只带编译产物与生产依赖
 # 构建：docker build -f deploy/Dockerfile -t qingyu-universal .
 # ============================================================
-FROM node:24-alpine AS build
+FROM node:24-alpine AS admin-build
+WORKDIR /app/admin
+
+COPY admin/package.json admin/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY admin/ ./
+# 后台的类型来自服务端契约（@api-types 别名指向 ../generated）
+COPY generated/ /app/generated/
+RUN npm run build
+
+# ------------------------------------------------------------
+FROM node:24-alpine AS server-build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -24,10 +37,12 @@ WORKDIR /app
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8787 \
-    DATA_DIR=/data
+    DATA_DIR=/data \
+    ADMIN_DIST_DIR=/app/admin/dist
 
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
+COPY --from=server-build /app/node_modules ./node_modules
+COPY --from=server-build /app/dist ./dist
+COPY --from=admin-build /app/admin/dist ./admin/dist
 COPY package.json ./
 COPY app ./app
 

@@ -21,6 +21,7 @@ import type { MigrationReport } from './migrate.js';
 import type { WorkerEnv, WorkerModule } from './types.js';
 import { createHealthHandler } from './routes/health.js';
 import { createConfigJsHandler } from './routes/config-js.js';
+import { adminAppAvailable, createAdminAppHandler } from './routes/admin-app.js';
 import { createSeoHandlers, type SeoDeps } from './routes/seo.js';
 import {
   createLocalDownloadHandler,
@@ -107,6 +108,14 @@ export function createApp(deps: AppDeps): Hono {
     app.on(['GET', 'HEAD'], '/', seo.home);
     app.on(['GET', 'HEAD'], '/posts/:id', seo.article);
     app.on(['GET', 'HEAD'], '/posts/:id/', seo.article);
+  }
+
+  /* ---------- 新版后台 ----------
+   * 构建产物存在才挂载；否则请求自然落到上游旧版后台，功能不中断。 */
+  if (adminAppAvailable(config.adminDistDir)) {
+    const adminApp = createAdminAppHandler(config.adminDistDir);
+    app.on(['GET', 'HEAD'], '/admin', adminApp.index);
+    app.on(['GET', 'HEAD'], '/admin/*', adminApp.asset);
   }
 
   /* ---------- 前端配置注入 ---------- */

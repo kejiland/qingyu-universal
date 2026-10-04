@@ -1,6 +1,8 @@
 # 依赖 / 构建产物 / 运行时数据
 node_modules/
 dist/
+admin/node_modules/
+admin/dist/
 *.tsbuildinfo
 npm-debug.log*
 

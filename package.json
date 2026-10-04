@@ -25,7 +25,11 @@
     "openapi:emit": "node dist/cli/openapi.js",
     "api:types": "openapi-typescript generated/openapi.json -o generated/api.d.ts",
     "api:generate": "npm run build && npm run openapi:emit && npm run api:types",
-    "typecheck:tests": "tsc -p tsconfig.test.json"
+    "typecheck:tests": "tsc -p tsconfig.test.json",
+    "admin:install": "npm --prefix admin ci --no-audit --no-fund",
+    "admin:dev": "npm --prefix admin run dev",
+    "admin:build": "npm --prefix admin run build",
+    "build:all": "npm run build && npm run admin:build"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.3",

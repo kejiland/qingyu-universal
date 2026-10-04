@@ -1,0 +1,428 @@
+@import "tailwindcss";
+
+/* ============================================================
+ * 轻语后台 · 设计系统
+ * ------------------------------------------------------------
+ * 设计取向：暖色编辑风（与博客正文的赭橙主色一致），
+ * 大量留白、克制的阴影、12–16px 圆角、动效短促不喧哗。
+ * 明暗两套色板通过 CSS 变量切换，@theme inline 让工具类直接引用变量，
+ * 因此切换 .dark 时所有语义色自动跟随，不需要写两遍 dark: 变体。
+ * ============================================================ */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --canvas: #faf8f5;
+  --surface: #ffffff;
+  --surface-2: #f4f0ea;
+  --surface-3: #ece6dd;
+  --border: #e8e1d7;
+  --border-strong: #d8cfc2;
+
+  --ink: #1c1917;
+  --ink-soft: #57534e;
+  --ink-muted: #8f857a;
+
+  --accent: #c25e3a;
+  --accent-hover: #a94e2e;
+  --accent-soft: #fdf1ea;
+  --accent-ring: rgba(194, 94, 58, 0.32);
+
+  --success: #2f855a;
+  --success-soft: #eaf6ef;
+  --warning: #b7791f;
+  --warning-soft: #fdf6e6;
+  --danger: #c53030;
+  --danger-soft: #fdecec;
+  --info: #2b6cb0;
+  --info-soft: #eaf2fb;
+
+  --shadow-xs: 0 1px 2px rgba(28, 25, 23, 0.05);
+  --shadow-sm: 0 1px 3px rgba(28, 25, 23, 0.07), 0 1px 2px rgba(28, 25, 23, 0.04);
+  --shadow-md: 0 4px 12px rgba(28, 25, 23, 0.07), 0 2px 4px rgba(28, 25, 23, 0.04);
+  --shadow-lg: 0 12px 32px rgba(28, 25, 23, 0.11), 0 4px 8px rgba(28, 25, 23, 0.05);
+}
+
+.dark {
+  --canvas: #131110;
+  --surface: #1c1917;
+  --surface-2: #241f1c;
+  --surface-3: #2e2824;
+  --border: #302a25;
+  --border-strong: #433a33;
+
+  --ink: #f5f1ec;
+  --ink-soft: #bdb2a6;
+  --ink-muted: #8b8177;
+
+  --accent: #e0794f;
+  --accent-hover: #ec8f6d;
+  --accent-soft: #2c1d16;
+  --accent-ring: rgba(224, 121, 79, 0.34);
+
+  --success: #68d391;
+  --success-soft: #16251c;
+  --warning: #e3b341;
+  --warning-soft: #2a2314;
+  --danger: #fc8181;
+  --danger-soft: #2b1818;
+  --info: #7cb3f0;
+  --info-soft: #16223200;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.38);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.42);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+
+.dark {
+  --info-soft: #162232;
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-ink-muted: var(--ink-muted);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Source Han Sans SC", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --radius-card: 14px;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "tnum" 1;
+  }
+
+  ::selection {
+    background: var(--accent-ring);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* 细滚动条，避免在侧栏与编辑区显得笨重 */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--ink-muted);
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    height: 2.375rem;
+    padding: 0 0.875rem;
+    border-radius: 10px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s, transform 0.06s;
+    border: 1px solid transparent;
+  }
+  .btn:active:not(:disabled) {
+    transform: translateY(0.5px);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: var(--shadow-xs);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+
+  .btn-secondary {
+    background: var(--surface);
+    border-color: var(--border-strong);
+    color: var(--ink);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--surface-2);
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--ink-soft);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--surface-2);
+    color: var(--ink);
+  }
+
+  .btn-danger {
+    background: var(--danger);
+    color: #fff;
+  }
+  .btn-danger:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+
+  .btn-sm {
+    height: 2rem;
+    padding: 0 0.6875rem;
+    font-size: 0.8125rem;
+    border-radius: 8px;
+  }
+
+  .btn-icon {
+    width: 2.25rem;
+    padding: 0;
+  }
+
+  .input,
+  .textarea,
+  .select {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    color: var(--ink);
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .input::placeholder,
+  .textarea::placeholder {
+    color: var(--ink-muted);
+  }
+  .input:focus,
+  .textarea:focus,
+  .select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-ring);
+  }
+  .input:disabled,
+  .textarea:disabled {
+    background: var(--surface-2);
+    color: var(--ink-muted);
+  }
+  .textarea {
+    resize: vertical;
+    line-height: 1.65;
+  }
+  .input-lg {
+    height: 2.75rem;
+    font-size: 0.9375rem;
+  }
+
+  .label {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--ink-soft);
+    margin-bottom: 0.375rem;
+  }
+
+  .hint {
+    font-size: 0.75rem;
+    color: var(--ink-muted);
+    margin-top: 0.375rem;
+    line-height: 1.5;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.5;
+  }
+  .badge-success { background: var(--success-soft); color: var(--success); }
+  .badge-warning { background: var(--warning-soft); color: var(--warning); }
+  .badge-danger  { background: var(--danger-soft);  color: var(--danger); }
+  .badge-info    { background: var(--info-soft);    color: var(--info); }
+  .badge-neutral { background: var(--surface-2);    color: var(--ink-soft); }
+
+  /* 编辑区与预览区的排版：手写以保持与博客正文一致的阅读感 */
+  .prose-qingyu {
+    color: var(--ink);
+    line-height: 1.8;
+    font-size: 0.9375rem;
+    word-wrap: break-word;
+  }
+  .prose-qingyu > *:first-child { margin-top: 0; }
+  .prose-qingyu h1,
+  .prose-qingyu h2,
+  .prose-qingyu h3,
+  .prose-qingyu h4 {
+    font-weight: 600;
+    line-height: 1.35;
+    margin: 1.75em 0 0.75em;
+    letter-spacing: -0.01em;
+  }
+  .prose-qingyu h1 { font-size: 1.625rem; }
+  .prose-qingyu h2 { font-size: 1.3125rem; }
+  .prose-qingyu h3 { font-size: 1.125rem; }
+  .prose-qingyu h4 { font-size: 1rem; }
+  .prose-qingyu p { margin: 1em 0; }
+  .prose-qingyu a {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-decoration-thickness: 1px;
+  }
+  .prose-qingyu strong { font-weight: 600; }
+  .prose-qingyu ul,
+  .prose-qingyu ol { margin: 1em 0; padding-left: 1.5em; }
+  .prose-qingyu ul { list-style: disc; }
+  .prose-qingyu ol { list-style: decimal; }
+  .prose-qingyu li { margin: 0.375em 0; }
+  .prose-qingyu blockquote {
+    margin: 1.25em 0;
+    padding: 0.25em 0 0.25em 1em;
+    border-left: 3px solid var(--accent);
+    color: var(--ink-soft);
+    background: var(--surface-2);
+    border-radius: 0 8px 8px 0;
+    padding-right: 1em;
+  }
+  .prose-qingyu code {
+    background: var(--surface-3);
+    padding: 0.125em 0.375em;
+    border-radius: 5px;
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+  }
+  .prose-qingyu pre {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.875rem 1rem;
+    overflow-x: auto;
+    margin: 1.25em 0;
+    line-height: 1.6;
+  }
+  .prose-qingyu pre code {
+    background: none;
+    padding: 0;
+    font-size: 0.8125rem;
+  }
+  .prose-qingyu img {
+    max-width: 100%;
+    border-radius: 10px;
+    margin: 1.25em 0;
+  }
+  .prose-qingyu hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2em 0;
+  }
+  .prose-qingyu table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.25em 0;
+    font-size: 0.875rem;
+  }
+  .prose-qingyu th,
+  .prose-qingyu td {
+    border: 1px solid var(--border);
+    padding: 0.5em 0.75em;
+    text-align: left;
+  }
+  .prose-qingyu th { background: var(--surface-2); font-weight: 600; }
+}
+
+@layer utilities {
+  .animate-in {
+    animation: fade-rise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes fade-rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  .shimmer {
+    background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
+    background-size: 400% 100%;
+    animation: shimmer 1.4s ease infinite;
+  }
+  @keyframes shimmer {
+    from { background-position: 100% 50%; }
+    to { background-position: 0 50%; }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

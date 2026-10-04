@@ -23,6 +23,7 @@
 | 定时任务 | node-cron | 替代 Cloudflare Cron Triggers，时区可配 |
 | 邮件 | nodemailer | 相比手写 SMTP，连接池 / STARTTLS / AUTH 回退都更可靠 |
 | 测试 | vitest | 单元测试 + 端到端冒烟测试 |
+| 后台界面 | Vue 3 + Vite + Tailwind v4 | 组件化 + 设计令牌，明暗双主题；与博客同一套暖色气质 |
 | 反代 | Caddy | 自动 HTTPS，零配置 |
 
 > 上游 `app/` 目录（业务逻辑，约 240 KB JS）**保持原样**，只通过一层适配器接入上述栈。
@@ -169,6 +170,54 @@ BLOG_MAIL_FROM=博客 <noreply@example.com>
 
 ---
 
+## 新版后台
+
+后台已从「单文件 315 KB 手写 DOM」重构为 **Vue 3 + Vite + TypeScript + Tailwind** 应用，
+源码在 `admin/`，构建产物由服务端托管在 `/admin/`。
+
+```bash
+npm run admin:install     # 安装后台依赖
+npm run admin:dev         # 开发模式（热更新，代理 API 到 :8787）
+npm run admin:build       # 构建到 admin/dist
+```
+
+### 界面
+
+- **设计令牌驱动**：颜色、圆角、阴影、字体统一在 `admin/src/style.css` 的 `@theme` 中定义，
+  明暗双色板通过 CSS 变量切换，组件不需要写两遍 `dark:` 变体
+- **暖色编辑风**：与博客正文的赭橙主色同源，大量留白、克制阴影、短促动效
+- **响应式**：≥1024px 固定侧栏，小屏收为抽屉
+- **无 UI 框架依赖**：组件用 Tailwind 工具类 + 少量语义类（`.card` `.btn` `.input`）自建，
+  因此样式完全可控，不会出现「一眼看出是某个 UI 库」的味道
+
+### 已迁移的模块
+
+| 模块 | 状态 |
+| --- | --- |
+| 登录 / 首次初始化 | ✅ |
+| 文章列表（搜索、状态筛选、计数） | ✅ |
+| 文章编辑器（Markdown 分栏实时预览、封面、标签、SEO 覆盖、定时发布） | ✅ |
+| 媒体库（拖拽上传、进度、复制链接、删除） | ✅ |
+| 评论 / 设置 / 订阅者 / 备份 / 日志 | ⏳ 占位页，一键跳旧版 |
+
+### 迁移策略：新旧共存，零功能中断
+
+上游的路由判定是 `path.indexOf('/admin') === 0`，因此 **`/admin-legacy` 会自动落到旧版后台**，
+无需改动任何上游代码。于是：
+
+```
+/admin          → 新版后台（逐模块迁移中）
+/admin-legacy   → 旧版后台（功能完整，随时可用）
+```
+
+未迁移的模块在新版里显示占位页并提供「前往旧版后台」入口，**功能不丢失**。
+迁移完成后再把 `/admin` 与 `/admin-legacy` 对调即可。
+
+> 构建产物不存在时（未执行 `admin:build`），`/admin` 会自动回落到旧版后台，
+> 因此开发环境和精简部署都不会出现白屏。
+
+---
+
 ## SEO 与社交分享
 
 上游把 SEO 逻辑放在浏览器里（`app/public/app.js` 的 `updateSEO()`）——它会在页面加载后用
@@ -291,6 +340,7 @@ src/
 tests/                  vitest 单元测试
 scripts/                上游适配补丁（唯一保留的 .mjs 工具脚本）
 deploy/                 Dockerfile / Caddyfile / install.sh / install.ps1
+admin/                  新版后台（Vue + Vite + Tailwind）
 compose.yaml            app + Caddy 编排
 data/                   运行时数据（不入库）：qingyu.db、uploads/、backups/
 ```
@@ -316,7 +366,8 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
 - [x] **v0.2** TypeScript + Hono + zod + pino + node-cron + nodemailer；单元测试与 CI
 - [x] **v0.2.1** 文章页 / 首页服务端 SEO 渲染（OG 卡片、JSON-LD、canonical）
 - [x] **v0.2.2** API 契约层：zod schema → OpenAPI → 客户端类型，响应漂移检测
-- [ ] **v0.3** 前端拆分（公开站 SSR + 后台 SPA）、站点 JSON 备份导入、数据库外键约束
+- [x] **v0.3** 后台重构为 Vue 3 + Vite + Tailwind SPA（文章 / 编辑器 / 媒体库）
+- [ ] **v0.3.1** 后台剩余模块迁移、公开站 SSR 拆分、数据库外键约束
 - [ ] **v0.3** 契约覆盖剩余约 50 个接口（管理认证 / 媒体 / 订阅 / 备份）
 - [ ] **v0.3.1** PostgreSQL 适配、Redis/Valkey 限流
 - [ ] **v0.4** PaaS 模板（Railway / Render / Fly.io / Cloud Run）、多架构镜像发布

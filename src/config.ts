@@ -46,6 +46,7 @@ const EnvSchema = z.object({
   SITE_URL: z.string().trim().optional(),
   SITE_DOMAIN: z.string().trim().default(''),
   DATA_DIR: z.string().trim().default('./data'),
+  ADMIN_DIST_DIR: z.string().trim().default(''),
   TRUST_PROXY: booleanish(true),
   GEOIP_HEADER: z.string().trim().default('CF-IPCountry'),
   LOG_LEVEL: z.string().trim().default(''),
@@ -128,6 +129,8 @@ export interface AppConfig {
   readonly siteUrl: string;
   readonly siteDomain: string;
   readonly dataDir: string;
+  /** 新版后台的构建产物目录（不存在时自动回落到旧版后台）。 */
+  readonly adminDistDir: string;
   readonly dbPath: string;
   readonly uploadDir: string;
   readonly secret: string;
@@ -222,6 +225,7 @@ export function loadConfig(): AppConfig {
     siteUrl,
     siteDomain: env.SITE_DOMAIN,
     dataDir,
+    adminDistDir: path.resolve(ROOT, env.ADMIN_DIST_DIR || path.join('admin', 'dist')),
     dbPath: path.join(dataDir, 'qingyu.db'),
     uploadDir: path.join(dataDir, 'uploads'),
     secret,

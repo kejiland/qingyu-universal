@@ -47,6 +47,12 @@ jobs:
             exit 1
           fi
 
+      - name: 安装后台依赖
+        run: npm run admin:install
+
+      - name: 后台类型检查与构建
+        run: npm run admin:build
+
       - name: bash 语法检查
         run: bash -n deploy/install.sh
 
