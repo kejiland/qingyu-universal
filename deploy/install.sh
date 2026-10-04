@@ -21,6 +21,7 @@ INSTALL_DIR="${QINGYU_DIR:-/opt/qingyu-universal}"
 DOMAIN="${SITE_DOMAIN:-}"
 IP_ADDR=""
 APP_PORT=""
+ASSUME_YES=0
 EMAIL="${ACME_EMAIL:-}"
 IMAGE="${QINGYU_IMAGE:-}"
 
@@ -84,6 +85,7 @@ while [ $# -gt 0 ]; do
     --ref)      REF="${2:-}"; shift ;;
     --repo)     REPO="${2:-}"; shift ;;
     --port)     APP_PORT="${2:-}"; shift ;;
+    -y|--yes)   ASSUME_YES=1 ;;
     --ip)       IP_ADDR="${2:-}"; shift ;;
     --image)    IMAGE="${2:-}"; shift ;;
     -h|--help)  COMMAND="help" ;;
@@ -112,6 +114,7 @@ usage() {
   --                     （代价是拿不到自动 HTTPS 证书）；不配合 --domain
   --                     时为 IP+端口模式（默认 8080）
   --ip     <地址>         无域名模式下写入 SITE_URL 的地址（默认自动探测公网 IP）
+  -y, --yes               不提问，全部使用默认值（自动化 / CI 用）
   --email  <邮箱>         ACME 证书通知邮箱（可选）
   --dir    <目录>         安装目录，默认 /opt/qingyu-universal
   --ref    <分支/标签>     下载的代码版本，默认 main
@@ -337,6 +340,116 @@ check_port_free() {
 }
 
 # ------------------------------------------------------------
+# 人性化交互：先检测，再报告，最后让用户选
+# ------------------------------------------------------------
+# 关键陷阱：`curl … | bash` 时 stdin 是**脚本本身**，
+# 普通 read 会把脚本内容当成用户输入吃掉。必须从 /dev/tty 读。
+# /dev/tty 不可读（CI、无终端、--yes）时自动退回非交互模式。
+can_ask() {
+  [ "$ASSUME_YES" -eq 1 ] && return 1
+  [ -r /dev/tty ] || return 1
+  return 0
+}
+
+ask() {
+  # $1=提示文案  $2=默认值；结果写入 REPLY（空输入取默认值）
+  local prompt="$1" default="$2" answer=""
+  printf '  %s' "$prompt" > /dev/tty
+  [ -n "$default" ] && printf ' [%s]' "$default" > /dev/tty
+  printf ': ' > /dev/tty
+  IFS= read -r answer < /dev/tty || answer=""
+  REPLY="${answer:-$default}"
+}
+
+port_in_use_pair() {
+  local free=1
+  port_in_use 80 && free=0
+  port_in_use 443 && free=0
+  return $(( 1 - free ))
+}
+
+interact_mode() {
+  # 参数已指定 / 非升级场景已在 resolve_mode 里处理，这里只在「全新安装且未给参数」时提问
+  [ -n "$DOMAIN" ] && return 0
+  [ -n "$APP_PORT" ] && return 0
+  [ -f "$INSTALL_DIR/.env" ] && return 0
+
+  # ---- 环境报告（无论是否能交互都打印，让用户心里有数）----
+  local distro arch ip
+  distro=$(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-未知}") || distro="未知"
+  arch="$(uname -m 2>/dev/null || echo '未知')"
+  ip="$(detect_ip)"
+
+  echo
+  log "环境检查"
+  echo "    系统          ${distro} / ${arch}"
+  echo "    公网 IP       ${ip}"
+  echo "    curl          $(have curl && echo '已安装' || echo '未安装，将自动安装')"
+  echo "    Docker        $(docker_ready && echo '已就绪' || echo '未安装，将自动安装')"
+  local avail
+  avail=$(df -Pk / 2>/dev/null | awk 'NR==2 {print $4}')
+  [ -n "$avail" ] && echo "    可用磁盘      $((avail / 1024)) MB"
+
+  # ---- 端口检测 ----
+  local ports_free=1
+  port_in_use 80 && ports_free=0
+  port_in_use 443 && ports_free=0
+  if [ "$ports_free" -eq 1 ]; then
+    echo "    端口 80/443   空闲（可启用自动 HTTPS）"
+  else
+    echo "    端口 80/443   已被占用"
+  fi
+
+  can_ask || {
+    # 非交互：沿用自动决策，只说明会怎么做
+    echo
+    if [ "$ports_free" -eq 1 ]; then
+      log "非交互模式：未指定域名，将按 IP + 端口部署"
+    else
+      log "非交互模式：80/443 被占用，将按自定义端口部署"
+    fi
+    return 0
+  }
+
+  echo
+  if [ "$ports_free" -eq 1 ]; then
+    log "请选择部署方式"
+    echo "    1) 域名 + 自动 HTTPS   （推荐；需要域名解析到 ${ip}）"
+    echo "    2) IP + 端口           （无需域名，纯 HTTP）"
+    ask "选择" "1"
+
+    if [ "$REPLY" = "1" ]; then
+      ask "域名（如 blog.example.com，留空则改用 IP + 端口）" ""
+      if [ -n "$REPLY" ]; then
+        DOMAIN="$REPLY"
+        IP_ADDR="$ip"
+        log "将部署为 https://${DOMAIN}（自动申请证书）"
+        return 0
+      fi
+      log "未填域名，改用 IP + 端口"
+    fi
+    APP_PORT="$(pick_free_port)"
+    IP_ADDR="$ip"
+    log "将部署为 http://${ip}:${APP_PORT}"
+    return 0
+  fi
+
+  # 80/443 被占用
+  log "80/443 已被占用，无法申请 Let's Encrypt 证书"
+  echo "    （HTTP-01 验证固定走 80，TLS-ALPN 固定走 443 —— 这是协议限制，不是本项目的限制）"
+  echo "    可选：腾出端口后重跑可启用 HTTPS；或继续用自定义端口（纯 HTTP）"
+  echo
+  ask "自定义端口（留空自动选空闲端口）" ""
+  if [ -n "$REPLY" ]; then
+    APP_PORT="$REPLY"
+  else
+    APP_PORT="$(pick_free_port)"
+  fi
+  IP_ADDR="$ip"
+  log "将部署为 http://${ip}:${APP_PORT}（纯 HTTP，登录后台时密码为明文传输）"
+}
+
+# ------------------------------------------------------------
 # 傻瓜式：自动决定部署模式
 # ------------------------------------------------------------
 # 原则：能满足 HTTPS 条件就上 HTTPS；不满足就自动降级为「自定义端口 + 纯 HTTP」，
@@ -533,6 +646,7 @@ cmd_install() {
   ensure_curl
   install_docker
   fetch_source
+  interact_mode
   resolve_mode
   ensure_env
   preflight
