@@ -40,6 +40,12 @@ export function runMigrations(db: D1Database, dir: string, log: MigrationLogger 
     }
 
     const sql = fs.readFileSync(path.join(dir, file), 'utf8');
+
+    // SQLite 重建表（加外键）必须在关闭外键检查的前提下进行，
+    // 而 PRAGMA foreign_keys 在事务内是空操作，所以只能在 BEGIN 之前设置。
+    const foreignKeysOff = /^\s*--\s*@foreign-keys-off/m.test(sql.slice(0, 400));
+    if (foreignKeysOff) db.native.exec('PRAGMA foreign_keys = OFF');
+
     db.native.exec('BEGIN');
     try {
       db.native.exec(sql);
@@ -66,6 +72,8 @@ export function runMigrations(db: D1Database, dir: string, log: MigrationLogger 
         continue;
       }
       throw new Error(`迁移 ${file} 执行失败：${message}`);
+    } finally {
+      if (foreignKeysOff) db.native.exec('PRAGMA foreign_keys = ON');
     }
   }
 
