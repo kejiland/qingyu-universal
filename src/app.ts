@@ -109,6 +109,9 @@ export function createApp(deps: AppDeps): Hono {
     app.on(['GET', 'HEAD'], '/', seo.home);
     app.on(['GET', 'HEAD'], '/posts/:id', seo.article);
     app.on(['GET', 'HEAD'], '/posts/:id/', seo.article);
+    app.on(['GET', 'HEAD'], '/archive', seo.archive);
+    app.on(['GET', 'HEAD'], '/tags', seo.tags);
+    app.on(['GET', 'HEAD'], '/categories', seo.categories);
   }
 
   /* ---------- 新版后台 ----------

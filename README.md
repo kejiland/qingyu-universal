@@ -236,6 +236,8 @@ Twitter、Discord 抓到的永远是 `index.html` 里写死的那套标题。
 | --- | --- |
 | `/posts/<id>/` | `og:type=article`、文章标题/摘要/封面、绝对 `og:url` 与 canonical、`article:tag`、`article:published_time`、`BlogPosting` JSON-LD |
 | `/` | 站点名与简介、绝对 canonical、`WebSite` JSON-LD |
+| /archive | **按年/月分组的全部已发布文章** |
+| /tags、/categories | **标签云 / 分类云（含计数）** |
 | 草稿 / 定时 / 不存在的文章 | 只注入站点级信息并标记 `robots: noindex, nofollow`——**文章标题不会泄露给爬虫** |
 
 字段优先级与 `updateSEO()` 完全一致，避免爬虫看到的和用户看到的对不上：
@@ -377,7 +379,8 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
 - [x] **v0.4** 文章页与首页列表服务端渲染（正文/列表进 HTML，爬虫免 JS 可见）
 - [x] **v0.4.1** 数据库外键约束与级联清理（曾清理 18 条存量孤儿）
 - [x] **v0.5** 后台模块迁移全部完成（订阅者 / Webmention / 统计）
-- [ ] **v0.5.1** 归档/标签页 SSR、comments.parent_id 自引用外键
+- [x] **v0.5.1** 归档 / 标签 / 分类页服务端渲染
+- [ ] **v0.6** comments.parent_id 自引用外键、撤下旧版后台
 - [ ] **v0.3** 契约覆盖剩余约 50 个接口（管理认证 / 媒体 / 订阅 / 备份）
 - [ ] **v0.3.1** PostgreSQL 适配、Redis/Valkey 限流
 - [ ] **v0.4** PaaS 模板（Railway / Render / Fly.io / Cloud Run）、多架构镜像发布

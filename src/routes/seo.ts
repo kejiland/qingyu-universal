@@ -19,10 +19,18 @@ import {
   injectHead,
   readSiteIdentity,
   renderHeadBlock,
-  type PostRow
+  type PostRow,
+  type SiteIdentity
 } from '../seo/meta.js';
 import { injectAppContent, renderPostContent } from '../ssr/post.js';
 import { HOME_POSTS_SQL, renderHomeContent } from '../ssr/list.js';
+import {
+  ARCHIVE_POSTS_SQL,
+  filterPosts,
+  renderArchiveContent,
+  renderCategoriesContent,
+  renderTagsContent
+} from '../ssr/pages.js';
 
 export interface SeoDeps {
   config: AppConfig;
@@ -58,6 +66,9 @@ function createShellLoader(publicDir: string) {
 export interface SeoHandlers {
   home: (c: Context) => Promise<Response>;
   article: (c: Context) => Promise<Response>;
+  archive: (c: Context) => Promise<Response>;
+  tags: (c: Context) => Promise<Response>;
+  categories: (c: Context) => Promise<Response>;
 }
 
 export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
@@ -73,7 +84,15 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
     // 把最新文章列表渲染进 #app，让爬虫与首屏无需等待 JS
     let withList = shell;
     try {
-      const posts = db.native.prepare(HOME_POSTS_SQL).all() as unknown as PostRow[];
+      // 带 ?tag= / ?category= 时按条件筛选（标签是 JSON 数组，需取全量后比对）
+      const url = new URL(c.req.url);
+      const tag = url.searchParams.get('tag');
+      const category = url.searchParams.get('category');
+      let posts = db.native.prepare(HOME_POSTS_SQL).all() as unknown as PostRow[];
+      if (tag || category) {
+        const all = db.native.prepare(ARCHIVE_POSTS_SQL).all() as unknown as PostRow[];
+        posts = filterPosts(all, { tag, category }).slice(0, 10);
+      }
       if (posts.length) withList = injectAppContent(shell, renderHomeContent(posts, site));
     } catch {
       /* 查询失败时回落到原始外壳，不影响页面可用性 */
@@ -130,5 +149,25 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
     return htmlResponse(c, html, { 'Cache-Control': 'no-cache', ETag: etag, ...security() });
   };
 
-  return { home, article };
+  /** 归档 / 标签 / 分类：同一套「查全量已发布文章 → 渲染对应结构」的模式。 */
+  function makeListPage(render: (posts: PostRow[], site: SiteIdentity) => string) {
+    return async (c: Context): Promise<Response> => {
+      const shell = await loadShell();
+      const site = readSiteIdentity(db);
+      let withContent = shell;
+      try {
+        const posts = db.native.prepare(ARCHIVE_POSTS_SQL).all() as unknown as PostRow[];
+        withContent = injectAppContent(shell, render(posts, site));
+      } catch {
+        /* 查询失败时回落到原始外壳 */
+      }
+      return htmlResponse(c, withContent, { 'Cache-Control': 'no-cache', ...security() });
+    };
+  }
+
+  const archive = makeListPage(renderArchiveContent);
+  const tags = makeListPage(renderTagsContent);
+  const categories = makeListPage(renderCategoriesContent);
+
+  return { home, article, archive, tags, categories };
 }
