@@ -107,7 +107,10 @@ usage() {
 选项：
   --domain <域名>         对外域名，启用 Caddy + Let's Encrypt 自动 HTTPS
                           （不填则用 http://<服务器IP>:<端口> 直接访问，无证书）
-  --port   <端口>         无域名模式下的对外端口（默认 8080）
+  --port   <端口>         直接对外暴露该端口，走纯 HTTP、不启动 Caddy。
+  --                     配合 --domain 时是 80/443 被占用时的退路
+  --                     （代价是拿不到自动 HTTPS 证书）；不配合 --domain
+  --                     时为 IP+端口模式（默认 8080）
   --ip     <地址>         无域名模式下写入 SITE_URL 的地址（默认自动探测公网 IP）
   --email  <邮箱>         ACME 证书通知邮箱（可选）
   --dir    <目录>         安装目录，默认 /opt/qingyu-universal
@@ -215,17 +218,25 @@ ensure_env() {
   setup_key="qy-$(rand_short)"
   write_token="$(rand)"
 
-  if [ -n "$DOMAIN" ]; then
-    # 有域名：Caddy 反代 + 自动 HTTPS，app 只绑本机，不对外暴露
+  if [ -n "$DOMAIN" ] && [ -z "$APP_PORT" ]; then
+    # 模式一：域名 + 自动 HTTPS
+    # Caddy 反代，app 只绑本机不对外暴露；证书走 Let's Encrypt
     site_url="https://$DOMAIN"
     app_bind="127.0.0.1:8787"
     compose_profiles="domain"
     trust_proxy="1"
   else
-    # 无域名：不启 Caddy，app 直接对外；普通 HTTP，不涉及任何证书
+    # 模式二 / 三：纯 HTTP，不启 Caddy、不涉及证书
+    #   · --domain X --port 8080 → http://X:8080（80/443 被占用时的退路）
+    #   · 无 --domain --port 8080 → http://<IP>:8080
+    #   · 无 --domain 且未给端口 → 默认 8080
     [ -n "$APP_PORT" ] || APP_PORT=8080
-    [ -n "$IP_ADDR" ] || IP_ADDR="$(detect_ip)"
-    site_url="http://${IP_ADDR}:${APP_PORT}"
+    if [ -n "$DOMAIN" ]; then
+      site_url="http://${DOMAIN}:${APP_PORT}"
+    else
+      [ -n "$IP_ADDR" ] || IP_ADDR="$(detect_ip)"
+      site_url="http://${IP_ADDR}:${APP_PORT}"
+    fi
     app_bind="0.0.0.0:${APP_PORT}"
     compose_profiles=""
     # 没有反向代理时不能信任 X-Forwarded-For —— 否则限流标识可被伪造绕过
@@ -285,6 +296,18 @@ env_value() {
   grep -E "^${key}=" "$INSTALL_DIR/.env" 2>/dev/null | head -n1 | cut -d= -f2-
 }
 
+# 是否启用 Caddy（即 HTTPS 模式）。
+# .env 已存在时必须以里面的 COMPOSE_PROFILES 为准：
+# 那时 APP_BIND=127.0.0.1:8787 会被误判成「自定义端口」。
+uses_caddy() {
+  local profiles; profiles="$(env_value COMPOSE_PROFILES)"
+  if [ -n "$profiles" ]; then
+    [ "$profiles" = "domain" ]
+    return
+  fi
+  [ -n "$DOMAIN" ] && [ -z "$APP_PORT" ]
+}
+
 # app 在本机的监听端口：从 APP_BIND（形如 127.0.0.1:8787 / 0.0.0.0:8080）里取
 local_health_port() {
   local bind; bind="$(env_value APP_BIND)"
@@ -333,9 +356,21 @@ preflight() {
   fi
   [ -n "$APP_PORT" ] || APP_PORT=8080
 
-  if [ -n "$DOMAIN" ]; then
-    check_port_free 80 "Caddy 的 HTTP（证书签发也需要）" || ok=0
-    check_port_free 443 "Caddy 的 HTTPS" || ok=0
+  if uses_caddy; then
+    local conflict=0
+    check_port_free 80 "Caddy 的 HTTP（证书签发也需要）" || conflict=1
+    check_port_free 443 "Caddy 的 HTTPS" || conflict=1
+    if [ "$conflict" -eq 1 ]; then
+      ok=0
+      warn "80 / 443 被占用时无法自动申请 Let's Encrypt 证书 ——"
+      warn "HTTP-01 验证固定走 80，TLS-ALPN 固定走 443，换成别的端口拿不到证书。"
+      warn "可选方案："
+      warn "  1) 停掉占用端口的服务（如 nginx / apache）后重试"
+      warn "  2) 改用自定义端口 + 纯 HTTP（无证书，浏览器无警告）："
+      warn "       ./deploy/install.sh upgrade --domain ${DOMAIN} --port 8080"
+      warn "  3) 保留现有 Web 服务器，手工把请求反代到本应用（见 README「与现有 Web 服务器共存」）"
+      warn "  4) 不要证书、直接用 IP + 端口：./deploy/install.sh --port 8080（不带 --domain）"
+    fi
   else
     check_port_free "$APP_PORT" "应用" || ok=0
   fi

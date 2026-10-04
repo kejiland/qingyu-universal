@@ -41,6 +41,61 @@ curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/depl
 脚本会自动：安装 Docker → 生成 `.env` 与随机密钥 → 构建镜像 → 启动容器 →
 等待健康检查 → 输出访问地址与初始化密钥。
 
+### 端口被占用怎么办
+
+服务器上常见的情况是 80/443 已经被别的服务占用（nginx、Apache、宝塔、其它站点）。
+
+**先说清楚一个硬约束**：Let's Encrypt 的两种自动验证方式都绑死端口 ——
+HTTP-01 固定走 **80**，TLS-ALPN 固定走 **443**。所以**换端口就拿不到自动证书**，
+这不是本项目可以绕过的限制。
+
+可选方案：
+
+| 方案 | 命令 | 代价 |
+| --- | --- | --- |
+| **1. 腾出端口** | 停掉占用 80/443 的服务后正常部署 | 需要那个服务让位 |
+| **2. 换端口 + 纯 HTTP** | `install.sh --domain blog.example.com --port 8080` | 无证书，但**浏览器没有警告**（因为不是 HTTPS） |
+| **3. 保留现有 Web 服务器，手工反代** | 见下方 | 需要自己写反代配置 |
+| **4. 完全不用域名** | `install.sh --port 8080` | 用 `http://IP:8080` 访问 |
+
+方案 2 的访问地址是 `http://blog.example.com:8080`（注意带端口）。
+**指定了 `--port` 就会跳过 Caddy**，不管有没有 `--domain` —— 这是刻意的：
+既然不用 80/443，Caddy 的自动 HTTPS 就没有意义，不如省掉一个容器。
+
+> 想要「自定义端口 + 有效证书」，只能改用 **DNS-01 验证**（在 DNS 里加 TXT 记录）。
+> 这需要带 DNS 插件的自定义 Caddy 镜像，不在当前范围内。
+
+### 与现有 Web 服务器共存（方案 3）
+
+如果服务器上已经跑着 nginx / Apache，让它继续对外，把请求转发给本应用即可。
+本应用的容器会监听宿主机的一个端口，你只需要在反代里指过去。
+
+部署时用**不带 `--domain`** 的方式，让脚本不启动 Caddy：
+
+```bash
+./deploy/install.sh --port 8787           # 应用监听 0.0.0.0:8787
+```
+
+然后在 nginx 里加：
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;   # 注意用 $remote_addr
+    proxy_set_header X-Forwarded-Proto $scheme;
+    client_max_body_size 64m;                         # 上传上限
+}
+```
+
+两点要特别注意：
+
+1. **`X-Forwarded-For` 必须由反代覆盖**（用 `$remote_addr`，不要用 `$proxy_add_x_forwarded_for`）。
+   否则客户端可以自带这个头，伪造 IP 绕过限流。
+2. 这种模式下 `.env` 里 `TRUST_PROXY=0`，应用的限流会以**反代的 IP** 为准
+   （所有人看起来是同一个 IP）。若要恢复按真实访客 IP 限流，
+   把 `.env` 的 `TRUST_PROXY` 改成 `1` 并重启 —— 前提是你已按第 1 点覆盖了该头。
+
 ### 两种部署模式
 
 **域名不是必需的。** 不给 `--domain` 时走 IP + 端口模式：
