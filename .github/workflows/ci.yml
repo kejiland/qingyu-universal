@@ -5,34 +5,70 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  NODE_VERSION: '24'
+  SETUP_KEY: ci-setup-key
+
 jobs:
-  smoke:
-    name: 端到端冒烟测试
+  quality:
+    name: 类型检查与单元测试
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci --no-audit --no-fund
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 构建
+        run: npm run build
+
+      - name: 单元测试
+        run: npm test
+
+      - name: bash 语法检查
+        run: bash -n deploy/install.sh
+
+  smoke:
+    name: 端到端冒烟测试
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
 
       - name: 准备配置
         run: |
-          cat > .env <<'EOF'
+          cat > .env <<EOF
           PORT=8787
           HOST=127.0.0.1
           SITE_URL=http://localhost:8787
           DATA_DIR=./data
           TRUST_PROXY=0
-          BLOG_ADMIN_SETUP_KEY=ci-setup-key
+          LOG_PRETTY=0
+          BLOG_ADMIN_SETUP_KEY=${{ env.SETUP_KEY }}
           EOF
 
       - name: 应用数据库迁移
-        run: node server/migrate.js
+        run: npm run migrate
 
       - name: 启动服务
         run: |
-          node server/index.js > server.log 2>&1 &
+          node dist/index.js > server.log 2>&1 &
           for i in $(seq 1 30); do
             curl -fsS http://localhost:8787/healthz && break
             sleep 1
@@ -41,20 +77,21 @@ jobs:
       - name: 冒烟测试
         env:
           BASE_URL: http://localhost:8787
-          SETUP_KEY: ci-setup-key
-        run: node scripts/smoke.mjs
+        run: npm run smoke
 
       - name: 失败时输出服务日志
         if: failure()
         run: cat server.log
 
   docker:
-    name: 镜像构建
+    name: 镜像构建与容器验证
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: docker/setup-buildx-action@v3
-      - name: 构建镜像（不推送）
+
+      - name: 构建镜像
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -62,30 +99,17 @@ jobs:
           push: false
           load: true
           tags: qingyu-universal:ci
+
       - name: 容器冒烟测试
         run: |
           docker run -d --name qingyu-ci \
             -e SITE_URL=http://localhost:8787 \
-            -e BLOG_ADMIN_SETUP_KEY=ci-setup-key \
+            -e LOG_PRETTY=0 \
+            -e BLOG_ADMIN_SETUP_KEY=${{ env.SETUP_KEY }} \
             -p 8787:8787 qingyu-universal:ci
           for i in $(seq 1 40); do
             curl -fsS http://localhost:8787/healthz && break
             sleep 1
           done
-          curl -fsS http://localhost:8787/api/posts | head -c 200
+          BASE_URL=http://localhost:8787 node dist/cli/smoke.js
           docker logs qingyu-ci --tail 40
-
-  syntax:
-    name: 脚本语法检查
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: bash 语法检查
-        run: bash -n deploy/install.sh
-      - name: 所有模块可被 Node 解析
-        run: |
-          node --input-type=module -e "await import('./server/config.js')"
-          node --check scripts/backup.js
-          node --check scripts/restore.js
-          node --check scripts/health.js
-          node --check scripts/seed.js

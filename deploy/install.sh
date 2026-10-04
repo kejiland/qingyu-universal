@@ -109,7 +109,7 @@ fetch_source() {
   if [ -n "${SOURCE_ROOT:-}" ] && [ -f "$SOURCE_ROOT/compose.yaml" ] && [ -f "$SOURCE_ROOT/deploy/Dockerfile" ]; then
     log "使用本地代码：$SOURCE_ROOT"
     if [ "$(cd "$SOURCE_ROOT" && pwd)" != "$(cd "$INSTALL_DIR" && pwd)" ]; then
-      for item in package.json compose.yaml app server scripts deploy LICENSE .env.example; do
+      for item in package.json package-lock.json tsconfig.json compose.yaml app src scripts deploy LICENSE .env.example; do
         [ -e "$SOURCE_ROOT/$item" ] && cp -a "$SOURCE_ROOT/$item" "$INSTALL_DIR/"
       done
     fi
@@ -274,7 +274,7 @@ cmd_upgrade() {
 
 cmd_backup() {
   [ -d "$INSTALL_DIR" ] || die "未找到安装目录：$INSTALL_DIR"
-  compose exec -T app node scripts/backup.js /data/backups
+  compose exec -T app node dist/cli/backup.js /data/backups
 }
 
 cmd_restore() {
@@ -286,7 +286,7 @@ cmd_restore() {
   local name
   name="$(basename "$file")"
   docker cp "$file" qingyu-app:/data/restore-incoming.db
-  compose run --rm --no-deps app node scripts/restore.js /data/restore-incoming.db
+  compose run --rm --no-deps app node dist/cli/restore.js /data/restore-incoming.db
   compose up -d app
   log "恢复完成"
 }

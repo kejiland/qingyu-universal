@@ -3,10 +3,30 @@
 把 [qingyu-blog](https://github.com/kejiland/qingyu-blog) 从「深度绑定 Cloudflare」变成
 **可以部署在任何 VPS / NAS / 云主机** 的通用版本：一条命令拉起，数据在自己手里。
 
-- **零第三方运行时依赖** —— 只用 Node 内置能力（`node:sqlite` + WebCrypto），无 `npm install`
-- **默认单机开箱即用** —— SQLite + 本地磁盘 + Caddy 自动 HTTPS
-- **可选接入云服务** —— S3 兼容对象存储、PostgreSQL（规划中）、OpenAI 兼容 AI、SMTP/Resend
-- **业务行为与线上版一致** —— 直接复用上游业务代码，API 字段、后台、主题、搜索全部保留
+- **现代 Node 技术栈** —— TypeScript + Hono + zod + pino + vitest，有类型、有测试、有构建
+- **默认单机开箱即用** —— SQLite + 本地磁盘 + Caddy 自动 HTTPS，无需注册任何云服务
+- **可选接入云服务** —— S3 兼容对象存储（R2 / MinIO / BWS / OSS）、SMTP 或 Resend、任意 OpenAI 兼容 AI
+- **业务行为与线上版一致** —— 复用上游业务代码，API 字段、后台、主题、全文搜索全部保留
+
+---
+
+## 技术栈
+
+| 层 | 选型 | 为什么 |
+| --- | --- | --- |
+| 运行时 | Node.js 24 LTS | `node:sqlite` 在 24 起稳定，无需原生编译 |
+| 语言 | TypeScript（`tsc` 构建） | 服务层有编译期约束；上游 `app/` 保持 JS 以便同步 |
+| HTTP | [Hono](https://hono.dev) + `@hono/node-server` | 与上游的 Workers 形态天然契合，路由/中间件/流式响应齐备 |
+| 数据库 | `node:sqlite`（WAL + FTS5） | 一方 API，零原生编译；D1 本就是 SQLite，语义完全对齐 |
+| 配置校验 | zod | 配置错误在**启动时**报出，而不是运行到某个分支才炸 |
+| 日志 | pino（+ pino-pretty） | 结构化 JSON，可直接被 Loki / journald 采集 |
+| 定时任务 | node-cron | 替代 Cloudflare Cron Triggers，时区可配 |
+| 邮件 | nodemailer | 相比手写 SMTP，连接池 / STARTTLS / AUTH 回退都更可靠 |
+| 测试 | vitest | 单元测试 + 端到端冒烟测试 |
+| 反代 | Caddy | 自动 HTTPS，零配置 |
+
+> 上游 `app/` 目录（业务逻辑，约 240 KB JS）**保持原样**，只通过一层适配器接入上述栈。
+> 这样上游修 bug 时，重新同步 + 跑一次适配补丁即可，见 [docs/UPSTREAM.md](docs/UPSTREAM.md)。
 
 ---
 
@@ -49,23 +69,34 @@ Windows（Docker Desktop）：
 
 ---
 
-## 本地开发（不用 Docker）
+## 本地开发
 
-要求 **Node.js ≥ 22.5**（推荐 24 LTS；`node:sqlite` 在 24 起稳定）。
+要求 **Node.js ≥ 24**（`node:sqlite` 在 24 起稳定，无需实验性开关）。
 
 ```bash
+npm ci                    # 安装依赖
 cp .env.example .env      # 至少设置 SITE_URL 与 BLOG_ADMIN_SETUP_KEY
+npm run build             # TypeScript 编译到 dist/
 npm run migrate           # 应用 32 个数据库迁移
 npm start                 # http://localhost:8787
 ```
 
-验证：
+开发时用 `npm run dev`（tsx 监听 `src/`，改动即时重启，无需重新构建）。
+
+### 测试
 
 ```bash
-BASE_URL=http://localhost:8787 SETUP_KEY=<你的安装密钥> node scripts/smoke.mjs
+npm test                  # 单元测试（D1 / KV / 存储 / 迁移 / 配置，31 项）
+npm run typecheck         # 仅类型检查
+
+# 端到端冒烟测试（需先启动实例）
+BASE_URL=http://localhost:8787 SETUP_KEY=<安装密钥> npm run smoke
 ```
 
-冒烟测试覆盖：健康检查 / 管理员初始化 / 登录 / 权限拦截 / 文章 CRUD / 全文搜索 /
+单元测试覆盖：D1 兼容层的语句绑定/事务回滚/参数归一化、KV 的 TTL 与类型转换、
+本地存储的签名校验与目录穿越防护、32 个迁移的完整应用与幂等重放、配置校验与 S3 回落逻辑。
+
+端到端测试覆盖：健康检查 / 管理员初始化 / 登录 / 权限拦截 / 文章 CRUD / 全文搜索 /
 评论 / RSS / Sitemap / 媒体直传 / 站点备份 / 删除，共 18 项。
 
 ---
@@ -81,6 +112,8 @@ BASE_URL=http://localhost:8787 SETUP_KEY=<你的安装密钥> node scripts/smoke
 | `BLOG_ADMIN_SETUP_KEY` | 首次初始化管理员的安装密钥 | 空（**建议必填**） |
 | `DATA_DIR` | 数据目录（SQLite / 上传 / 备份） | `./data` |
 | `TRUST_PROXY` | 是否信任反代注入的客户端 IP 头 | `1` |
+| `LOG_LEVEL` / `LOG_PRETTY` | 日志级别 / 是否彩色输出 | `info` / `0` |
+| `CRON_TIMEZONE` / `BACKUP_CRON` | 定时任务时区与自动备份时间 | `UTC` / `0 19 * * *` |
 
 ### 存储：本地磁盘 或 任意 S3
 
@@ -103,6 +136,7 @@ S3_BACKUP_BUCKET=qingyu-backup
 ```
 
 浏览器会直传对象存储（不占服务器带宽），行为与线上 Cloudflare 版一致。
+若从线上版迁移，也可直接沿用 `R2_*` 变量名，配置层两者都认。
 
 ### AI：任意 OpenAI 兼容接口
 
@@ -127,34 +161,38 @@ SMTP_SECURE=0           # 465 端口用 1
 BLOG_MAIL_FROM=博客 <noreply@example.com>
 ```
 
-留空则关闭订阅邮件；后台订阅管理、确认链接等依赖邮件的功能会自动降级提示。
+启动时会做一次 SMTP 连接与认证自检，配置错误只告警不阻塞启动。
+留空则关闭订阅邮件；后台订阅管理、确认链接等依赖邮件的功能会优雅降级。
 
 ---
 
-## 架构：适配器复用，而不是重写
+## 架构
 
-上游 `qingyu-blog` 是纯 Cloudflare 形态，但它的**业务代码本身就是可移植的**：
-所有平台能力都通过少量绑定（`env.DB` / `env.BLOG` / `env.ASSETS` / `env.AI` / `env.R2_*`）访问，
-而 D1 本身**就是 SQLite**。因此本项目不改写业务逻辑，而是提供一层同形绑定：
+核心原则：**业务逻辑复用上游，平台能力由适配器提供。**
 
 ```
 app/worker.js  +  app/functions/**     上游业务代码（文章/评论/统计/AI/搜索/备份…）
         │  通过 Cloudflare 风格的绑定访问平台能力
         ▼
-server/bindings/*                       自托管绑定实现
-  ├── d1.js       env.DB      → node:sqlite（含 FTS5 trigram 全文索引）
-  ├── kv.js       env.BLOG    → SQLite KV 表（含 TTL）
-  ├── assets.js   env.ASSETS  → public/ 目录（含 _redirects 语义）
-  ├── storage.js  R2/S3       → 本地磁盘 + 签名上传端点
-  ├── ai.js       env.AI      → OpenAI 兼容接口
-  └── mail.js     Resend      → SMTP
+src/bindings/*                          自托管绑定实现（TypeScript）
+  ├── d1.ts        env.DB      → node:sqlite（WAL + FTS5 trigram）
+  ├── kv.ts        env.BLOG    → SQLite KV 表（含 TTL）
+  ├── assets.ts    env.ASSETS  → public/ 目录（含 _redirects 语义）
+  ├── storage.ts   R2/S3       → 本地磁盘 + 签名上传端点
+  ├── ai.ts        env.AI      → OpenAI 兼容接口
+  └── mail.ts      Resend      → SMTP（nodemailer）
         │
         ▼
-server/index.js                         原生 Node HTTP → Web Fetch 桥接 + 定时调度
+src/app.ts                               Hono：专有路由 + 兜底转交 worker.fetch
+src/index.ts                             启动：配置 → 绑定 → 迁移 → HTTP → 调度
 ```
 
-好处：**行为与线上版一致**，上游修 bug 时只需重新同步 `app/` 并跑一次
-`node scripts/apply-upstream-adapters.mjs`（幂等补丁，共 8 处接缝改动，业务逻辑零修改）。
+为什么要保留这层绑定，而不是把业务代码改写成 Hono 路由：
+
+- 上游 `api-core.js` 有 12 万行业务逻辑，重写等于把「文章/评论/统计/搜索/备份/审计/
+  Webmention/订阅」全部重新实现并逐一对齐行为——成本极高且必然引入回归；
+- D1 就是 SQLite，绑定契约本身是标准接口，实现它是**低成本、高保真**的路径；
+- 上游继续演进时，本项目只需重新同步 `app/` + 跑一次幂等补丁。
 
 详见 [docs/UPSTREAM.md](docs/UPSTREAM.md)。
 
@@ -162,14 +200,19 @@ server/index.js                         原生 Node HTTP → Web Fetch 桥接 + 
 
 ```
 app/                    上游业务代码（worker.js / functions/ / public/ / migrations/）
-server/
-  index.js              服务入口：路由 / 本地上传 / 静态对象 / 调度
-  config.js             .env → Workers 风格 env 绑定
-  migrate.js            迁移执行器（幂等、事务化）
-  scheduler.js          替代 Cloudflare Cron（定时发布 / 邮件投递 / 自动备份）
-  http.js               Node ↔ Web Fetch 桥接、Range 静态文件
+src/
+  index.ts              启动入口：装配绑定、迁移、HTTP、定时任务、优雅退出
+  app.ts                Hono 应用：专有路由 + 转交上游 worker.fetch
+  config.ts             dotenv + zod 配置校验与归一化
+  logger.ts             pino（并接管上游 console.*）
+  migrate.ts            迁移执行器（事务化、幂等）
+  scheduler.ts          node-cron 调度（定时发布 / 邮件投递 / 自动备份）
+  types.ts              D1 / KV / ASSETS / AI 契约类型
   bindings/             各平台能力的自托管实现
-scripts/                冒烟测试 / 种子导入 / 备份 / 恢复 / 上游适配补丁
+  routes/               健康检查 / 本地上传 / 配置注入 / 公开对象
+  cli/                  migrate / seed / health / backup / restore / smoke
+tests/                  vitest 单元测试
+scripts/                上游适配补丁（唯一保留的 .mjs 工具脚本）
 deploy/                 Dockerfile / Caddyfile / install.sh / install.ps1
 compose.yaml            app + Caddy 编排
 data/                   运行时数据（不入库）：qingyu.db、uploads/、backups/
@@ -192,10 +235,11 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
 
 ## 路线图
 
-- [x] **v0.1** Docker + SQLite + 本地磁盘 + Caddy + 一键部署脚本；AI(SMTP/S3) 适配
-- [ ] **v0.2** PostgreSQL 适配、Redis/Valkey 限流、站点 JSON 备份跨版本导入
-- [ ] **v0.3** PaaS 模板（Railway / Render / Fly.io / Cloud Run）、多架构镜像发布
-- [ ] **v0.4** Helm Chart、SQLite → PostgreSQL 迁移工具、镜像签名与 SBOM
+- [x] **v0.1** Docker + SQLite + 本地磁盘 + Caddy + 一键部署脚本；AI / SMTP / S3 适配
+- [x] **v0.2** TypeScript + Hono + zod + pino + node-cron + nodemailer；单元测试与 CI
+- [ ] **v0.3** 站点 JSON 备份跨版本导入、PostgreSQL 适配、Redis/Valkey 限流
+- [ ] **v0.4** PaaS 模板（Railway / Render / Fly.io / Cloud Run）、多架构镜像发布
+- [ ] **v0.5** Helm Chart、SQLite → PostgreSQL 迁移工具、镜像签名与 SBOM
 
 ## 许可证
 

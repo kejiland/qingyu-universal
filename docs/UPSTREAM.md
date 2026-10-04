@@ -57,29 +57,29 @@
 
 ## 三、绑定实现要点
 
-### D1（`server/bindings/d1.js`）
+### D1（`src/bindings/d1.ts`）
 - `node:sqlite` 的 `DatabaseSync`，WAL + `synchronous=NORMAL` + `busy_timeout=5000`
 - 预编译语句缓存（超过 400 条时清空）
 - `undefined → null`、`boolean → 0/1`（D1 参数类型限制）
 - `batch()` 用事务包裹；`run()` 返回 D1 形状的 `meta.changes` / `last_row_id`
 
-### KV（`server/bindings/kv.js`）
+### KV（`src/bindings/kv.ts`）
 - 表结构 `_kv_store(k, v, expires_at)`
 - `get(key, 'json' | 'text' | 'arrayBuffer' | 'stream')`、`put(..., { expirationTtl })`
 - 读取时惰性清理过期键（每分钟最多一次全表清理）
 
-### 存储（`server/bindings/storage.js`）
+### 存储（`src/bindings/storage.ts`）
 - 本地磁盘模式：`DATA_DIR/uploads/{media,music,backups,og}`
 - 上传地址用 HMAC-SHA256 签名并带有效期，`/api/local-upload` 校验后落盘
 - 公开读取 `/media/*`、`/music/*`、`/og/*`，支持 HTTP Range（音频拖动播放）
 - 目录穿越防护：key 必须在允许前缀内，且解析后仍位于 uploads 目录内
 
-### 邮件（`server/bindings/mail.js`）
-- 极简 SMTP 客户端（`node:net` / `node:tls`），支持隐式 TLS(465) 与 STARTTLS(587)、
-  `AUTH PLAIN` / `AUTH LOGIN`
-- 主题按 RFC 2047 Base64 编码，正文为标准 multipart/alternative
+### 邮件（`src/bindings/mail.ts`）
+- 使用 nodemailer：连接池、STARTTLS 协商、AUTH 机制回退、MIME 组装交给成熟库
+- 启动时做一次 `transport.verify()` 自检，配置错误只告警、不阻塞启动
+- 通过 `env.MAIL_SEND` 注入；上游 `sendEmail()` 优先走它，未配置时回退 Resend
 
-### AI（`server/bindings/ai.js`）
+### AI（`src/bindings/ai.ts`）
 - 把 `env.AI.run(model, { messages })` 适配为 OpenAI `/chat/completions`
 - 把 `choices[0].message.content` 包装回上游期望的 `{ response }` 形状
 
@@ -91,7 +91,7 @@
 # 1. 拉取上游最新代码
 git clone --depth 1 https://github.com/kejiland/qingyu-blog /tmp/upstream
 
-# 2. 用上游最新内容覆盖 app/ 下的目录（server/ deploy/ 等自有代码不动）
+# 2. 用上游最新内容覆盖 app/ 下的目录（src/ deploy/ 等自有代码不动）
 #    建议先 git commit，便于用 git checkout 核对差异
 cp -a /tmp/upstream/functions   app/functions
 cp -a /tmp/upstream/public      app/public
@@ -99,17 +99,22 @@ cp -a /tmp/upstream/migrations  app/migrations
 cp    /tmp/upstream/worker.js   app/worker.js
 
 # 3. 重新应用适配补丁（幂等，重复执行安全）
-node scripts/apply-upstream-adapters.mjs
+npm run sync:upstream
 
-# 4. 回归验证
+# 4. 安装依赖并构建
+npm ci
+npm run build
+
+# 5. 回归验证
 npm run migrate
 npm start &
-BASE_URL=http://localhost:8787 SETUP_KEY=... node scripts/smoke.mjs
+npm test
+BASE_URL=http://localhost:8787 SETUP_KEY=... npm run smoke
 ```
 
 > 若上游删除了旧文件，`cp -a` 不会清理残留，请用 `git status` 核对后再提交。
 
-> **注意**：上游若新增平台绑定（例如 `env.QUEUE`、`env.BROWSER`），需要在 `server/`
+> **注意**：上游若新增平台绑定（例如 `env.QUEUE`、`env.BROWSER`），需要在 `src/`
 > 下补一个同形实现，并更新本文档的对照表。
 
 ---
@@ -118,5 +123,5 @@ BASE_URL=http://localhost:8787 SETUP_KEY=... node scripts/smoke.mjs
 
 上游的 32 个迁移是**跨版本增量**的，其中 `0003_cover_column.sql` 在全新数据库上
 会因 `0001_init.sql` 已含 `cover` 列而报 `duplicate column name`——上游 `deploy.yml`
-对此做了「列已存在即忽略」处理。本项目 `server/migrate.js` 采用同样策略，
+对此做了「列已存在即忽略」处理。本项目 `src/migrate.ts` 采用同样策略，
 并把每个迁移记录到 `_migrations` 表，保证重复执行安全且不会漏跑新迁移。

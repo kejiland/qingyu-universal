@@ -1,0 +1,13 @@
+# 构建上下文排除项：只保留镜像真正需要的文件
+.git
+.github
+node_modules
+dist
+data
+docs
+screenshots
+*.log
+.env
+.env.*
+!.env.example
+README.md

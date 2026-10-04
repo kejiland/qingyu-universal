@@ -1,5 +1,7 @@
-# 依赖 / 运行时产物
+# 依赖 / 构建产物 / 运行时数据
 node_modules/
+dist/
+*.tsbuildinfo
 npm-debug.log*
 
 # 本地数据（数据库 / 上传 / 备份）——绝不入库
