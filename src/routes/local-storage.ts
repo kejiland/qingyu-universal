@@ -13,6 +13,28 @@ import type { Context } from 'hono';
 import type { LocalStorage } from '../bindings/storage.js';
 import { contentTypeFor } from '../bindings/assets.js';
 
+/**
+ * 本地上传/下载端点的 CORS 头。
+ *
+ * 上传地址由服务端按 SITE_URL 生成，但**用户实际访问后台的地址可能不同**
+ * （例如安装脚本探测到公网 IP、而用户用 localhost 打开；或反之）。
+ * 这时 PUT 会变成跨域请求，浏览器先发 OPTIONS 预检 —— 若端点不返回
+ * CORS 头，预检失败，XHR 触发 onerror，前端只能报「上传失败：网络错误」，
+ * 完全看不出真正原因。
+ *
+ * 安全性：该端点靠 URL 里的 HMAC 签名鉴权，放开来源不会降低安全性 ——
+ * 没有有效签名，任何来源都传不进来。
+ */
+function corsHeaders(c: Context): Record<string, string> {
+  return {
+    'Access-Control-Allow-Origin': c.req.header('origin') || '*',
+    'Access-Control-Allow-Methods': 'PUT, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Max-Age': '600',
+    Vary: 'Origin'
+  };
+}
+
 /** 上传兜底上限（图片 10MB / 音乐 30MB，留足余量）。 */
 const MAX_UPLOAD_BYTES = 64 * 1024 * 1024;
 
@@ -33,6 +55,7 @@ function byteLimitGuard(max: number): Transform {
 
 export function createLocalUploadHandler(storage: LocalStorage) {
   return async (c: Context): Promise<Response> => {
+    if (c.req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(c) });
     if (c.req.method !== 'PUT' && c.req.method !== 'POST') {
       return c.json({ ok: false, error: 'Method Not Allowed' }, 405);
     }
@@ -70,7 +93,7 @@ export function createLocalUploadHandler(storage: LocalStorage) {
       if (contentType) await fsp.writeFile(`${target}.meta`, contentType, 'utf8').catch(() => {});
 
       const stat = await fsp.stat(target);
-      return c.json({ ok: true, key, size: stat.size });
+      return c.json({ ok: true, key, size: stat.size }, 200, corsHeaders(c));
     } catch (error) {
       await fsp.rm(target, { force: true }).catch(() => {});
       const message = error instanceof Error ? error.message : String(error);
@@ -89,6 +112,7 @@ export function createLocalDownloadHandler(storage: LocalStorage) {
     const expires = url.searchParams.get('exp') ?? '';
     const signature = url.searchParams.get('sig') ?? '';
 
+    if (c.req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(c) });
     if (!storage.verify('GET', key, expires, '', signature)) {
       return c.json({ ok: false, error: '下载地址无效或已过期' }, 403);
     }
