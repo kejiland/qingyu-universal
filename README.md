@@ -86,7 +86,7 @@ npm start                 # http://localhost:8787
 ### 测试
 
 ```bash
-npm test                  # 单元测试（D1 / KV / 存储 / 迁移 / 配置，31 项）
+npm test                  # 单元测试（D1 / KV / 存储 / 迁移 / 配置 / SEO，52 项）
 npm run typecheck         # 仅类型检查
 
 # 端到端冒烟测试（需先启动实例）
@@ -94,10 +94,11 @@ BASE_URL=http://localhost:8787 SETUP_KEY=<安装密钥> npm run smoke
 ```
 
 单元测试覆盖：D1 兼容层的语句绑定/事务回滚/参数归一化、KV 的 TTL 与类型转换、
-本地存储的签名校验与目录穿越防护、32 个迁移的完整应用与幂等重放、配置校验与 S3 回落逻辑。
+本地存储的签名校验与目录穿越防护、32 个迁移的完整应用与幂等重放、配置校验与 S3 回落逻辑、
+服务端 SEO 的注入/回退/XSS 防护/草稿不泄露。
 
-端到端测试覆盖：健康检查 / 管理员初始化 / 登录 / 权限拦截 / 文章 CRUD / 全文搜索 /
-评论 / RSS / Sitemap / 媒体直传 / 站点备份 / 删除，共 18 项。
+端到端测试覆盖：健康检查 / 管理员初始化 / 登录 / 权限拦截 / 文章 CRUD / **服务端 SEO** /
+全文搜索 / 评论 / RSS / Sitemap / 媒体直传 / 站点备份 / 删除，共 25 项。
 
 ---
 
@@ -163,6 +164,43 @@ BLOG_MAIL_FROM=博客 <noreply@example.com>
 
 启动时会做一次 SMTP 连接与认证自检，配置错误只告警不阻塞启动。
 留空则关闭订阅邮件；后台订阅管理、确认链接等依赖邮件的功能会优雅降级。
+
+---
+
+## SEO 与社交分享
+
+上游把 SEO 逻辑放在浏览器里（`app/public/app.js` 的 `updateSEO()`）——它会在页面加载后用
+JS 改写 `<meta>`、canonical 与 JSON-LD。这对**不执行 JS 的社交爬虫完全无效**：微信、
+Twitter、Discord 抓到的永远是 `index.html` 里写死的那套标题。
+
+自托管版把这套规则搬到了服务端，在返回 HTML **之前**就注入正确的标签：
+
+| 页面 | 注入内容 |
+| --- | --- |
+| `/posts/<id>/` | `og:type=article`、文章标题/摘要/封面、绝对 `og:url` 与 canonical、`article:tag`、`article:published_time`、`BlogPosting` JSON-LD |
+| `/` | 站点名与简介、绝对 canonical、`WebSite` JSON-LD |
+| 草稿 / 定时 / 不存在的文章 | 只注入站点级信息并标记 `robots: noindex, nofollow`——**文章标题不会泄露给爬虫** |
+
+字段优先级与 `updateSEO()` 完全一致，避免爬虫看到的和用户看到的对不上：
+
+```
+标题   : seo.title  →  「文章标题 · 站点名」
+描述   : seo.desc   →  excerpt  →  正文去 Markdown 后前 200 字  →  站点简介
+分享图 : og_image   →  cover    →  （留空则用 summary 卡片）
+canonical: seo.canonical  →  https://<SITE_URL>/posts/<id>/
+```
+
+`seo` 字段（`title` / `desc` / `canonical` / `noindex`）在后台文章编辑器里就能填，
+数据库早就存着了，之前只是没人渲染它。
+
+**注意**：站点名与简介来自后台的「站点基础信息」；没配置时会回退到内置默认值。
+自托管站点建议先把它改成自己的名字。
+
+安全细节：文章标题会经过 HTML 属性转义，JSON-LD 会转义 `<` `>` `&` 与 U+2028/2029，
+因此标题里的 `</script>` 或 `"` 无法逃逸出标签。响应头复用上游的 `securityHeaders()`，
+与静态资源路径保持一致。
+
+详见 [docs/SEO.md](docs/SEO.md)。
 
 ---
 
@@ -237,7 +275,9 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
 
 - [x] **v0.1** Docker + SQLite + 本地磁盘 + Caddy + 一键部署脚本；AI / SMTP / S3 适配
 - [x] **v0.2** TypeScript + Hono + zod + pino + node-cron + nodemailer；单元测试与 CI
-- [ ] **v0.3** 站点 JSON 备份跨版本导入、PostgreSQL 适配、Redis/Valkey 限流
+- [x] **v0.2.1** 文章页 / 首页服务端 SEO 渲染（OG 卡片、JSON-LD、canonical）
+- [ ] **v0.3** 前端拆分（公开站 SSR + 后台 SPA）、站点 JSON 备份导入、数据库外键约束
+- [ ] **v0.3.1** PostgreSQL 适配、Redis/Valkey 限流
 - [ ] **v0.4** PaaS 模板（Railway / Render / Fly.io / Cloud Run）、多架构镜像发布
 - [ ] **v0.5** Helm Chart、SQLite → PostgreSQL 迁移工具、镜像签名与 SBOM
 

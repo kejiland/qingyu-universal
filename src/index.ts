@@ -71,6 +71,13 @@ const workerEntry = pathToFileURL(path.join(config.appDir, 'worker.js')).href;
 const workerModule = (await import(workerEntry)) as { default: WorkerModule };
 const worker = workerModule.default;
 
+/* ---------- 复用上游的安全响应头 ----------
+ * SEO 路由直接返回 HTML，不经过 worker，因此这里把上游的 securityHeaders()
+ * 借过来，保证两条路径的安全头完全一致（避免各写一份导致漂移）。 */
+const apiCoreEntry = pathToFileURL(path.join(config.appDir, 'functions/_lib/api-core.js')).href;
+const apiCore = (await import(apiCoreEntry)) as { securityHeaders?: () => Record<string, string> };
+const securityHeaders = typeof apiCore.securityHeaders === 'function' ? apiCore.securityHeaders : undefined;
+
 /* ---------- 自引用 fetch 改写 ----------
  * 本地存储模式下备份等逻辑会在服务端 fetch 本站地址（SITE_URL）。
  * 若公网域名在容器内不可解析，这里把本站 origin 改写到环回地址，保证必然可达。 */
@@ -96,6 +103,7 @@ const app = createApp({
   worker,
   migration,
   storage,
+  seo: { config, db, securityHeaders },
   startTime: startedAt,
   onRequest: (info) => logger.info(info, 'http')
 });

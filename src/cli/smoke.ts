@@ -112,11 +112,22 @@ ok('文章出现在公开列表', list.status === 200 && Boolean(list.data.posts
 const detail = await api<{ post?: { content?: string } }>(`/api/posts/${encodeURIComponent(POST_ID)}`);
 ok('文章详情可读取', detail.status === 200 && Boolean(detail.data.post?.content?.includes(KEYWORD)), `status=${detail.status}`);
 
-/* ---------- 7. 全文搜索（FTS5 trigram） ---------- */
+/* ---------- 7. 服务端 SEO（爬虫视角：不执行 JS 也能读到正确 meta） ---------- */
+const articlePage = await fetch(`${BASE}/posts/${encodeURIComponent(POST_ID)}/`);
+const articleHtml = await articlePage.text();
+ok('文章页返回 HTML', articlePage.status === 200 && (articlePage.headers.get('content-type') ?? '').includes('text/html'), `status=${articlePage.status}`);
+ok('注入 og:title（含文章标题）', /property="og:title" content="[^"]*冒烟测试文章/.test(articleHtml));
+ok('og:type = article', articleHtml.includes('property="og:type" content="article"'));
+ok('注入绝对 canonical', /<link rel="canonical" href="https?:\/\/[^"]+\/posts\//.test(articleHtml));
+ok('注入 BlogPosting JSON-LD', articleHtml.includes('"@type":"BlogPosting"'));
+ok('替换掉写死的站点标题', !articleHtml.includes("Qingyu'Blog · 轻量博客"));
+ok('head 内 canonical / JSON-LD 各一份', (articleHtml.match(/rel="canonical"/g) ?? []).length === 1 && (articleHtml.match(/application\/ld\+json/g) ?? []).length === 1);
+
+/* ---------- 8. 全文搜索（FTS5 trigram） ---------- */
 const search = await api<{ results?: Array<{ id: string }> }>(`/api/search?q=${encodeURIComponent(KEYWORD)}`);
 ok('FTS5 全文搜索命中新文章', search.status === 200 && Boolean(search.data.results?.some((r) => r.id === POST_ID)), `status=${search.status}`);
 
-/* ---------- 8. 评论 ---------- */
+/* ---------- 9. 评论 ---------- */
 const comment = await api(`/api/posts/${encodeURIComponent(POST_ID)}/comments`, {
   method: 'POST',
   body: { author: '冒烟测试', content: `评论验证 ${MARKER}` }
@@ -126,14 +137,14 @@ ok('发表评论成功', comment.status === 200 || comment.status === 201, `stat
 const comments = await api(`/api/posts/${encodeURIComponent(POST_ID)}/comments`);
 ok('评论可读回', comments.status === 200 && JSON.stringify(comments.data).includes(MARKER), `status=${comments.status}`);
 
-/* ---------- 9. Feed / Sitemap ---------- */
+/* ---------- 10. Feed / Sitemap ---------- */
 const feed = await fetch(`${BASE}/api/feed.xml`);
 ok('RSS 订阅可生成', feed.status === 200 && (await feed.text()).includes('<rss'), `status=${feed.status}`);
 
 const sitemap = await fetch(`${BASE}/api/sitemap.xml`);
 ok('Sitemap 可生成', sitemap.status === 200 && (await sitemap.text()).includes('<urlset'), `status=${sitemap.status}`);
 
-/* ---------- 10. 媒体上传（本地磁盘或 S3 直传） ---------- */
+/* ---------- 11. 媒体上传（本地磁盘或 S3 直传） ---------- */
 const signed = await api<{ uploadUrl?: string; publicUrl?: string; key?: string }>('/api/media/upload-url', {
   method: 'POST',
   headers: auth,
@@ -164,11 +175,11 @@ if (signed.status === 200 && signed.data.uploadUrl) {
   ok('媒体上传地址签发', false, `status=${signed.status}`);
 }
 
-/* ---------- 11. 备份（本地磁盘模式亦可用） ---------- */
+/* ---------- 12. 备份（本地磁盘模式亦可用） ---------- */
 const backup = await api('/api/admin/backups', { method: 'POST', headers: auth });
 ok('站点备份可创建', backup.status === 200 || backup.status === 201, `status=${backup.status}`);
 
-/* ---------- 12. 清理 ---------- */
+/* ---------- 13. 清理 ---------- */
 const removed = await api(`/api/posts/${encodeURIComponent(POST_ID)}`, { method: 'DELETE', headers: auth });
 ok('删除文章成功', removed.status === 200 || removed.status === 204, `status=${removed.status}`);
 

@@ -15,6 +15,7 @@ import type { LocalStorage } from './bindings/storage.js';
 import type { MigrationReport } from './migrate.js';
 import type { WorkerEnv, WorkerModule } from './types.js';
 import { createHealthHandler } from './routes/health.js';
+import { createSeoHandlers, type SeoDeps } from './routes/seo.js';
 import { createConfigJsHandler } from './routes/config-js.js';
 import {
   createLocalDownloadHandler,
@@ -31,6 +32,8 @@ export interface AppDeps {
   storage?: LocalStorage;
   /** 进程启动时间（健康检查里的 uptime 基准）。 */
   startTime?: number;
+  /** 服务端 SEO 渲染依赖；不传则跳过注入（保持上游原始行为）。 */
+  seo?: SeoDeps;
   /** 请求日志注入点，便于测试时静音。 */
   onRequest?: (info: { method: string; path: string; status: number; ms: number }) => void;
 }
@@ -123,6 +126,15 @@ export function createApp(deps: AppDeps): Hono {
     for (const prefix of ['/media/*', '/music/*', '/og/*']) {
       app.on(['GET', 'HEAD'], prefix, publicObject);
     }
+  }
+
+  /* ---------- 服务端 SEO：文章页 / 首页 ----------
+   * 必须在 catch-all 之前注册，否则会被上游 worker 的 SPA 回退吞掉。 */
+  if (deps.seo) {
+    const seo = createSeoHandlers(deps.seo);
+    app.on(['GET', 'HEAD'], '/', seo.home);
+    app.on(['GET', 'HEAD'], '/posts/:id', seo.article);
+    app.on(['GET', 'HEAD'], '/posts/:id/', seo.article);
   }
 
   /* ---------- 前端配置注入 ---------- */
