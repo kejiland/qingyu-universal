@@ -112,6 +112,9 @@ export function createApp(deps: AppDeps): Hono {
     app.on(['GET', 'HEAD'], '/archive', seo.archive);
     app.on(['GET', 'HEAD'], '/tags', seo.tags);
     app.on(['GET', 'HEAD'], '/categories', seo.categories);
+    app.on(['GET', 'HEAD'], '/about', seo.about);
+    app.on(['GET', 'HEAD'], '/links', seo.links);
+    app.on(['GET', 'HEAD'], '/popular', seo.popular);
   }
 
   /* ---------- 新版后台 ----------

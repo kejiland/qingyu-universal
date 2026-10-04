@@ -14,6 +14,14 @@ import type { Context } from 'hono';
 import type { AppConfig } from '../config.js';
 import type { D1Database } from '../bindings/d1.js';
 import {
+  POPULAR_POSTS_SQL,
+  readSettingJson,
+  renderAboutContent,
+  renderLinksContent,
+  renderPopularContent,
+  type FriendLink,
+} from '../ssr/pages.js';
+import {
   buildArticleMeta,
   buildHomeMeta,
   injectHead,
@@ -71,6 +79,9 @@ export interface SeoHandlers {
   archive: (c: Context) => Promise<Response>;
   tags: (c: Context) => Promise<Response>;
   categories: (c: Context) => Promise<Response>;
+  about: (c: Context) => Promise<Response>;
+  links: (c: Context) => Promise<Response>;
+  popular: (c: Context) => Promise<Response>;
 }
 
 export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
@@ -181,5 +192,50 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
   const tags = makeListPage(renderTagsContent);
   const categories = makeListPage(renderCategoriesContent);
 
-  return { home, article, archive, tags, categories };
+  /** 通用静态页：标题/描述可定制，canonical 指向自身路径。 */
+  function makePage(render: (site: SiteIdentity, chrome: ReturnType<typeof readChrome>) => string, path: string, title: string, desc?: string) {
+    return async (c: Context): Promise<Response> => {
+      const shell = await loadShell();
+      const site = readSiteIdentity(db);
+      const chrome = readChrome(db, site.name);
+      let withContent = shell;
+      try {
+        withContent = injectAppContent(shell, wrapWithChrome(chrome, render(site, chrome), path));
+      } catch {
+        /* 查询失败时回落到原始外壳 */
+      }
+      const base = buildHomeMeta(site, config.siteUrl);
+      const meta = {
+        ...base,
+        title: title + ' · ' + site.name,
+        ogTitle: title + ' · ' + site.name,
+        description: desc || base.description,
+        ogDescription: desc || base.description,
+        canonical: config.siteUrl + path,
+        ogUrl: config.siteUrl + path,
+        jsonLd: { '@context': 'https://schema.org', '@type': 'WebPage', name: title, url: config.siteUrl + path }
+      };
+      return htmlResponse(c, injectHead(withContent, meta, renderHeadBlock(meta)), {
+        'Cache-Control': 'no-cache',
+        ...security()
+      });
+    };
+  }
+
+  const about = makePage((site) => {
+    const siteCfg = readSettingJson<{ about?: string }>(db, 'site', {});
+    return renderAboutContent(String(siteCfg.about || ''), site);
+  }, '/about', '关于');
+
+  const links = makePage((_site) => {
+    const footerCfg = readSettingJson<{ links?: FriendLink[] }>(db, 'footer', {});
+    return renderLinksContent(footerCfg.links || []);
+  }, '/links', '友链');
+
+  const popular = makePage(() => {
+    const posts = db.native.prepare(POPULAR_POSTS_SQL).all() as unknown as PostRow[];
+    return renderPopularContent(posts);
+  }, '/popular', '热门');
+
+  return { home, article, archive, tags, categories, about, links, popular };
 }

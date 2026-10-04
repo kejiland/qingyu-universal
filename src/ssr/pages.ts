@@ -8,7 +8,9 @@
  * 注意：标签与分类的链接指向 /?tag=xxx 与 /?category=xxx（首页带查询），
  * 不是独立路径——筛选后的列表由首页 SSR 负责。
  * ============================================================ */
+import type { D1Database } from '../bindings/d1.js';
 import { escapeHtml, type PostRow, type SiteIdentity } from '../seo/meta.js';
+import { renderMarkdown } from './post.js';
 
 function parseTags(raw: unknown): string[] {
   if (typeof raw !== 'string' || !raw.trim()) return [];
@@ -129,3 +131,91 @@ export function filterPosts(
     return String(post.category ?? '').trim() === category;
   });
 }
+
+/* ---------- 关于 / 友链 / 热门 ---------- */
+
+/** 读取 site_settings 里的 JSON 配置（关于页取 site，友链取 footer）。 */
+export function readSettingJson<T>(db: D1Database, key: string, fallback: T): T {
+  try {
+    const row = db.native.prepare('SELECT v FROM site_settings WHERE k = ?').get(key) as
+      | { v?: string }
+      | undefined;
+    if (!row || !row.v) return fallback;
+    const value = JSON.parse(String(row.v));
+    return value && typeof value === 'object' ? (value as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** 关于页：正文来自后台「站点信息 → 关于页面内容」（Markdown）。 */
+export function renderAboutContent(markdown: string, site: SiteIdentity): string {
+  const text = String(markdown || '').trim();
+  const body = text ? renderMarkdown(text) : '<p class="ab-muted">还没有填写关于页面内容。</p>';
+  return (
+    '<main class="container page-fade">' +
+    '<h2 class="page-title">关于</h2>' +
+    '<div class="about-card card"><div class="article about-intro">' + body + '</div>' +
+    '<h3>' + escapeHtml(site.name) + '</h3><p>' + escapeHtml(site.description) + '</p>' +
+    '</div></main>'
+  );
+}
+
+export interface FriendLink {
+  text?: string;
+  url?: string;
+}
+
+/** 友链页：数据来自 footer.links，与 app.js 的读取路径一致。 */
+export function renderLinksContent(links: FriendLink[]): string {
+  const valid = (Array.isArray(links) ? links : []).filter((l) => l && l.url);
+  const cards = valid
+    .map(function (l) {
+      return (
+        '<a class="friend-card" href="' + escapeHtml(String(l.url)) + '" target="_blank" rel="noopener nofollow">' +
+        '<span class="friend-name">' + escapeHtml(String(l.text || l.url)) + '</span></a>'
+      );
+    })
+    .join('');
+  const body = valid.length
+    ? '<div class="friend-grid">' + cards + '</div>'
+    : '<p class="ab-muted">还没有添加友链。</p>';
+  return '<main class="container page-fade"><h2 class="page-title">友链</h2>' + body + '</main>';
+}
+
+/** 热门页：按浏览量倒序，数据来自 posts LEFT JOIN stats。 */
+export function renderPopularContent(posts: PostRow[]): string {
+  const cards = posts
+    .map(function (post, index) {
+      const views = Number((post as unknown as { views?: number }).views) || 0;
+      const meta = parseTags(post.tags).slice(0, 3).join(' / ') || String(post.date || '');
+      return (
+        '<a class="popular-card" href="/posts/' + encodeURIComponent(post.id) + '/">' +
+        '<span class="popular-rank">' + (index + 1) + '</span>' +
+        '<div class="popular-main">' +
+        '<div class="popular-card-title">' + escapeHtml(post.title || '') + '</div>' +
+        '<div class="popular-card-meta">' + escapeHtml(meta) + '</div></div>' +
+        '<div class="popular-metrics"><span>浏览 ' + views + '</span></div>' +
+        '</a>'
+      );
+    })
+    .join('');
+  return (
+    '<main class="container page-fade">' +
+    '<div class="list-head popular-head"><div><h2 class="page-title">热门</h2></div>' +
+    '<div class="popular-ranges">' +
+    '<button class="popular-range active" data-popular-range="all">全部</button>' +
+    '<button class="popular-range" data-popular-range="30">近 30 天</button>' +
+    '<button class="popular-range" data-popular-range="7">近 7 天</button>' +
+    '</div></div>' +
+    (cards || '<p class="ab-muted">还没有足够的数据。</p>') +
+    '</main>'
+  );
+}
+
+/** 热门页的查询：join stats 取浏览量。 */
+export const POPULAR_POSTS_SQL =
+  'SELECT p.*, COALESCE(s.views, 0) AS views FROM posts p ' +
+  'LEFT JOIN stats s ON s.post_id = p.id ' +
+  "WHERE COALESCE(p.status, 'published') = 'published' " +
+  'ORDER BY views DESC, p.date DESC LIMIT 20';
