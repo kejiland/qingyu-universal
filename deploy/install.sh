@@ -460,12 +460,16 @@ summary() {
   echo "      ${INSTALL_DIR}/deploy/install.sh upgrade"
   echo "      ${INSTALL_DIR}/deploy/install.sh backup"
   echo
-  if [ -z "$(env_value SITE_DOMAIN)" ]; then
-    echo "    当前为 IP + 端口模式（普通 HTTP，无证书）。"
-    echo "    有域名后执行：./deploy/install.sh upgrade --domain your.domain.com"
-    echo "    届时会自动启用 Caddy 与 Let's Encrypt HTTPS。"
-  else
+  if [ "$(env_value COMPOSE_PROFILES)" = "domain" ]; then
     echo "    已启用自动 HTTPS。证书首次签发通常需要十几秒，可通过 deploy/install.sh logs 查看。"
+  else
+    echo "    当前为纯 HTTP 模式（未启用 Caddy / 无证书）。"
+    echo
+    echo "    ⚠ 注意：此模式下管理后台的登录密码是明文传输的。"
+    echo "      若在公共网络登录后台，建议改为下面任一方式："
+    echo "        · 让出 80/443 后重新部署：./deploy/install.sh upgrade --domain your.domain.com"
+    echo "        · 用现有 Web 服务器反代（可继续用它的证书），见 README「与现有 Web 服务器共存」"
+    echo "        · 端口被上游封禁时，用反向隧道（Cloudflare Tunnel / Tailscale Funnel）对外提供 HTTPS"
   fi
   echo
 }

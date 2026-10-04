@@ -65,6 +65,39 @@ HTTP-01 固定走 **80**，TLS-ALPN 固定走 **443**。所以**换端口就拿�
 > 想要「自定义端口 + 有效证书」，只能改用 **DNS-01 验证**（在 DNS 里加 TXT 记录）。
 > 这需要带 DNS 插件的自定义 Caddy 镜像，不在当前范围内。
 
+### 服务器不提供 80/443（云厂商限制、ISP 封禁、NAT 后）
+
+这和"端口被占用"是两回事：**占用**是别的程序在用（腾出来或反代即可），
+**不提供**是流量根本到不了这台机器（比如家用宽带、受限 VPS、多层 NAT）。
+
+这种情况下上面三个方案都不成立，本应用也无法自行解决 —— 需要一个
+**反向隧道**：由内往外建立连接，外部通过隧道服务商的域名访问，
+不需要任何入站端口。
+
+| 方案 | 说明 |
+| --- | --- |
+| **Cloudflare Tunnel**（`cloudflared`） | 免费、自带 HTTPS 与 CDN。代价是又依赖 Cloudflare |
+| **Tailscale Funnel** | 免费额度、不依赖 Cloudflare，但域名是 `*.ts.net` |
+| **其它隧道**（frp / ngrok / bore） | 需要自己有一台有公网端口的机器做中转 |
+
+以 Cloudflare Tunnel 为例（外部无需开放端口）：
+
+```bash
+./deploy/install.sh --port 8787          # 本应用监听 0.0.0.0:8787，纯 HTTP
+cloudflared tunnel --url http://localhost:8787
+```
+
+拿到隧道域名后，把 `.env` 的 `SITE_URL` 改成那个 `https://` 地址并重启 ——
+否则 RSS、Sitemap、分享卡片里的链接会指向 `127.0.0.1`：
+
+```bash
+sed -i 's|^SITE_URL=.*|SITE_URL=https://你的隧道域名|' .env
+docker compose up -d
+```
+
+隧道模式下 `TRUST_PROXY` 保持 `0` 即可（隧道本身会终止 TLS，
+但如果它不覆盖 `X-Forwarded-For`，设为 1 反而会信任伪造头）。
+
 ### 与现有 Web 服务器共存（方案 3）
 
 如果服务器上已经跑着 nginx / Apache，让它继续对外，把请求转发给本应用即可。
