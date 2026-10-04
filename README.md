@@ -380,7 +380,8 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
 - [x] **v0.4.1** 数据库外键约束与级联清理（曾清理 18 条存量孤儿）
 - [x] **v0.5** 后台模块迁移全部完成（订阅者 / Webmention / 统计）
 - [x] **v0.5.1** 归档 / 标签 / 分类页服务端渲染
-- [ ] **v0.6** comments.parent_id 自引用外键、撤下旧版后台
+- [x] **v0.6** comments.parent_id 自引用外键（删除父评论时级联清理回复）
+- [ ] **v0.7** 撤下旧版后台、公开站前端拆分（Astro/SSR 取代 296 KB 的 app.js）
 - [ ] **v0.3** 契约覆盖剩余约 50 个接口（管理认证 / 媒体 / 订阅 / 备份）
 - [ ] **v0.3.1** PostgreSQL 适配、Redis/Valkey 限流
 - [ ] **v0.4** PaaS 模板（Railway / Render / Fly.io / Cloud Run）、多架构镜像发布

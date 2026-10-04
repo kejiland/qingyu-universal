@@ -44,7 +44,13 @@ export function runMigrations(db: D1Database, dir: string, log: MigrationLogger 
     // SQLite 重建表（加外键）必须在关闭外键检查的前提下进行，
     // 而 PRAGMA foreign_keys 在事务内是空操作，所以只能在 BEGIN 之前设置。
     const foreignKeysOff = /^\s*--\s*@foreign-keys-off/m.test(sql.slice(0, 400));
-    if (foreignKeysOff) db.native.exec('PRAGMA foreign_keys = OFF');
+    if (foreignKeysOff) {
+      db.native.exec('PRAGMA foreign_keys = OFF');
+      // 重建「自引用」表时还要关掉现代化的 rename 行为：
+      // legacy_alter_table=ON 时 ALTER TABLE RENAME 不会去改写 schema 里的引用，
+      // 新表里写死的 REFERENCES <表名> 才能在改名后正确指向自己。
+      db.native.exec('PRAGMA legacy_alter_table = ON');
+    }
 
     db.native.exec('BEGIN');
     try {
@@ -73,7 +79,10 @@ export function runMigrations(db: D1Database, dir: string, log: MigrationLogger 
       }
       throw new Error(`迁移 ${file} 执行失败：${message}`);
     } finally {
-      if (foreignKeysOff) db.native.exec('PRAGMA foreign_keys = ON');
+      if (foreignKeysOff) {
+        db.native.exec('PRAGMA legacy_alter_table = OFF');
+        db.native.exec('PRAGMA foreign_keys = ON');
+      }
     }
   }
 

@@ -137,3 +137,109 @@ describe('外键约束与级联', () => {
     }
   });
 });
+
+/* ============================================================
+ * comments.parent_id 自引用外键（迁移 0034）
+ * ------------------------------------------------------------
+ * 这张表是自引用的，重建时最容易出错的两点：
+ *   1. 外键必须在改名后指向自己，而不是指向被删掉的旧表
+ *   2. 重建过程中不能被 DROP TABLE 的隐式 DELETE 级联清空
+ * 这里把两点都锁死。
+ * ============================================================ */
+describe('评论自引用外键', () => {
+  function freshDb() {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qingyu-cfk-'));
+    const db = createD1(path.join(dir, 'cfk.db'));
+    runMigrations(db, MIGRATIONS_DIR);
+    return { db, dir };
+  }
+
+  it('parent_id 外键指向 comments 自己（而非残留的中间表名）', () => {
+    const { db, dir } = freshDb();
+    try {
+      const fks = db.native.prepare('PRAGMA foreign_key_list(comments)').all() as Array<{
+        table: string;
+        from: string;
+        to: string;
+        on_delete: string;
+      }>;
+      const selfRef = fks.find((fk) => fk.from === 'parent_id');
+      expect(selfRef, '应存在 parent_id 外键').toBeTruthy();
+      expect(selfRef?.table).toBe('comments');       // 关键：指向自己
+      expect(selfRef?.to).toBe('id');
+      expect(selfRef?.on_delete).toBe('CASCADE');
+
+      // 中间表名不应残留
+      const leftover = db.scalar<string>(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='comments_new'"
+      );
+      expect(leftover).toBeNull();
+    } finally {
+      db.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('删除父评论时级联删除子回复与孙回复', () => {
+    const { db, dir } = freshDb();
+    try {
+      db.native.prepare("INSERT INTO posts (id,title,date,content,status) VALUES (?,?,?,?,?)")
+        .run('p1', 't', '2026-01-01', 'x', 'published');
+      const ins = db.native.prepare(
+        'INSERT INTO comments (id,post_id,author,content,date,parent_id) VALUES (?,?,?,?,?,?)'
+      );
+      ins.run('root', 'p1', 'a', '顶层', '2026-01-01', null);
+      ins.run('child', 'p1', 'b', '回复', '2026-01-01', 'root');
+      ins.run('grand', 'p1', 'c', '孙回复', '2026-01-01', 'child');
+      ins.run('other', 'p1', 'd', '无关评论', '2026-01-01', null);
+
+      expect(db.scalar<number>('SELECT COUNT(*) FROM comments')).toBe(4);
+
+      // 只删父评论，不手工清理任何子级
+      db.native.prepare('DELETE FROM comments WHERE id = ?').run('root');
+
+      const left = db.native.prepare('SELECT id FROM comments ORDER BY id').all() as Array<{ id: string }>;
+      expect(left.map((r) => r.id)).toEqual(['other']);
+    } finally {
+      db.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('删除文章仍然级联清理整棵评论树', () => {
+    const { db, dir } = freshDb();
+    try {
+      db.native.prepare("INSERT INTO posts (id,title,date,content,status) VALUES (?,?,?,?,?)")
+        .run('p1', 't', '2026-01-01', 'x', 'published');
+      const ins = db.native.prepare(
+        'INSERT INTO comments (id,post_id,author,content,date,parent_id) VALUES (?,?,?,?,?,?)'
+      );
+      ins.run('root', 'p1', 'a', '顶层', '2026-01-01', null);
+      ins.run('child', 'p1', 'b', '回复', '2026-01-01', 'root');
+
+      // 删文章会把 comments 的 post_id 外键触发为 CASCADE；
+      // 删除过程中「父评论 → 子回复」的级联也必须跟上
+      db.native.prepare('DELETE FROM posts WHERE id = ?').run('p1');
+      expect(db.scalar<number>('SELECT COUNT(*) FROM comments')).toBe(0);
+    } finally {
+      db.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('父评论不存在时插入子回复会被拒绝', () => {
+    const { db, dir } = freshDb();
+    try {
+      db.native.prepare("INSERT INTO posts (id,title,date,content,status) VALUES (?,?,?,?,?)")
+        .run('p1', 't', '2026-01-01', 'x', 'published');
+      expect(() =>
+        db.native
+          .prepare('INSERT INTO comments (id,post_id,author,content,date,parent_id) VALUES (?,?,?,?,?,?)')
+          .run('c1', 'p1', 'a', 'b', '2026-01-01', 'no-such-parent')
+      ).toThrow(/FOREIGN KEY constraint failed/);
+    } finally {
+      db.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
