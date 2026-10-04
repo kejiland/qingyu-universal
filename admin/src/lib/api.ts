@@ -13,42 +13,16 @@ export type Comment = components['schemas']['Comment'];
 export type Seo = components['schemas']['Seo'];
 export type PostListResponse = paths['/api/posts']['get']['responses'][200]['content']['application/json'];
 
-/* ---------- 尚未进入契约的接口（下一步补进 src/api/contract） ---------- */
+/* ---------- 全部来自服务端契约生成的类型 ---------- */
 
-export interface LoginResponse {
-  ok: true;
-  token: string;
-  expiresIn: number;
-  mustChange: boolean;
-  defaultPassword?: string;
-}
-
-export interface SessionInfo {
-  authed: boolean;
-  mustChange: boolean;
-}
-
-export interface MediaItem {
-  id: string;
-  name: string;
-  url: string;
-  thumb_url?: string;
-  type: string;
-  size: number;
-  created_at: string;
-}
-
-export interface MediaUploadTicket {
-  ok: true;
-  uploadUrl: string;
-  publicUrl: string;
-  thumbUploadUrl: string;
-  thumbPublicUrl: string;
-  key: string;
-  thumbKey: string;
-  contentType: string;
-  expiresIn: number;
-}
+export type LoginResponse = components['schemas']['LoginResponse'];
+export type MediaItem = components['schemas']['MediaItem'];
+export type MediaCreated = components['schemas']['MediaCreated'];
+export type MediaUploadTicket = components['schemas']['MediaUploadTicket'];
+export type CommentAdminItem = components['schemas']['CommentAdminItem'];
+export type AuditLogItem = components['schemas']['AuditLogItem'];
+export type ErrorLogItem = components['schemas']['ErrorLogItem'];
+export type BackupItem = components['schemas']['BackupItem'];
 
 /* ---------- 错误与请求 ---------- */
 
@@ -164,9 +138,34 @@ export const api = {
   listMedia: () => request<{ ok: true; media: MediaItem[] }>('/api/media'),
   uploadTicket: (filename: string, size: number, makeThumb = true) =>
     request<MediaUploadTicket>('/api/media/upload-url', { method: 'POST', ...json({ filename, size, makeThumb }) }),
-  registerMedia: (item: { id: string; name: string; url: string; type: string; size: number; thumb_url?: string }) =>
-    request<{ ok: true; media: MediaItem }>('/api/media', { method: 'POST', ...json(item) }),
+  registerMedia: (item: { url: string; name?: string; type?: string; size?: number; thumbUrl?: string }) =>
+    request<{ ok: true; media: MediaCreated }>('/api/media', { method: 'POST', ...json(item) }),
   deleteMedia: (id: string) => request<{ ok: true }>(`/api/media/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  /* 评论管理 */
+  listComments: (status: 'all' | 'pending' | 'approved' = 'all') =>
+    request<{ ok: true; comments: CommentAdminItem[] }>(`/api/comments?status=${status}`),
+  updateComment: (id: string, patch: { status?: 'approved' | 'pending'; pinned?: boolean; featured?: boolean; content?: string }) =>
+    request<{ ok: true }>(`/api/comments/${encodeURIComponent(id)}`, { method: 'PUT', ...json(patch) }),
+  deleteComment: (id: string) =>
+    request<{ ok: true }>(`/api/comments/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  bulkComments: (op: 'approve' | 'pending' | 'delete', ids: string[]) =>
+    request<{ ok: true; updated: number; op: string }>('/api/admin/comments/bulk', { method: 'POST', ...json({ op, ids }) }),
+
+  /* 日志 */
+  listAudit: (limit = 200) => request<{ ok: true; logs: AuditLogItem[]; counts: Record<string, number> }>(`/api/admin/audit?limit=${limit}`),
+  listErrors: () => request<{ ok: true; total: number; sumHits: number; errors: ErrorLogItem[] }>('/api/admin/errors'),
+
+  /* 备份 */
+  listBackups: () => request<{ ok: true; configured: boolean; backups: BackupItem[] }>('/api/admin/backups'),
+  createBackup: () => request<{ ok: true; backup: BackupItem }>('/api/admin/backups', { method: 'POST' }),
+  deleteBackup: (id: string) => request<{ ok: true }>(`/api/admin/backups/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  restoreBackup: (id: string) =>
+    request<{ ok: true; result: Record<string, unknown> }>(`/api/admin/backups/${encodeURIComponent(id)}/restore`, { method: 'POST' }),
+
+  /* 认证补充 */
+  changePassword: (current: string, password: string) =>
+    request<{ ok: true; message: string }>('/api/admin/password', { method: 'POST', ...json({ current, password }) }),
 
   /* 设置 */
   getSettings: () => request<{ ok: true; settings: Record<string, string> }>('/api/settings'),

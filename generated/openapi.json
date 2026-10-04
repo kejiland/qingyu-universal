@@ -24,6 +24,18 @@
       "name": "设置"
     },
     {
+      "name": "认证"
+    },
+    {
+      "name": "媒体"
+    },
+    {
+      "name": "日志"
+    },
+    {
+      "name": "备份"
+    },
+    {
       "name": "系统"
     }
   ],
@@ -584,6 +596,529 @@
         "required": [
           "ok",
           "settings"
+        ],
+        "additionalProperties": false
+      },
+      "LoginResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "token": {
+            "type": "string"
+          },
+          "expiresIn": {
+            "type": "number"
+          },
+          "mustChange": {
+            "type": "boolean"
+          },
+          "defaultPassword": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "token",
+          "expiresIn",
+          "mustChange"
+        ],
+        "additionalProperties": false,
+        "description": "登录成功返回会话 token"
+      },
+      "MessageResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "MediaListResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "media": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaItem"
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "media"
+        ],
+        "additionalProperties": false
+      },
+      "MediaItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "thumb_url": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "size": {
+            "type": "number"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url",
+          "type",
+          "size",
+          "created_at"
+        ],
+        "additionalProperties": false
+      },
+      "MediaUploadTicket": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "uploadUrl": {
+            "type": "string"
+          },
+          "publicUrl": {
+            "type": "string"
+          },
+          "thumbUploadUrl": {
+            "type": "string"
+          },
+          "thumbPublicUrl": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "thumbKey": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "expiresIn": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "ok",
+          "uploadUrl",
+          "publicUrl",
+          "thumbUploadUrl",
+          "thumbPublicUrl",
+          "key",
+          "thumbKey",
+          "contentType",
+          "expiresIn"
+        ],
+        "additionalProperties": false,
+        "description": "直传地址（S3 预签名或本地签名端点）"
+      },
+      "MediaRegisterResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "media": {
+            "$ref": "#/components/schemas/MediaCreated"
+          }
+        },
+        "required": [
+          "ok",
+          "media"
+        ],
+        "additionalProperties": false
+      },
+      "MediaCreated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "thumbUrl": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "size": {
+            "type": "number"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url",
+          "type",
+          "size",
+          "created_at"
+        ],
+        "additionalProperties": false
+      },
+      "CommentAdminListResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "comments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CommentAdminItem"
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "comments"
+        ],
+        "additionalProperties": false
+      },
+      "CommentAdminItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "post_id": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "parent_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "likes": {
+            "type": "number"
+          },
+          "pinned": {
+            "type": "number"
+          },
+          "featured": {
+            "type": "number"
+          },
+          "post_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "post_id",
+          "author",
+          "content",
+          "date",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "CommentBulkResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "updated": {
+            "type": "number"
+          },
+          "op": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "updated",
+          "op"
+        ],
+        "additionalProperties": false
+      },
+      "AuditLogResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "logs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditLogItem"
+            }
+          },
+          "counts": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "logs",
+          "counts"
+        ],
+        "additionalProperties": false
+      },
+      "AuditLogItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "ip": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "action",
+          "created_at"
+        ],
+        "additionalProperties": false
+      },
+      "ErrorLogResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "total": {
+            "type": "number"
+          },
+          "sumHits": {
+            "type": "number"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ErrorLogItem"
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "total",
+          "sumHits",
+          "errors"
+        ],
+        "additionalProperties": false
+      },
+      "ErrorLogItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "stack": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "ua": {
+            "type": "string"
+          },
+          "hits": {
+            "type": "number"
+          },
+          "created_at": {
+            "type": "number"
+          },
+          "last_at": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "message",
+          "hits",
+          "created_at"
+        ],
+        "additionalProperties": false
+      },
+      "BackupListResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "backups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BackupItem"
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "configured",
+          "backups"
+        ],
+        "additionalProperties": false
+      },
+      "BackupItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "size": {
+            "type": "number"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "counts": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "size",
+          "reason",
+          "createdAt",
+          "counts"
+        ],
+        "additionalProperties": false
+      },
+      "BackupCreateResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "backup": {
+            "$ref": "#/components/schemas/BackupItem"
+          }
+        },
+        "required": [
+          "ok",
+          "backup"
+        ],
+        "additionalProperties": false
+      },
+      "BackupRestoreResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "ok",
+          "result"
         ],
         "additionalProperties": false
       },
@@ -1415,6 +1950,1033 @@
           }
         },
         "description": "返回 site_settings 表的所有键值（值统一为字符串，JSON 需自行解析）。"
+      }
+    },
+    "/api/admin/login": {
+      "post": {
+        "tags": [
+          "认证"
+        ],
+        "summary": "管理员登录",
+        "operationId": "postApiAdminLogin",
+        "responses": {
+          "200": {
+            "description": "登录成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "密码错误或账户被锁定",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "密码登录，成功返回 7 天会话 token。若数据库中还没有管理员，上游会生成随机初始密码并在 defaultPassword 中返回（此时 mustChange=true）。若配置了 BLOG_ADMIN_SETUP_KEY，请求头带 X-Setup-Key 可跳过登录失败限流（应急通道）。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "password"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/setup": {
+      "post": {
+        "tags": [
+          "认证"
+        ],
+        "summary": "初始化 / 重设管理员密码",
+        "operationId": "postApiAdminSetup",
+        "responses": {
+          "201": {
+            "description": "密码已设置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "密码少于 8 位",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "安装密钥无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "密码已存在，需先清除才能重置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "首次初始化与重置共用此接口。配置了 BLOG_ADMIN_SETUP_KEY 时必须携带匹配的 X-Setup-Key 头。已有密码时（重置场景）响应为 409 并提示先删除 admin_auth 行。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "minLength": 8
+                  }
+                },
+                "required": [
+                  "password"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/logout": {
+      "post": {
+        "tags": [
+          "认证"
+        ],
+        "summary": "退出登录",
+        "operationId": "postApiAdminLogout",
+        "responses": {
+          "200": {
+            "description": "已退出",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "撤销当前会话 token。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/password": {
+      "post": {
+        "tags": [
+          "认证"
+        ],
+        "summary": "修改密码",
+        "operationId": "postApiAdminPassword",
+        "responses": {
+          "200": {
+            "description": "密码已更新",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "新密码少于 8 位",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "当前密码不正确",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "需要提供当前密码。成功后原有会话失效，需重新登录。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "current": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 8
+                  }
+                },
+                "required": [
+                  "current",
+                  "password"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/media": {
+      "get": {
+        "tags": [
+          "媒体"
+        ],
+        "summary": "媒体列表",
+        "operationId": "getApiMedia",
+        "responses": {
+          "200": {
+            "description": "媒体列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "返回媒体库元数据（倒序）。文件本体在对象存储或本地磁盘。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "媒体"
+        ],
+        "summary": "登记媒体元数据",
+        "operationId": "postApiMedia",
+        "responses": {
+          "201": {
+            "description": "登记成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaRegisterResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "直传完成后调用，把对象信息写入 media 表。id 由服务端生成，请求体里的 id 会被忽略。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "pattern": "^https?:\\/\\/"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "type": "number"
+                  },
+                  "thumbUrl": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/media/upload-url": {
+      "post": {
+        "tags": [
+          "媒体"
+        ],
+        "summary": "签发直传地址",
+        "operationId": "postApiMediaUpload-url",
+        "responses": {
+          "200": {
+            "description": "直传地址",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaUploadTicket"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "格式不支持或大小超限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "存储未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "返回可 PUT 的地址与对应的公开 URL（S3 预签名或本地签名端点）。支持格式：png / jpg / jpeg / webp / gif / svg / avif / bmp / ico；单张 ≤ 10MB。makeThumb=true 时额外返回缩略图地址。未配置对象存储时由本地磁盘适配器接管，行为一致。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "filename": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "size": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "makeThumb": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "filename",
+                  "size"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/media/{id}": {
+      "delete": {
+        "tags": [
+          "媒体"
+        ],
+        "summary": "删除媒体",
+        "operationId": "deleteApiMediaById",
+        "responses": {
+          "200": {
+            "description": "已删除",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "媒体不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "同时删除原图与缩略图对象，再移除数据库记录。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/api/comments": {
+      "get": {
+        "tags": [
+          "评论"
+        ],
+        "summary": "评论管理列表",
+        "operationId": "getApiComments",
+        "responses": {
+          "200": {
+            "description": "评论列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentAdminListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "跨文章返回全部评论（含待审核），并带出所属文章标题。按时间倒序，不分页。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "pending",
+                "approved"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "/api/comments/{id}": {
+      "put": {
+        "tags": [
+          "评论"
+        ],
+        "summary": "审核 / 编辑评论",
+        "operationId": "putApiCommentsById",
+        "responses": {
+          "200": {
+            "description": "已更新",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "字段非法或为空",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "评论不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "仅允许修改 status（approved / pending）、pinned、featured、content 中至少一项。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "approved",
+                      "pending"
+                    ]
+                  },
+                  "pinned": {
+                    "type": [
+                      "boolean",
+                      "number"
+                    ]
+                  },
+                  "featured": {
+                    "type": [
+                      "boolean",
+                      "number"
+                    ]
+                  },
+                  "content": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "评论"
+        ],
+        "summary": "删除评论",
+        "operationId": "deleteApiCommentsById",
+        "responses": {
+          "200": {
+            "description": "已删除",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "评论不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/comments/bulk": {
+      "post": {
+        "tags": [
+          "评论"
+        ],
+        "summary": "批量审核 / 删除评论",
+        "operationId": "postApiAdminCommentsBulk",
+        "responses": {
+          "200": {
+            "description": "批量完成",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentBulkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数不完整",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "单次最多 200 条，在一个事务里执行。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "type": "string",
+                    "enum": [
+                      "approve",
+                      "pending",
+                      "delete"
+                    ]
+                  },
+                  "ids": {
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "op",
+                  "ids"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/audit": {
+      "get": {
+        "tags": [
+          "日志"
+        ],
+        "summary": "操作审计日志",
+        "operationId": "getApiAdminAudit",
+        "responses": {
+          "200": {
+            "description": "审计日志",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditLogResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "最近的操作记录（默认 200 条，最多 500）。可按 action 过滤，并返回各动作计数。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/errors": {
+      "get": {
+        "tags": [
+          "日志"
+        ],
+        "summary": "错误日志",
+        "operationId": "getApiAdminErrors",
+        "responses": {
+          "200": {
+            "description": "错误日志",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorLogResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "按指纹聚合的前端错误（最近 200 条），含总条数与总命中次数。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/backups": {
+      "get": {
+        "tags": [
+          "备份"
+        ],
+        "summary": "备份列表",
+        "operationId": "getApiAdminBackups",
+        "responses": {
+          "200": {
+            "description": "备份列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "返回备份记录与保留策略内的条目（最多 30 份）。configured=false 表示未配置备份桶，只能查看历史。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "备份"
+        ],
+        "summary": "创建备份",
+        "operationId": "postApiAdminBackups",
+        "responses": {
+          "201": {
+            "description": "备份已创建",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupCreateResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "未配置备份桶",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "把全部业务表导出为 JSON 并上传到备份桶；未配置备份桶时返回 503。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/backups/{id}": {
+      "delete": {
+        "tags": [
+          "备份"
+        ],
+        "summary": "删除备份",
+        "operationId": "deleteApiAdminBackupsById",
+        "responses": {
+          "200": {
+            "description": "已删除",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "备份不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/backups/{id}/restore": {
+      "post": {
+        "tags": [
+          "备份"
+        ],
+        "summary": "从备份恢复",
+        "operationId": "postApiAdminBackupsByIdRestore",
+        "responses": {
+          "200": {
+            "description": "恢复完成",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupRestoreResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "未配置备份桶",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "危险操作：会按备份内容覆盖现有数据表。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/healthz": {

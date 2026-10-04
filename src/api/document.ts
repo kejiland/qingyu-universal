@@ -6,12 +6,13 @@
  * ============================================================ */
 import { VERSION } from '../config.js';
 import { buildOpenApiDocument } from './openapi.js';
+import { adminRoutes } from './routes/admin.js';
 import { postRoutes } from './routes/posts.js';
 
 export const API_TITLE = '轻语博客 API';
 
 export function createApiDocument(serverUrl: string): Record<string, unknown> {
-  return buildOpenApiDocument(postRoutes, {
+  return buildOpenApiDocument([...postRoutes, ...adminRoutes], {
     title: API_TITLE,
     version: VERSION,
     description:

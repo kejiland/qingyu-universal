@@ -33,7 +33,31 @@ const routes: RouteRecordRaw[] = [
     component: () => import('./views/MediaView.vue'),
     meta: { title: '媒体库' }
   },
-  // 尚未迁移的模块：显示占位页并引导到旧版后台，功能不丢失
+  {
+    path: '/comments',
+    name: 'comments',
+    component: () => import('./views/CommentsView.vue'),
+    meta: { title: '评论' }
+  },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: () => import('./views/SettingsView.vue'),
+    meta: { title: '设置' }
+  },
+  {
+    path: '/backups',
+    name: 'backups',
+    component: () => import('./views/BackupsView.vue'),
+    meta: { title: '备份' }
+  },
+  {
+    path: '/logs',
+    name: 'logs',
+    component: () => import('./views/LogsView.vue'),
+    meta: { title: '日志' }
+  },
+  // 仍未迁移的模块（订阅者 / 统计 / Webmention）：占位页 + 跳转旧版，功能不丢失
   {
     path: '/:pathMatch(.*)*',
     name: 'placeholder',

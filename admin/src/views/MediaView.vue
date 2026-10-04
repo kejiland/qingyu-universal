@@ -61,12 +61,11 @@ async function uploadFiles(files: File[]): Promise<void> {
         // 缩略图由后端签发独立地址，这里让服务端生成更稳妥，暂不前端压缩
       }
       const { media } = await api.registerMedia({
-        id: ticket.key,
         name: file.name,
         url: ticket.publicUrl,
         type: ticket.contentType || file.type,
         size: file.size,
-        ...(ticket.thumbPublicUrl ? { thumb_url: ticket.thumbPublicUrl } : {})
+        ...(ticket.thumbPublicUrl ? { thumbUrl: ticket.thumbPublicUrl } : {})
       });
       items.value = [media, ...items.value];
       done += 1;

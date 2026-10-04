@@ -18,6 +18,18 @@ import {
   SettingsResponseSchema
 } from '../src/api/contract/posts.js';
 import { ErrorResponseSchema, HealthResponseSchema, OkResponseSchema } from '../src/api/contract/common.js';
+import {
+  AuditLogResponseSchema,
+  BackupCreateResponseSchema,
+  BackupListResponseSchema,
+  CommentAdminListResponseSchema,
+  CommentBulkResponseSchema,
+  ErrorLogResponseSchema,
+  LoginResponseSchema,
+  MediaListResponseSchema,
+  MediaRegisterResponseSchema,
+  MediaUploadTicketSchema
+} from '../src/api/contract/admin.js';
 import type { ZodType } from 'zod';
 
 let server: TestServer;
@@ -219,5 +231,134 @@ describe('API 契约', () => {
       expect(status).toBe(405);
       expectSchema(ErrorResponseSchema, data);
     });
+  });
+});
+
+/* ============================================================
+ * 后台域契约：认证 / 媒体 / 评论管理 / 审计 / 日志 / 备份
+ * ============================================================ */
+describe('后台域 API 契约', () => {
+  let mediaId = '';
+  let commentId = '';
+
+  it('POST /api/admin/login → LoginResponse', async () => {
+    const { status, data } = await call('/api/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Setup-Key': server.setupKey },
+      body: JSON.stringify({ password: 'Contract-Test-Password-1' })
+    });
+    expect(status).toBe(200);
+    expectSchema(LoginResponseSchema, data);
+    expect((data as { token: string }).token.length).toBeGreaterThan(0);
+  });
+
+  it('GET /api/media → MediaListResponse', async () => {
+    const { status, data } = await call('/api/media', { headers: { Authorization: `Bearer ${token}` } });
+    expect(status).toBe(200);
+    expectSchema(MediaListResponseSchema, data);
+  });
+
+  it('POST /api/media/upload-url → MediaUploadTicket', async () => {
+    const { status, data } = await call('/api/media/upload-url', {
+      method: 'POST',
+      headers: jsonAuth(),
+      body: JSON.stringify({ filename: 'contract.png', size: 512, makeThumb: true })
+    });
+    expect(status).toBe(200);
+    expectSchema(MediaUploadTicketSchema, data);
+    mediaId = (data as { key: string }).key;
+  });
+
+  it('POST /api/media → 登记元数据', async () => {
+    const { status, data } = await call('/api/media', {
+      method: 'POST',
+      headers: jsonAuth(),
+      body: JSON.stringify({
+        name: 'contract.png',
+        url: 'https://cdn.example.com/media/contract.png',
+        type: 'image/png',
+        size: 512
+      })
+    });
+    expect(status).toBe(201);
+    expectSchema(MediaRegisterResponseSchema, data);
+    mediaId = (data as { media: { id: string } }).media.id;
+  });
+
+  it('DELETE /api/media/:id', async () => {
+    const { status, data } = await call(`/api/media/${encodeURIComponent(mediaId)}`, {
+      method: 'DELETE',
+      headers: jsonAuth()
+    });
+    expect(status).toBe(200);
+    expectSchema(OkResponseSchema, data);
+  });
+
+  it('GET /api/comments → 管理列表（带 post_title）', async () => {
+    const { status, data } = await call('/api/comments?status=all', { headers: { Authorization: `Bearer ${token}` } });
+    expect(status).toBe(200);
+    expectSchema(CommentAdminListResponseSchema, data);
+
+    const first = (data as { comments: Array<{ id: string; post_title?: string | null }> }).comments[0];
+    if (first) commentId = first.id;
+  });
+
+  it('PUT /api/comments/:id → 审核通过', async () => {
+    if (!commentId) return;
+    const { status, data } = await call(`/api/comments/${encodeURIComponent(commentId)}`, {
+      method: 'PUT',
+      headers: jsonAuth(),
+      body: JSON.stringify({ status: 'approved' })
+    });
+    expect(status).toBe(200);
+    expectSchema(OkResponseSchema, data);
+  });
+
+  it('POST /api/admin/comments/bulk → 批量操作', async () => {
+    if (!commentId) return;
+    const { status, data } = await call('/api/admin/comments/bulk', {
+      method: 'POST',
+      headers: jsonAuth(),
+      body: JSON.stringify({ op: 'approve', ids: [commentId] })
+    });
+    expect(status).toBe(200);
+    expectSchema(CommentBulkResponseSchema, data);
+  });
+
+  it('GET /api/admin/audit → 审计日志', async () => {
+    const { status, data } = await call('/api/admin/audit?limit=20', { headers: { Authorization: `Bearer ${token}` } });
+    expect(status).toBe(200);
+    expectSchema(AuditLogResponseSchema, data);
+  });
+
+  it('GET /api/admin/errors → 错误日志', async () => {
+    const { status, data } = await call('/api/admin/errors', { headers: { Authorization: `Bearer ${token}` } });
+    expect(status).toBe(200);
+    expectSchema(ErrorLogResponseSchema, data);
+  });
+
+  it('GET /api/admin/backups → 备份列表（本地磁盘模式亦可用）', async () => {
+    const { status, data } = await call('/api/admin/backups', { headers: { Authorization: `Bearer ${token}` } });
+    expect(status).toBe(200);
+    expectSchema(BackupListResponseSchema, data);
+    expect((data as { configured: boolean }).configured).toBe(true);
+  });
+
+  it('POST /api/admin/backups → 创建备份', async () => {
+    const { status, data } = await call('/api/admin/backups', { method: 'POST', headers: jsonAuth() });
+    expect(status).toBe(201);
+    expectSchema(BackupCreateResponseSchema, data);
+  });
+
+  it('POST /api/admin/logout → 撤销会话', async () => {
+    const { status, data } = await call('/api/admin/logout', { method: 'POST', headers: jsonAuth() });
+    expect(status).toBe(200);
+    expectSchema(OkResponseSchema, data);
+  });
+
+  it('媒体接口未授权时返回 401', async () => {
+    const { status, data } = await call('/api/media');
+    expect(status).toBe(401);
+    expectSchema(ErrorResponseSchema, data);
   });
 });

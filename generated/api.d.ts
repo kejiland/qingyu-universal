@@ -120,6 +120,312 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 管理员登录
+         * @description 密码登录，成功返回 7 天会话 token。若数据库中还没有管理员，上游会生成随机初始密码并在 defaultPassword 中返回（此时 mustChange=true）。若配置了 BLOG_ADMIN_SETUP_KEY，请求头带 X-Setup-Key 可跳过登录失败限流（应急通道）。
+         */
+        post: operations["postApiAdminLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 初始化 / 重设管理员密码
+         * @description 首次初始化与重置共用此接口。配置了 BLOG_ADMIN_SETUP_KEY 时必须携带匹配的 X-Setup-Key 头。已有密码时（重置场景）响应为 409 并提示先删除 admin_auth 行。
+         */
+        post: operations["postApiAdminSetup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 退出登录
+         * @description 撤销当前会话 token。
+         */
+        post: operations["postApiAdminLogout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 修改密码
+         * @description 需要提供当前密码。成功后原有会话失效，需重新登录。
+         */
+        post: operations["postApiAdminPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 媒体列表
+         * @description 返回媒体库元数据（倒序）。文件本体在对象存储或本地磁盘。
+         */
+        get: operations["getApiMedia"];
+        put?: never;
+        /**
+         * 登记媒体元数据
+         * @description 直传完成后调用，把对象信息写入 media 表。id 由服务端生成，请求体里的 id 会被忽略。
+         */
+        post: operations["postApiMedia"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media/upload-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 签发直传地址
+         * @description 返回可 PUT 的地址与对应的公开 URL（S3 预签名或本地签名端点）。支持格式：png / jpg / jpeg / webp / gif / svg / avif / bmp / ico；单张 ≤ 10MB。makeThumb=true 时额外返回缩略图地址。未配置对象存储时由本地磁盘适配器接管，行为一致。
+         */
+        post: operations["postApiMediaUpload-url"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * 删除媒体
+         * @description 同时删除原图与缩略图对象，再移除数据库记录。
+         */
+        delete: operations["deleteApiMediaById"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 评论管理列表
+         * @description 跨文章返回全部评论（含待审核），并带出所属文章标题。按时间倒序，不分页。
+         */
+        get: operations["getApiComments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/comments/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 审核 / 编辑评论
+         * @description 仅允许修改 status（approved / pending）、pinned、featured、content 中至少一项。
+         */
+        put: operations["putApiCommentsById"];
+        post?: never;
+        /** 删除评论 */
+        delete: operations["deleteApiCommentsById"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/comments/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 批量审核 / 删除评论
+         * @description 单次最多 200 条，在一个事务里执行。
+         */
+        post: operations["postApiAdminCommentsBulk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 操作审计日志
+         * @description 最近的操作记录（默认 200 条，最多 500）。可按 action 过滤，并返回各动作计数。
+         */
+        get: operations["getApiAdminAudit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/errors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 错误日志
+         * @description 按指纹聚合的前端错误（最近 200 条），含总条数与总命中次数。
+         */
+        get: operations["getApiAdminErrors"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/backups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 备份列表
+         * @description 返回备份记录与保留策略内的条目（最多 30 份）。configured=false 表示未配置备份桶，只能查看历史。
+         */
+        get: operations["getApiAdminBackups"];
+        put?: never;
+        /**
+         * 创建备份
+         * @description 把全部业务表导出为 JSON 并上传到备份桶；未配置备份桶时返回 503。
+         */
+        post: operations["postApiAdminBackups"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/backups/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除备份 */
+        delete: operations["deleteApiAdminBackupsById"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/backups/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 从备份恢复
+         * @description 危险操作：会按备份内容覆盖现有数据表。
+         */
+        post: operations["postApiAdminBackupsByIdRestore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -284,6 +590,148 @@ export interface components {
             ok: true;
             settings: {
                 [key: string]: string;
+            };
+        };
+        /** @description 登录成功返回会话 token */
+        LoginResponse: {
+            /** @constant */
+            ok: true;
+            token: string;
+            expiresIn: number;
+            mustChange: boolean;
+            defaultPassword?: string;
+        };
+        MessageResponse: {
+            /** @constant */
+            ok: true;
+            message: string;
+        };
+        MediaListResponse: {
+            /** @constant */
+            ok: true;
+            media: components["schemas"]["MediaItem"][];
+        };
+        MediaItem: {
+            id: string;
+            name: string;
+            url: string;
+            thumb_url?: string;
+            type: string;
+            size: number;
+            created_at: string;
+        };
+        /** @description 直传地址（S3 预签名或本地签名端点） */
+        MediaUploadTicket: {
+            /** @constant */
+            ok: true;
+            uploadUrl: string;
+            publicUrl: string;
+            thumbUploadUrl: string;
+            thumbPublicUrl: string;
+            key: string;
+            thumbKey: string;
+            contentType: string;
+            expiresIn: number;
+        };
+        MediaRegisterResponse: {
+            /** @constant */
+            ok: true;
+            media: components["schemas"]["MediaCreated"];
+        };
+        MediaCreated: {
+            id: string;
+            name: string;
+            url: string;
+            thumbUrl?: string;
+            type: string;
+            size: number;
+            created_at: string;
+        };
+        CommentAdminListResponse: {
+            /** @constant */
+            ok: true;
+            comments: components["schemas"]["CommentAdminItem"][];
+        };
+        CommentAdminItem: {
+            id: string;
+            post_id: string;
+            author: string;
+            content: string;
+            date: string;
+            status: string;
+            parent_id?: string | null;
+            likes?: number;
+            pinned?: number;
+            featured?: number;
+            post_title?: string | null;
+        };
+        CommentBulkResponse: {
+            /** @constant */
+            ok: true;
+            updated: number;
+            op: string;
+        };
+        AuditLogResponse: {
+            /** @constant */
+            ok: true;
+            logs: components["schemas"]["AuditLogItem"][];
+            counts: {
+                [key: string]: number;
+            };
+        };
+        AuditLogItem: {
+            id: string;
+            action: string;
+            target?: string;
+            detail?: string;
+            ip?: string;
+            created_at: number;
+        };
+        ErrorLogResponse: {
+            /** @constant */
+            ok: true;
+            total: number;
+            sumHits: number;
+            errors: components["schemas"]["ErrorLogItem"][];
+        };
+        ErrorLogItem: {
+            id: number;
+            kind: string;
+            message: string;
+            source?: string;
+            stack?: string;
+            url?: string;
+            ua?: string;
+            hits: number;
+            created_at: number;
+            last_at?: number;
+        };
+        BackupListResponse: {
+            /** @constant */
+            ok: true;
+            configured: boolean;
+            backups: components["schemas"]["BackupItem"][];
+        };
+        BackupItem: {
+            id: string;
+            key: string;
+            size: number;
+            reason: string;
+            createdAt: number;
+            counts: {
+                [key: string]: number;
+            };
+        };
+        BackupCreateResponse: {
+            /** @constant */
+            ok: true;
+            backup: components["schemas"]["BackupItem"];
+        };
+        BackupRestoreResponse: {
+            /** @constant */
+            ok: true;
+            result: {
+                [key: string]: unknown;
             };
         };
         HealthResponse: {
@@ -693,6 +1141,709 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+        };
+    };
+    postApiAdminLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 登录成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            /** @description 密码错误或账户被锁定 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    postApiAdminSetup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 密码已设置 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageResponse"];
+                };
+            };
+            /** @description 密码少于 8 位 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 安装密钥无效 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 密码已存在，需先清除才能重置 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    postApiAdminLogout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已退出 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    postApiAdminPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    current: string;
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 密码已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageResponse"];
+                };
+            };
+            /** @description 新密码少于 8 位 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 当前密码不正确 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getApiMedia: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 媒体列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaListResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    postApiMedia: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    url: string;
+                    name?: string;
+                    type?: string;
+                    size?: number;
+                    thumbUrl?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 登记成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaRegisterResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    "postApiMediaUpload-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    filename: string;
+                    size: number;
+                    makeThumb?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description 直传地址 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaUploadTicket"];
+                };
+            };
+            /** @description 格式不支持或大小超限 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 存储未配置 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteApiMediaById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 媒体不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getApiComments: {
+        parameters: {
+            query?: {
+                status?: "all" | "pending" | "approved";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 评论列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentAdminListResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    putApiCommentsById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    status?: "approved" | "pending";
+                    pinned?: boolean | number;
+                    featured?: boolean | number;
+                    content?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description 字段非法或为空 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 评论不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteApiCommentsById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 评论不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    postApiAdminCommentsBulk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    op: "approve" | "pending" | "delete";
+                    ids: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description 批量完成 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentBulkResponse"];
+                };
+            };
+            /** @description 参数不完整 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getApiAdminAudit: {
+        parameters: {
+            query?: {
+                limit?: string;
+                action?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 审计日志 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditLogResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getApiAdminErrors: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 错误日志 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorLogResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getApiAdminBackups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 备份列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupListResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    postApiAdminBackups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 备份已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupCreateResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未配置备份桶 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteApiAdminBackupsById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 备份不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    postApiAdminBackupsByIdRestore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 恢复完成 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupRestoreResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未配置备份桶 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

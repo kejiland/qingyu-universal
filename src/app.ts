@@ -29,6 +29,7 @@ import {
   createPublicObjectHandler
 } from './routes/local-storage.js';
 import { registerApiRoutes, type ResponseValidation } from './api/registry.js';
+import { adminRoutes } from './api/routes/admin.js';
 import { postRoutes } from './api/routes/posts.js';
 import { createApiDocument } from './api/document.js';
 import { withEdgeHeaders } from './edge.js';
@@ -83,7 +84,7 @@ export function createApp(deps: AppDeps): Hono {
       validateResponses: deps.validateResponses ?? 'warn',
       logger
     },
-    postRoutes
+    [...postRoutes, ...adminRoutes]
   );
 
   /* ---------- OpenAPI 文档 ---------- */

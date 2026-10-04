@@ -145,7 +145,6 @@ async function uploadCover(file: File): Promise<void> {
     form.value.cover = ticket.publicUrl;
     await api
       .registerMedia({
-        id: ticket.key,
         name: file.name,
         url: ticket.publicUrl,
         type: ticket.contentType || file.type,
