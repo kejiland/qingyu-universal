@@ -291,6 +291,90 @@ local_health_port() {
   printf '%s' "${bind##*:}"
 }
 
+# ------------------------------------------------------------
+# 起飞前检查
+# ------------------------------------------------------------
+# 真实 VPS 上最常见的三种失败是：端口被占、防火墙没放行、DNS 没指过来。
+# 当前实现里它们分别表现为 compose 报错、Caddy 静默失败、证书反复重试，
+# 排查成本都很高。这里提前检查，把问题在动手之前说清楚。
+port_in_use() {
+  local port="$1"
+  have ss || return 1
+  ss -ltn 2>/dev/null | awk 'NR>1 {print $4}' | grep -qE "[:.]${port}$"
+}
+
+check_port_free() {
+  local port="$1" who="$2"
+  if port_in_use "$port"; then
+    warn "端口 ${port} 已被占用（${who}需要）"
+    ss -ltnp 2>/dev/null | grep -E "[:.]${port}$" | head -n2 | sed 's/^/      /'
+    return 1
+  fi
+  return 0
+}
+
+preflight() {
+  local ok=1
+  log "起飞前检查…"
+
+  # 磁盘：镜像 + 依赖大约需要 1GB，留 2GB 余量避免构建到一半失败
+  local avail
+  avail=$(df -Pk /var/lib 2>/dev/null | awk 'NR==2 {print $4}')
+  [ -n "$avail" ] || avail=$(df -Pk / 2>/dev/null | awk 'NR==2 {print $4}')
+  if [ -n "$avail" ] && [ "$avail" -lt 2097152 ]; then
+    warn "磁盘可用空间不足 2GB（当前约 $((avail / 1024)) MB），构建镜像可能失败"
+    ok=0
+  fi
+
+  # 端口：可能来自 --port，也可能来自已存在的 .env（此时 ensure_env 已提前返回）
+  if [ -z "$APP_PORT" ]; then
+    local bind; bind="$(env_value APP_BIND)"
+    APP_PORT="${bind##*:}"
+  fi
+  [ -n "$APP_PORT" ] || APP_PORT=8080
+
+  if [ -n "$DOMAIN" ]; then
+    check_port_free 80 "Caddy 的 HTTP（证书签发也需要）" || ok=0
+    check_port_free 443 "Caddy 的 HTTPS" || ok=0
+  else
+    check_port_free "$APP_PORT" "应用" || ok=0
+  fi
+
+  # DNS：域名没指过来时 Caddy 会反复重试，表现是「HTTPS 打不开但日志不直观」
+  if [ -n "$DOMAIN" ]; then
+    local resolved
+    resolved=$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | head -n1)
+    if [ -z "$resolved" ]; then
+      warn "域名 ${DOMAIN} 解析不出来 —— Let's Encrypt 签发证书会失败"
+      warn "请先添加 A 记录指向本机公网 IP，再重新执行"
+      ok=0
+    else
+      log "  ${DOMAIN} 解析到 ${resolved}"
+    fi
+  else
+    log "  无域名模式：应用监听 0.0.0.0:${APP_PORT}"
+  fi
+
+  # 防火墙：不阻断，只给出该执行的命令（各家发行版工具不同，不宜代为修改）
+  if have ufw && ufw status 2>/dev/null | grep -q '^Status: active'; then
+    warn "检测到 ufw 已启用，若部署后无法访问请放行端口："
+    if [ -n "$DOMAIN" ]; then warn "    ufw allow 80,443/tcp"
+    else warn "    ufw allow ${APP_PORT}/tcp"; fi
+  elif have firewall-cmd && firewall-cmd --state 2>/dev/null | grep -q running; then
+    warn "检测到 firewalld 已启用，若部署后无法访问请放行端口："
+    if [ -n "$DOMAIN" ]; then
+      warn "    firewall-cmd --permanent --add-service=http --add-service=https && firewall-cmd --reload"
+    else
+      warn "    firewall-cmd --permanent --add-port=${APP_PORT}/tcp && firewall-cmd --reload"
+    fi
+  fi
+
+  if [ "$ok" -ne 1 ]; then
+    die "起飞前检查未通过，已中止（避免装到一半才失败）"
+  fi
+  log "起飞前检查通过"
+}
+
 compose() {
   cd "$INSTALL_DIR"
   if [ -n "$IMAGE" ]; then export QINGYU_IMAGE="$IMAGE"; fi
@@ -358,6 +442,7 @@ cmd_install() {
   install_docker
   fetch_source
   ensure_env
+  preflight
   log "构建并启动容器…"
   compose up -d --build
   wait_healthy
