@@ -1,0 +1,32 @@
+# ============================================================
+# Caddy 反向代理 + 自动 HTTPS
+# ------------------------------------------------------------
+# 域名由 compose 的 SITE_DOMAIN 注入；未配置时用 localhost（自签证书）。
+# 上游注入 X-Forwarded-*，应用据此识别真实客户端 IP（限流/统计）。
+# ============================================================
+{
+	admin off
+	servers {
+		protocols h1 h2
+	}
+}
+
+{$SITE_DOMAIN:localhost} {
+	encode zstd gzip
+
+	# 上传（图片 10MB / 音乐 30MB / 备份）留足余量
+	request_body {
+		max_size 64MB
+	}
+
+	reverse_proxy app:8787 {
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+		header_up Host {host}
+	}
+
+	header {
+		-Server
+	}
+}

@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /write
+Disallow: /posts/*/edit
+
+Sitemap: https://www.2024921.xyz/sitemap.xml

@@ -1,0 +1,23 @@
+# 依赖 / 运行时产物
+node_modules/
+npm-debug.log*
+
+# 本地数据（数据库 / 上传 / 备份）——绝不入库
+data/
+*.db
+*.db-wal
+*.db-shm
+uploads/
+backups/
+
+# 环境与密钥
+.env
+.env.*
+!.env.example
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

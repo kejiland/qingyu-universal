@@ -1,0 +1,21 @@
+{
+  "name": "qingyu-universal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Qingyu Blog - self-hosted universal edition (Node.js + SQLite + S3-compatible storage)",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "migrate": "node server/migrate.js",
+    "seed": "node scripts/seed.js",
+    "health": "node scripts/health.js",
+    "backup": "node scripts/backup.js",
+    "restore": "node scripts/restore.js"
+  },
+  "dependencies": {},
+  "optionalDependencies": {}
+}

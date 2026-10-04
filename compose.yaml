@@ -1,0 +1,62 @@
+# ============================================================
+# 轻语博客 · 自托管通用版
+# ------------------------------------------------------------
+# 启动：docker compose up -d --build
+# 日志：docker compose logs -f app
+# 停止：docker compose down
+#
+# 全部配置来自同目录 .env（由 deploy/install.sh 生成，或从 .env.example 复制）。
+# ============================================================
+name: qingyu-universal
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    image: ${QINGYU_IMAGE:-qingyu-universal:local}
+    container_name: qingyu-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # 容器内必须监听 0.0.0.0，由 Caddy 反代
+      HOST: 0.0.0.0
+      PORT: "8787"
+      DATA_DIR: /data
+      TRUST_PROXY: "1"
+    volumes:
+      - qingyu-data:/data
+    expose:
+      - "8787"
+    networks:
+      - qingyu
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: qingyu-caddy
+    restart: unless-stopped
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - qingyu
+
+volumes:
+  qingyu-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  qingyu:
+    driver: bridge

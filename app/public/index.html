@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <meta name="description" content="Qingyu'Blog · 零依赖轻量博客，双击即开；支持 Cloudflare Pages / Workers 云端存储。">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+  <meta name="author" content="Qingyu">
+  <meta name="theme-color" content="#c25e3a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>Qingyu'Blog · 轻量博客</title>
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Qingyu'Blog">
+  <meta property="og:title" content="Qingyu'Blog · 轻量博客">
+  <meta property="og:description" content="零依赖轻量博客，双击即开；支持 Cloudflare Pages / Workers 云端存储。">
+  <meta property="og:url" content="/">
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Qingyu'Blog · 轻量博客">
+  <meta name="twitter:description" content="零依赖轻量博客，双击即开；支持 Cloudflare Pages / Workers 云端存储。">
+  <!-- Canonical -->
+  <link rel="canonical" href="/">
+  <!-- RSS -->
+  <link rel="webmention" href="/api/webmention">
+  <link rel="alternate" type="application/rss+xml" title="Qingyu'Blog RSS" href="/feed.xml">
+  <!-- Agentic Resource Discovery（ARD v0.91）与旧版 AI Catalog 兼容入口 -->
+  <link rel="ard" href="/.well-known/ard.json">
+  <link rel="ai-catalog" href="/.well-known/ai-catalog.json">
+  <!-- Schema.org JSON-LD（首页） -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "Qingyu'Blog",
+    "url": "/",
+    "description": "零依赖轻量博客，双击即开；支持 Cloudflare Pages / Workers 云端存储。",
+    "potentialAction": {
+      "@type": "SearchAction",
+      "target": "/?q={search_term_string}",
+      "query-input": "required name=search_term_string"
+    }
+  }
+  </script>
+  <!-- 静态 base：彻底解决 /posts/<别名>/ 深度页面刷新时静态资源被按相对目录解析而 404 的问题。
+       （此前用 JS 动态插入 base，会与浏览器的预加载扫描器产生竞态，直达子页时仍会 404。） -->
+  <base href="/">
+  <script>
+    // file:// 本地双击直开时，把资源基准改回当前目录，保持本地预览可用；在线部署保持根路径。
+    // 同时尽早应用主题，避免深色模式用户首屏白闪（FOUC）。
+    (function () {
+      if (/^file:/i.test(location.protocol)) {
+        var b = document.querySelector('base');
+        if (b) b.setAttribute('href', './');
+      }
+      // iOS 检测（含 iPadOS 13+ 的 MacIntel 伪装）：命中后打 .ios 类，
+      // style.css 据此用系统原生宋体/仿宋、跳过 CDN webfont（省流量）。
+      var _plat = navigator.platform || '';
+      var _ua = navigator.userAgent || '';
+      if (/iP(hone|ad|od)/.test(_plat) || (/MacIntel/.test(_plat) && navigator.maxTouchPoints > 1) || /iPad|iPhone|iPod/.test(_ua)) {
+        document.documentElement.classList.add('ios');
+      }
+      try {
+        var t = localStorage.getItem('qingyu.theme');
+        if (t !== 'light' && t !== 'dark') {
+          t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+        }
+        document.documentElement.setAttribute('data-theme', t);
+        // 主题色（accent）：缺省 terra = 默认赭橙配色；提前设置避免切色后首屏闪动
+        var a = localStorage.getItem('qingyu.accent');
+        if (['terra', 'indigo', 'bamboo', 'dusk'].indexOf(a) >= 0) {
+          document.documentElement.setAttribute('data-accent', a);
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="manifest" href="/manifest.webmanifest?v=2.10.60">
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png?v=2.10.60">
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png?v=2.10.60">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 1024'><path d='M73.44768 958.112526S286.575881 57.38067 917.281057 2.410953c0 0-20.734192 341.390875-202.03782 479.297358 0 0-33.753335 45.808098 73.292956 31.824573 0 0-12.536953 153.336579-201.555629 192.8762 0 0-28.93143 28.93143 54.969717 31.824573 0 0-88.723052 137.424293-311.977254 63.649146 0 0 89.687433-216.985725 165.391341-289.3143a2209.396876 2209.396876 0 0 0-385.7524 431.078308s-15.430096 35.199907-36.164288 14.465715z' fill='%239B9A9A'/></svg>">
+  <style>
+    /* 首屏加载动画：在 app.js 接管前显示，主题色与暖色调一致 */
+    .mp-root { display: none; }
+    .boot-load {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 16px; background: var(--bg, #faf7f2); z-index: 1000;
+    }
+    .boot-ring {
+      width: 36px; height: 36px; position: relative;
+    }
+    .boot-ring::before, .boot-ring::after {
+      content: ""; position: absolute; inset: 0; border-radius: 50%;
+      border: 3px solid transparent; border-top-color: var(--accent, #c25e3a);
+      animation: bootSpin 1s cubic-bezier(.5,.15,.75,.45) infinite;
+    }
+    .boot-ring::after { animation-delay: .15s; border-top-color: var(--accent-2, #e08a63); opacity: .7; }
+    .boot-dot {
+      width: 7px; height: 7px; border-radius: 50%; background: #cfc4b6;
+      animation: bootPulse 1.2s ease-in-out infinite;
+    }
+    .boot-name { font-size: 13.5px; color: #9b8f83; letter-spacing: 3px; }
+    @keyframes bootSpin { to { transform: rotate(360deg); } }
+    @keyframes bootPulse { 0%,100% { opacity:.3; transform: scale(.8); } 50% { opacity:1; transform: scale(1.15); } }
+    @media (prefers-color-scheme: dark) {
+      .boot-load { background: #1d1a17; }
+      .boot-dot { background: #6a6158; }
+      .boot-name { color: #a89b8e; }
+    }
+  </style>
+  <link id="global-style" rel="stylesheet" href="style.min.css?v=2.10.60" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="style.min.css?v=2.10.60"></noscript>
+  <!-- 字体策略：前台全部改走系统宋体/仿宋栈，不再加载任何 webfont，PageSpeed 网络负载大幅下降 -->
+  <script defer src="config.min.js?v=2.10.60"></script>
+  <script defer src="posts.min.js?v=2.10.60"></script>
+  <script defer src="i18n.min.js?v=2.10.60"></script>
+</head>
+<body>
+  <div id="app">
+    <div class="boot-load" id="bootLoad">
+      <div class="boot-ring"></div>
+      <div class="boot-dot"></div>
+      <div class="boot-name">Qingyu'Blog · 加载中</div>
+    </div>
+  </div>
+  <script defer src="app.min.js?v=2.10.60"></script>
+  <script>
+  // 非首屏脚本改为「空闲/按需」加载：先保证首页渲染与核心交互，
+  // 再在浏览器空闲时拉取播放器与背景动画；触屏设备默认不预载背景动画。
+  (function () {
+    function loadJs(src) {
+      var s = document.createElement('script');
+      s.src = src + '?v=2.10.60';
+      s.defer = true;
+      document.body.appendChild(s);
+      return s;
+    }
+    function loadCss(href) {
+      var l = document.createElement('link');
+      l.rel = 'stylesheet';
+      l.href = href + '?v=2.10.60';
+      document.head.appendChild(l);
+      return l;
+    }
+    function idle(fn) {
+      try {
+        if ('requestIdleCallback' in window) { requestIdleCallback(fn, { timeout: 2500 }); return; }
+      } catch (e) {}
+      setTimeout(fn, 1600);
+    }
+    var isTouch = false;
+    try { isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0; } catch (e) {}
+    if (!isTouch) {
+      idle(function () { loadJs('bg-anim.min.js'); });
+    }
+    var p = '';
+    try { p = location.pathname || ''; } catch (e) {}
+    if (p.indexOf('/admin') !== 0 && p !== '/write' && !/^\/posts\/[^/]+\/(edit)$/.test(p)) {
+      idle(function () { loadCss('music-player.min.css'); loadJs('music-player.min.js'); });
+    }
+  })();
+  </script>
+  <!-- 后台脚本按需加载：仅进入后台路由时由 app.js 懒加载 -->
+  <script>
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('/sw.js?v=2.10.60').catch(function () {});
+    });
+  }
+  </script>
+</body>
+</html>
