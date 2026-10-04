@@ -336,6 +336,58 @@ check_port_free() {
   return 0
 }
 
+# ------------------------------------------------------------
+# 傻瓜式：自动决定部署模式
+# ------------------------------------------------------------
+# 原则：能满足 HTTPS 条件就上 HTTPS；不满足就自动降级为「自定义端口 + 纯 HTTP」，
+# **绝不因为端口或 DNS 问题中止安装**。用户不需要理解这些取舍，
+# 脚本自己选好并在最后说清楚为什么。
+pick_free_port() {
+  local p
+  for p in 8080 8081 8082 8088 8090 8095 3000; do
+    if ! port_in_use "$p"; then printf '%s' "$p"; return 0; fi
+  done
+  printf '%s' 8080
+}
+
+resolve_mode() {
+  # 升级场景：没给任何参数且已有 .env → 沿用原有模式，不擅自改动线上配置
+  if [ -z "$DOMAIN" ] && [ -z "$APP_PORT" ] && [ -f "$INSTALL_DIR/.env" ]; then
+    return 0
+  fi
+
+  # 无域名 → 一定是 IP + 端口模式，自动挑一个空闲端口
+  if [ -z "$DOMAIN" ]; then
+    [ -n "$APP_PORT" ] || APP_PORT="$(pick_free_port)"
+    return 0
+  fi
+
+  # 用户显式指定了端口 → 尊重选择，走 HTTP 模式
+  [ -n "$APP_PORT" ] && return 0
+
+  # 有域名且未指定端口 → 检查 HTTPS 的两个前提条件
+  local conflict=0
+  port_in_use 80 && conflict=1
+  port_in_use 443 && conflict=1
+
+  local resolved dns_ok=1
+  resolved=$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | head -n1)
+  [ -n "$resolved" ] || dns_ok=0
+
+  if [ "$conflict" -eq 0 ] && [ "$dns_ok" -eq 1 ]; then
+    return 0   # 两个条件都满足，走自动 HTTPS
+  fi
+
+  # 自动降级并把原因记下来，供摘要展示
+  APP_PORT="$(pick_free_port)"
+  DOWNGRADE_REASON=""
+  [ "$conflict" -eq 1 ] && DOWNGRADE_REASON="端口 80/443 已被占用"
+  if [ "$dns_ok" -eq 0 ]; then
+    DOWNGRADE_REASON="${DOWNGRADE_REASON:+${DOWNGRADE_REASON}；}域名 ${DOMAIN} 尚未解析到本机"
+  fi
+  DOWNGRADED_DOMAIN="$DOMAIN"
+}
+
 preflight() {
   local ok=1
   log "起飞前检查…"
@@ -357,22 +409,16 @@ preflight() {
   [ -n "$APP_PORT" ] || APP_PORT=8080
 
   if uses_caddy; then
-    local conflict=0
-    check_port_free 80 "Caddy 的 HTTP（证书签发也需要）" || conflict=1
-    check_port_free 443 "Caddy 的 HTTPS" || conflict=1
-    if [ "$conflict" -eq 1 ]; then
-      ok=0
-      warn "80 / 443 被占用时无法自动申请 Let's Encrypt 证书 ——"
-      warn "HTTP-01 验证固定走 80，TLS-ALPN 固定走 443，换成别的端口拿不到证书。"
-      warn "可选方案："
-      warn "  1) 停掉占用端口的服务（如 nginx / apache）后重试"
-      warn "  2) 改用自定义端口 + 纯 HTTP（无证书，浏览器无警告）："
-      warn "       ./deploy/install.sh upgrade --domain ${DOMAIN} --port 8080"
-      warn "  3) 保留现有 Web 服务器，手工把请求反代到本应用（见 README「与现有 Web 服务器共存」）"
-      warn "  4) 不要证书、直接用 IP + 端口：./deploy/install.sh --port 8080（不带 --domain）"
-    fi
+    # resolve_mode 已确保两个端口空闲，这里只是复核
+    check_port_free 80 "Caddy 的 HTTP（证书签发也需要）" || ok=0
+    check_port_free 443 "Caddy 的 HTTPS" || ok=0
   else
-    check_port_free "$APP_PORT" "应用" || ok=0
+    # 端口是 resolve_mode 挑出来的；若此刻被抢占，换一个再继续（不中止）
+    if port_in_use "$APP_PORT"; then
+      warn "端口 $APP_PORT 在安装过程中被占用，自动改用新端口"
+      APP_PORT="$(pick_free_port)"
+      log "  改用端口 $APP_PORT"
+    fi
   fi
 
   # DNS：域名没指过来时 Caddy 会反复重试，表现是「HTTPS 打不开但日志不直观」
@@ -464,6 +510,13 @@ summary() {
     echo "    已启用自动 HTTPS。证书首次签发通常需要十几秒，可通过 deploy/install.sh logs 查看。"
   else
     echo "    当前为纯 HTTP 模式（未启用 Caddy / 无证书）。"
+    if [ -n "${DOWNGRADE_REASON:-}" ]; then
+      echo
+      echo "    未能启用自动 HTTPS 的原因：${DOWNGRADE_REASON}"
+      echo "    已自动改用端口 ${APP_PORT:-$(local_health_port)} 继续部署，无需你处理。"
+      echo "    条件具备后可一条命令切换："
+      echo "      ./deploy/install.sh upgrade --domain ${DOWNGRADED_DOMAIN:-your.domain.com}"
+    fi
     echo
     echo "    ⚠ 注意：此模式下管理后台的登录密码是明文传输的。"
     echo "      若在公共网络登录后台，建议改为下面任一方式："
@@ -480,6 +533,7 @@ cmd_install() {
   ensure_curl
   install_docker
   fetch_source
+  resolve_mode
   ensure_env
   preflight
   log "构建并启动容器…"
@@ -494,6 +548,7 @@ cmd_upgrade() {
   if [ -n "$SOURCE_ROOT" ] && [ -f "$SOURCE_ROOT/compose.yaml" ] && [ "$SOURCE_ROOT" != "$INSTALL_DIR" ]; then
     fetch_source
   fi
+  resolve_mode
   # 先备份，再升级
   cmd_backup || warn "升级前备份失败，继续升级"
   log "拉取镜像 / 重建容器…"
