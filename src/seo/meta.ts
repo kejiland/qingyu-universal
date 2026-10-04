@@ -132,6 +132,8 @@ export interface PostRow {
   excerpt?: string | null;
   content?: string | null;
   cover?: string | null;
+  category?: string | null;
+  series?: string | null;
   og_image?: string | null;
   tags?: string | null;
   seo?: string | null;

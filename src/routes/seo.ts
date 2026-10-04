@@ -21,6 +21,7 @@ import {
   renderHeadBlock,
   type PostRow
 } from '../seo/meta.js';
+import { injectAppContent, renderPostContent } from '../ssr/post.js';
 
 export interface SeoDeps {
   config: AppConfig;
@@ -110,7 +111,11 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
       return new Response(null, { status: 304, headers: { ETag: etag, ...security() } });
     }
 
-    const html = injectHead(shell, meta, renderHeadBlock(meta));
+    // 先把正文渲染进 #app，再注入 head 元数据。
+    // app.js 启动后会照常接管 #app —— 标记同构，因此是原地替换。
+    const content = renderPostContent(row, site);
+    const withBody = content ? injectAppContent(shell, content) : shell;
+    const html = injectHead(withBody, meta, renderHeadBlock(meta));
     return htmlResponse(c, html, { 'Cache-Control': 'no-cache', ETag: etag, ...security() });
   };
 
