@@ -31,14 +31,21 @@ export interface ChromeData {
   };
 }
 
-/** app.js 在站点未配置导航时使用的默认项（与前台可见菜单一致）。 */
+/**
+ * app.js 内置 NAV 常量的等价物（顺序与文案逐项对齐）。
+ * 站点未在后台配置导航时，前后台必须用同一份默认值，
+ * 否则 SSR 渲染 6 项、app.js 接管后变成 9 项，导航栏会明显跳一下。
+ */
 const DEFAULT_NAV: NavItem[] = [
   { text: '首页', url: '/' },
-  { text: '归档', url: '/archive' },
   { text: '标签', url: '/tags' },
   { text: '分类', url: '/categories' },
-  { text: '关于', url: '/about' },
-  { text: '留言板', url: '/guestbook' }
+  { text: '历史', url: '/history' },
+  { text: '系列', url: '/series' },
+  { text: '热门', url: '/popular' },
+  { text: '归档', url: '/archive' },
+  { text: '留言板', url: '/guestbook' },
+  { text: '关于', url: '/about' }
 ];
 
 function safeJson<T>(raw: unknown, fallback: T): T {

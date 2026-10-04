@@ -75,7 +75,9 @@ describe('公开站 SSR · 站点框架', () => {
       runMigrations(db, MIGRATIONS_DIR);
       const chrome = readChrome(db, '站点名');
       expect(chrome.nav.length).toBeGreaterThan(0);
-      expect(chrome.nav.some((n) => n.url === '/archive')).toBe(true);
+      expect(chrome.nav.map((n) => n.url)).toEqual([
+        '/', '/tags', '/categories', '/history', '/series', '/popular', '/archive', '/guestbook', '/about'
+      ]);
       expect(chrome.footer.copyrightName).toBe('站点名');
     } finally {
       db.close();
