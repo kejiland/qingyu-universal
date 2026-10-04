@@ -268,6 +268,7 @@ Twitter、Discord 抓到的永远是 `index.html` 里写死的那套标题。
 | --- | --- |
 | `/posts/<id>/` | `og:type=article`、文章标题/摘要/封面、绝对 `og:url` 与 canonical、`article:tag`、`article:published_time`、`BlogPosting` JSON-LD |
 | `/` | 站点名与简介、绝对 canonical、`WebSite` JSON-LD |
+| 所有页面 | **顶栏（品牌 + 导航 + 操作区）与页脚**——不再等 JS 加载后才出现 |
 | /archive | **按年/月分组的全部已发布文章** |
 | /tags、/categories | **标签云 / 分类云（含计数）** |
 | 草稿 / 定时 / 不存在的文章 | 只注入站点级信息并标记 `robots: noindex, nofollow`——**文章标题不会泄露给爬虫** |

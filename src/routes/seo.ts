@@ -24,6 +24,7 @@ import {
 } from '../seo/meta.js';
 import { injectAppContent, renderPostContent } from '../ssr/post.js';
 import { HOME_POSTS_SQL, renderHomeContent } from '../ssr/list.js';
+import { readChrome, wrapWithChrome } from '../ssr/chrome.js';
 import {
   ARCHIVE_POSTS_SQL,
   filterPosts,
@@ -93,7 +94,10 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
         const all = db.native.prepare(ARCHIVE_POSTS_SQL).all() as unknown as PostRow[];
         posts = filterPosts(all, { tag, category }).slice(0, 10);
       }
-      if (posts.length) withList = injectAppContent(shell, renderHomeContent(posts, site));
+      if (posts.length) {
+        const chrome = readChrome(db, site.name);
+        withList = injectAppContent(shell, wrapWithChrome(chrome, renderHomeContent(posts, site), '/'));
+      }
     } catch {
       /* 查询失败时回落到原始外壳，不影响页面可用性 */
     }
@@ -144,7 +148,10 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
     // 先把正文渲染进 #app，再注入 head 元数据。
     // app.js 启动后会照常接管 #app —— 标记同构，因此是原地替换。
     const content = renderPostContent(row, site);
-    const withBody = content ? injectAppContent(shell, content) : shell;
+    const chrome = readChrome(db, site.name);
+    const withBody = content
+      ? injectAppContent(shell, wrapWithChrome(chrome, content, new URL(c.req.url).pathname))
+      : shell;
     const html = injectHead(withBody, meta, renderHeadBlock(meta));
     return htmlResponse(c, html, { 'Cache-Control': 'no-cache', ETag: etag, ...security() });
   };
@@ -157,7 +164,11 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
       let withContent = shell;
       try {
         const posts = db.native.prepare(ARCHIVE_POSTS_SQL).all() as unknown as PostRow[];
-        withContent = injectAppContent(shell, render(posts, site));
+        const chrome = readChrome(db, site.name);
+        withContent = injectAppContent(
+          shell,
+          wrapWithChrome(chrome, render(posts, site), new URL(c.req.url).pathname)
+        );
       } catch {
         /* 查询失败时回落到原始外壳 */
       }
