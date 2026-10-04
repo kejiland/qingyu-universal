@@ -109,9 +109,18 @@ fetch_source() {
   if [ -n "${SOURCE_ROOT:-}" ] && [ -f "$SOURCE_ROOT/compose.yaml" ] && [ -f "$SOURCE_ROOT/deploy/Dockerfile" ]; then
     log "使用本地代码：$SOURCE_ROOT"
     if [ "$(cd "$SOURCE_ROOT" && pwd)" != "$(cd "$INSTALL_DIR" && pwd)" ]; then
-      for item in package.json package-lock.json tsconfig.json compose.yaml app src scripts deploy LICENSE .env.example; do
-        [ -e "$SOURCE_ROOT/$item" ] && cp -a "$SOURCE_ROOT/$item" "$INSTALL_DIR/"
-      done
+      # 整树复制并排除本地产物。
+      # 此前是手写文件清单，加入后台应用后清单没同步，漏掉 admin/ 与 generated/，
+      # 会让 Dockerfile 构建后台时直接失败——清单式复制对新增目录太脆弱，改为整树。
+      tar -C "$SOURCE_ROOT" -cf - \
+        --exclude='./.git' \
+        --exclude='./node_modules' \
+        --exclude='./admin/node_modules' \
+        --exclude='./admin/dist' \
+        --exclude='./dist' \
+        --exclude='./data' \
+        --exclude='./.env' \
+        . | tar -C "$INSTALL_DIR" -xf -
     fi
     return
   fi
