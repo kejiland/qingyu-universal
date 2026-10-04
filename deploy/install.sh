@@ -218,6 +218,13 @@ fetch_source() {
     return
   fi
   # 情况二：curl | bash → 下载代码包
+  download_source
+}
+
+# 下载最新代码包并覆盖到安装目录。
+# 只覆盖代码，不动 .env 与 data —— 压缩包里本来就不含它们。
+# 供两种场景使用：curl|bash 首次安装，以及 upgrade（安装目录不是 git 仓库时）。
+download_source() {
   log "下载代码：$REPO@$REF"
   need_root
   ensure_curl
@@ -232,6 +239,26 @@ fetch_source() {
   [ -n "$extracted" ] || extracted="$(find "$tmp" -maxdepth 1 -mindepth 1 -type d | head -n1)"
   cp -a "$extracted"/. "$INSTALL_DIR/"
   rm -rf "$tmp"
+  log "代码已更新到 $REF"
+}
+
+# upgrade 专用的取码逻辑：
+#   安装目录是 git 仓库 → git pull
+#   从本地 checkout 运行  → 复制本地代码
+#   压缩包安装（默认）    → 下载最新代码包
+# 此前 upgrade 只做「重建容器」，对压缩包安装等于原地重建旧版本，
+# 用户执行了 upgrade 却拿不到新代码。
+update_source() {
+  if [ -d "$INSTALL_DIR/.git" ] && have git; then
+    log "从 git 拉取最新代码…"
+    git -C "$INSTALL_DIR" pull --ff-only || warn "git pull 失败，继续用现有代码重建"
+    return 0
+  fi
+  if [ -n "${SOURCE_ROOT:-}" ] && [ -f "$SOURCE_ROOT/compose.yaml" ] && [ "$SOURCE_ROOT" != "$INSTALL_DIR" ]; then
+    fetch_source
+    return 0
+  fi
+  download_source
 }
 
 # ---------- 配置生成 ----------
@@ -697,9 +724,7 @@ cmd_install() {
 cmd_upgrade() {
   need_root
   [ -d "$INSTALL_DIR" ] || die "未找到安装目录：$INSTALL_DIR"
-  if [ -n "$SOURCE_ROOT" ] && [ -f "$SOURCE_ROOT/compose.yaml" ] && [ "$SOURCE_ROOT" != "$INSTALL_DIR" ]; then
-    fetch_source
-  fi
+  update_source
   resolve_mode
   # 先备份，再升级
   cmd_backup || warn "升级前备份失败，继续升级"
