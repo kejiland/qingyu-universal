@@ -20,6 +20,7 @@ import { runMigrations } from './migrate.js';
 import { startScheduler } from './scheduler.js';
 import { createApp } from './app.js';
 import { logger, bridgeConsole } from './logger.js';
+import { withAsciiHeaders } from './header-guard.js';
 import type { Bindings, WorkerEnv, WorkerModule } from './types.js';
 
 /* ---------- 日志：接管上游 console.* ---------- */
@@ -120,7 +121,17 @@ function displayWidth(text: string): number {
 }
 const padTo = (text: string, width: number): string => text + ' '.repeat(Math.max(0, width - displayWidth(text)));
 
-const server = serve({ fetch: app.fetch, hostname: config.host, port: config.port }, () => {
+const server = serve(
+  {
+    // 最靠外的可拦截点：把响应交给 @hono/node-server 写出之前先消毒头值
+    // 最靠外的可拦截点：交给 @hono/node-server 写出之前先消毒头值。
+    // 这里断言是必要的：Hono 的 fetch 与 node-server 的 FetchCallback 在
+    // 可选参数上类型不兼容，但运行时签名一致。
+    fetch: ((request: Request) => withAsciiHeaders(app.fetch(request))) as never,
+    hostname: config.host,
+    port: config.port
+  },
+  () => {
   const lines = describeConfig(config);
   const width = Math.max(...lines.map(([label]) => displayWidth(label))) + 4;
 
