@@ -6,7 +6,7 @@
 #   从仓库运行：
 #     ./deploy/install.sh --domain blog.example.com
 #   远程一键（仓库发布后）：
-#     curl -fsSL https://raw.githubusercontent.com/<owner>/qingyu-universal/main/deploy/install.sh | bash -s -- --domain blog.example.com
+#     curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh | bash -s -- --domain blog.example.com
 #
 # 常用子命令：
 #     install（默认） | upgrade | backup | restore <file> | logs | status | uninstall

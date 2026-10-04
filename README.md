@@ -34,7 +34,7 @@
 ## 一分钟部署（Linux VPS）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<owner>/qingyu-universal/main/deploy/install.sh \
+curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh \
   | bash -s -- --domain blog.example.com
 ```
 
@@ -44,7 +44,7 @@ curl -fsSL https://raw.githubusercontent.com/<owner>/qingyu-universal/main/deplo
 从已克隆的仓库运行（推荐，可用本地最新代码）：
 
 ```bash
-git clone https://github.com/<owner>/qingyu-universal
+git clone https://github.com/kejiland/qingyu-universal
 cd qingyu-universal
 ./deploy/install.sh --domain blog.example.com
 ```
