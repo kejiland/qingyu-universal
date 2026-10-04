@@ -28,6 +28,48 @@ die()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# 脚本依赖 curl 做三件事：安装 Docker、下载源码包、健康检查。
+# 最小化的 Debian/Ubuntu 云镜像默认不带 curl，必须先把这一步补上，
+# 否则 `curl ... | sh` 会静默失败（管道里的 sh 收到空输入仍返回 0）。
+ensure_curl() {
+  have curl && return 0
+  if have wget; then
+    # 有 wget 没有 curl 时用兼容函数兜底
+    curl() {
+      local out="" url=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          -o) out="$2"; shift 2 ;;
+          -fsSL|-fsS|-sS|-fs|-fsS) shift ;;
+          *) url="$1"; shift ;;
+        esac
+      done
+      if [ -n "$out" ]; then wget -q -O "$out" "$url"; else wget -q -O - "$url"; fi
+    }
+    export -f curl
+    log "未检测到 curl，已用 wget 兼容层替代"
+    return 0
+  fi
+  log "未检测到 curl，正在安装…"
+  case "$(detect_distro)" in
+    alpine) $SUDO apk add --no-cache curl ;;
+    debian|ubuntu|raspbian) $SUDO apt-get update -qq && $SUDO apt-get install -y -qq curl ;;
+    fedora|rhel|centos|rocky|almalinux) $SUDO dnf install -y -q curl ;;
+    arch|manjaro) $SUDO pacman -Sy --noconfirm curl ;;
+    *) die "请先安装 curl 或 wget 后重试" ;;
+  esac
+  have curl || die "curl 安装失败，请手动安装后重试"
+}
+
+# 判断 Docker 是否真的可用：二进制存在不等于守护进程可达
+# （例如 WSL 里 PATH 上有 Windows 侧的 docker，但守护进程连不上）
+docker_ready() {
+  have docker || return 1
+  docker compose version >/dev/null 2>&1 || return 1
+  docker info >/dev/null 2>&1 || return 1
+  return 0
+}
+
 # ---------- 参数解析 ----------
 COMMAND="install"
 ARGS=()
@@ -82,11 +124,12 @@ detect_distro() {
 }
 
 install_docker() {
-  if have docker && docker compose version >/dev/null 2>&1; then
+  if docker_ready; then
     log "Docker 与 Compose 已就绪（$(docker --version)）"
     return
   fi
-  log "未检测到 Docker，正在安装…"
+  ensure_curl
+  log "未检测到可用的 Docker，正在安装…"
   if [ "$(detect_distro)" = "alpine" ]; then
     $SUDO apk add --no-cache docker docker-cli-compose
     $SUDO rc-update add docker default || true
@@ -127,6 +170,7 @@ fetch_source() {
   # 情况二：curl | bash → 下载代码包
   log "下载代码：$REPO@$REF"
   need_root
+  ensure_curl
   local tmp
   tmp="$(mktemp -d)"
   curl -fsSL "https://github.com/$REPO/archive/refs/heads/$REF.tar.gz" -o "$tmp/src.tgz" \
@@ -257,6 +301,7 @@ summary() {
 # ---------- 各子命令 ----------
 cmd_install() {
   need_root
+  ensure_curl
   install_docker
   fetch_source
   ensure_env
