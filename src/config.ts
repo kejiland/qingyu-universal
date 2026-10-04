@@ -98,6 +98,7 @@ const EnvSchema = z.object({
   /* 其它 */
   COMMENT_BLOCKLIST: z.string().default(''),
   INSTANCE_ID: z.string().trim().default('1'),
+  API_VALIDATE_RESPONSES: z.enum(['off', 'warn', 'strict']).optional(),
   CRON_TIMEZONE: z.string().trim().default('UTC'),
   BACKUP_CRON: z.string().trim().default('0 19 * * *'),
   TZ: z.string().trim().default('')
@@ -133,7 +134,9 @@ export interface AppConfig {
   readonly trustProxy: boolean;
   readonly geoipHeader: string;
   readonly logLevel: string;
-  readonly instanceId: string;
+  readonly instanceId: string;
+  /** 响应契约校验：off=关闭，warn=只告警，strict=不符即 500（测试用）。 */
+  readonly validateResponses: 'off' | 'warn' | 'strict';
   readonly cron: { readonly timezone: string; readonly backup: string };
   readonly storageMode: 'local' | 's3';
   readonly s3: StorageConfig;
@@ -225,7 +228,8 @@ export function loadConfig(): AppConfig {
     trustProxy: env.TRUST_PROXY,
     geoipHeader: env.GEOIP_HEADER,
     logLevel: env.LOG_LEVEL,
-    instanceId: env.INSTANCE_ID,
+    instanceId: env.INSTANCE_ID,
+    validateResponses: env.API_VALIDATE_RESPONSES ?? (process.env.NODE_ENV === 'production' ? 'off' : 'warn'),
     cron: { timezone: env.CRON_TIMEZONE, backup: env.BACKUP_CRON },
     storageMode,
     s3,

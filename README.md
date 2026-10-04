@@ -86,7 +86,9 @@ npm start                 # http://localhost:8787
 ### 测试
 
 ```bash
-npm test                  # 单元测试（D1 / KV / 存储 / 迁移 / 配置 / SEO，52 项）
+npm test                  # 单元测试 + 契约测试（72 项）
+npm run typecheck:tests   # 测试代码（含生成的客户端类型）编译期检查
+npm run api:generate      # 重新生成 OpenAPI 与客户端类型
 npm run typecheck         # 仅类型检查
 
 # 端到端冒烟测试（需先启动实例）
@@ -204,6 +206,43 @@ canonical: seo.canonical  →  https://<SITE_URL>/posts/<id>/
 
 ---
 
+## API 契约
+
+上游的接口是 62 个手写路由分支加 16 处 `await request.json()`，**零 schema 校验**：
+类型错误会被 `String()` 静默强转成脏数据存进库，也没有机器可读的接口描述。
+
+自托管版在 `src/api/` 加了一层契约，三者同源：
+
+```
+src/api/contract/*.ts   zod schema（唯一事实来源）
+      ├──→ 运行时校验        拒绝坏请求，错误信息带字段路径
+      ├──→ OpenAPI 3.1      /openapi.json 与 generated/openapi.json
+      └──→ 客户端类型        generated/api.d.ts
+```
+
+两个关键设计：
+
+**校验是只读的。** 请求 clone 后解析、仅用于判断是否 400，转发给上游的仍是原始请求。
+原因：zod 的 `z.object()` 默认**剥掉未声明字段**，如果拿解析结果去转发，上游需要的字段会被静默删掉。
+原样转发从根本上排除了这类行为变化。
+
+**响应也要校验。** 每条路由声明响应 schema，处理完回头校验真实响应体
+（`API_VALIDATE_RESPONSES=off|warn|strict`）。这个机制立刻抓到一个真实缺陷：
+`POST /api/posts/:id/comments` 的响应**不含 `post_id`**，而列表接口用 `SELECT *` 是含的——
+两个接口的评论形状不同，靠读代码很难发现。
+
+当前已覆盖文章 / 评论 / 检索 / 设置 / 健康检查共 9 个操作，其余约 50 个仍走上游兜底，
+行为完全不受影响。迁移一个域 = 把它的路由从兜底提到契约层，可逐个进行、随时停手。
+
+```bash
+npm run api:generate      # 重新生成 OpenAPI 与客户端类型
+curl localhost:8787/openapi.json
+```
+
+详见 [docs/API.md](docs/API.md)。
+
+---
+
 ## 架构
 
 核心原则：**业务逻辑复用上游，平台能力由适配器提供。**
@@ -276,7 +315,9 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
 - [x] **v0.1** Docker + SQLite + 本地磁盘 + Caddy + 一键部署脚本；AI / SMTP / S3 适配
 - [x] **v0.2** TypeScript + Hono + zod + pino + node-cron + nodemailer；单元测试与 CI
 - [x] **v0.2.1** 文章页 / 首页服务端 SEO 渲染（OG 卡片、JSON-LD、canonical）
+- [x] **v0.2.2** API 契约层：zod schema → OpenAPI → 客户端类型，响应漂移检测
 - [ ] **v0.3** 前端拆分（公开站 SSR + 后台 SPA）、站点 JSON 备份导入、数据库外键约束
+- [ ] **v0.3** 契约覆盖剩余约 50 个接口（管理认证 / 媒体 / 订阅 / 备份）
 - [ ] **v0.3.1** PostgreSQL 适配、Redis/Valkey 限流
 - [ ] **v0.4** PaaS 模板（Railway / Render / Fly.io / Cloud Run）、多架构镜像发布
 - [ ] **v0.5** Helm Chart、SQLite → PostgreSQL 迁移工具、镜像签名与 SBOM

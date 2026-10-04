@@ -30,8 +30,22 @@ jobs:
       - name: 构建
         run: npm run build
 
-      - name: 单元测试
+      - name: 单元测试与契约测试
         run: npm test
+
+      - name: 测试代码类型检查
+        run: npm run typecheck:tests
+
+      - name: 生成 OpenAPI 与客户端类型
+        run: npm run api:generate
+
+      - name: 检查生成产物是否最新
+        run: |
+          if ! git diff --quiet generated/; then
+            echo "::error::generated/ 与 API 契约不一致。请在本地运行 npm run api:generate 并提交产物。"
+            git --no-pager diff --stat generated/
+            exit 1
+          fi
 
       - name: bash 语法检查
         run: bash -n deploy/install.sh

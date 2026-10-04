@@ -104,6 +104,8 @@ const app = createApp({
   migration,
   storage,
   seo: { config, db, securityHeaders },
+  validateResponses: config.validateResponses,
+  logger: { warn: (message) => logger.warn(message), error: (message) => logger.error(message) },
   startTime: startedAt,
   onRequest: (info) => logger.info(info, 'http')
 });
