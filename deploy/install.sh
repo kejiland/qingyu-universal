@@ -160,6 +160,31 @@ prepare_install_dir() {
   fi
 }
 
+# 取构建版本（commit 短 SHA），用于确认「升级到底生效没有」。
+# 优先本地 git；否则读 GitHub 的 Atom feed —— 它走网页，不受 api.github.com
+# 的限流（未认证每小时 60 次，实测经常直接 403）。
+# 都取不到则返回空串，不影响部署。
+#
+# 注意：这里先把响应存进变量再解析，**不能**写成
+#   curl … | grep -m1 …
+# 因为脚本开了 set -o pipefail，而 grep -m1 命中后立即退出会让 curl 收到
+# SIGPIPE（141），pipefail 把整条管道判为失败 —— 而且这是竞态：
+# curl 先写完就正常，所以单独测试能过、在脚本里却拿到空值。
+resolve_revision() {
+  local sha="" body=""
+  if [ -d "$INSTALL_DIR/.git" ] && have git; then
+    sha=$(git -C "$INSTALL_DIR" rev-parse --short=7 HEAD 2>/dev/null) || sha=""
+  fi
+  if [ -z "$sha" ]; then
+    body=$(curl -fsS --max-time 8 -H 'User-Agent: curl' \
+           "https://github.com/$REPO/commits/$REF.atom" 2>/dev/null) || body=""
+    if [ -n "$body" ]; then
+      sha=$(printf '%s' "$body" | grep -oE 'Grit::Commit/[0-9a-f]{40}' | sed -n '1s|.*/||p') || sha=""
+      sha="${sha:0:7}"
+    fi
+  fi
+  printf '%s' "$sha"
+}
 # Docker 命令前缀：非 root 且当前用户访问不了守护进程（不在 docker 组）时用 sudo
 resolve_docker() {
   if [ "$(id -u)" -ne 0 ] && ! docker info >/dev/null 2>&1; then
@@ -715,7 +740,10 @@ cmd_install() {
   resolve_mode
   ensure_env
   preflight
-  log "构建并启动容器…"
+  BUILD_REVISION="$(resolve_revision)"
+  [ -n "$BUILD_REVISION" ] || BUILD_REVISION=unknown
+  export BUILD_REVISION
+  log "构建并启动容器…（版本 $BUILD_REVISION）"
   compose up -d --build
   wait_healthy
   summary

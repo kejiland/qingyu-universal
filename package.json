@@ -1,6 +1,6 @@
 {
   "name": "qingyu-universal",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Qingyu Blog · 自托管通用版（TypeScript + Hono + SQLite，可选 S3 / SMTP / OpenAI 兼容 AI）",

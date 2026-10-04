@@ -17,7 +17,14 @@ export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 export const APP_DIR = path.join(ROOT, 'app');
 export const PUBLIC_DIR = path.join(APP_DIR, 'public');
 export const MIGRATIONS_DIR = path.join(APP_DIR, 'migrations');
-export const VERSION = '0.2.0';
+export const VERSION = '0.3.0';
+
+/**
+ * 构建版本：构建镜像时注入的 git 短 SHA（见 deploy/Dockerfile 的 BUILD_REVISION）。
+ * 有它才能回答「我升级到底生效了没有」—— 仅靠语义版本号是做不到的，
+ * 因为同一个版本号下可能有很多次提交。压缩包安装时无法取到 SHA，则为空。
+ */
+export const BUILD_REVISION = String(process.env.BUILD_REVISION || '').trim();
 
 /* ---------- zod 助手 ---------- */
 const booleanish = (fallback: boolean) =>
@@ -119,6 +126,8 @@ export interface StorageConfig {
 
 export interface AppConfig {
   readonly version: string;
+  /** 构建时的 git 短 SHA；取不到则为空串。 */
+  readonly revision: string;
   readonly root: string;
   readonly appDir: string;
   readonly publicDir: string;
@@ -139,7 +148,7 @@ export interface AppConfig {
   readonly logLevel: string;
   readonly instanceId: string;
   /** 响应契约校验：off=关闭，warn=只告警，strict=不符即 500（测试用）。 */
-  readonly validateResponses: 'off' | 'warn' | 'strict';
+  readonly validateResponses: 'off' | 'warn' | 'strict';
   readonly cron: { readonly timezone: string; readonly backup: string };
   readonly storageMode: 'local' | 's3';
   readonly s3: StorageConfig;
@@ -215,6 +224,7 @@ export function loadConfig(): AppConfig {
 
   return Object.freeze({
     version: VERSION,
+    revision: BUILD_REVISION,
     root: ROOT,
     appDir: APP_DIR,
     publicDir: PUBLIC_DIR,
@@ -233,7 +243,7 @@ export function loadConfig(): AppConfig {
     geoipHeader: env.GEOIP_HEADER,
     logLevel: env.LOG_LEVEL,
     instanceId: env.INSTANCE_ID,
-    validateResponses: env.API_VALIDATE_RESPONSES ?? (process.env.NODE_ENV === 'production' ? 'off' : 'warn'),
+    validateResponses: env.API_VALIDATE_RESPONSES ?? (process.env.NODE_ENV === 'production' ? 'off' : 'warn'),
     cron: { timezone: env.CRON_TIMEZONE, backup: env.BACKUP_CRON },
     storageMode,
     s3,

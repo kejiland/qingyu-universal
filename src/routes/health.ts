@@ -29,6 +29,7 @@ export function createHealthHandler(deps: HealthDeps) {
     const payload = {
       ok: database === 'ok',
       version: deps.config.version,
+      revision: deps.config.revision || null,
       storage: deps.config.storageMode,
       database: 'sqlite',
       databaseStatus: database,

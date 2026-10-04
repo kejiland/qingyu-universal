@@ -19,6 +19,11 @@ RUN npm run build
 
 # ------------------------------------------------------------
 FROM node:24-alpine AS server-build
+
+# 构建版本（git 短 SHA），由 compose 的 build.args 注入。
+# 打进镜像后由 /healthz 与启动横幅输出 —— 用于确认「升级到底生效没有」。
+ARG BUILD_REVISION=""
+ENV BUILD_REVISION=$BUILD_REVISION
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -34,7 +39,10 @@ FROM node:24-alpine
 WORKDIR /app
 
 # 非 root 运行：直接使用镜像内置的 node 用户（uid/gid 1000）
-ENV NODE_ENV=production \
+# 运行阶段也要声明 —— ARG/ENV 不跨 FROM 阶段继承
+ARG BUILD_REVISION=""
+ENV BUILD_REVISION=$BUILD_REVISION \
+    NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8787 \
     DATA_DIR=/data \

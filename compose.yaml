@@ -14,6 +14,9 @@ services:
     build:
       context: .
       dockerfile: deploy/Dockerfile
+      args:
+        # 由 install.sh 解析后注入；取不到则为空
+        BUILD_REVISION: ${BUILD_REVISION:-}
     image: ${QINGYU_IMAGE:-qingyu-universal:local}
     container_name: qingyu-app
     restart: unless-stopped

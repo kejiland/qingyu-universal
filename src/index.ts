@@ -136,7 +136,7 @@ const server = serve(
   const width = Math.max(...lines.map(([label]) => displayWidth(label))) + 4;
 
   logger.info('');
-  logger.info(`  轻语博客 · 自托管通用版 v${config.version}`);
+  logger.info(`  轻语博客 · 自托管通用版 v${config.version}${config.revision ? ' (' + config.revision + ')' : ''}`);
   logger.info(`  ${'─'.repeat(60)}`);
   for (const [label, value] of lines) logger.info(`  ${padTo(label, width)}${value}`);
   logger.info(`  ${padTo('已应用迁移', width)}${migration.applied.length} 个（跳过 ${migration.skipped.length} 个）`);
