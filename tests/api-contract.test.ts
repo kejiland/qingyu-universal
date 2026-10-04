@@ -28,7 +28,11 @@ import {
   LoginResponseSchema,
   MediaListResponseSchema,
   MediaRegisterResponseSchema,
-  MediaUploadTicketSchema
+  MediaUploadTicketSchema,
+  StatsSourcesResponseSchema,
+  StatsTrendResponseSchema,
+  SubscriberListResponseSchema,
+  WebmentionListResponseSchema
 } from '../src/api/contract/admin.js';
 import type { ZodType } from 'zod';
 
@@ -358,6 +362,47 @@ describe('后台域 API 契约', () => {
 
   it('媒体接口未授权时返回 401', async () => {
     const { status, data } = await call('/api/media');
+    expect(status).toBe(401);
+    expectSchema(ErrorResponseSchema, data);
+  });
+});
+
+describe('订阅 / Webmention / 统计 契约', () => {
+  // 前一个 describe 的最后一个用例登出了会话，这里重新登录
+  beforeAll(async () => {
+    const again = await call('/api/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Setup-Key': server.setupKey },
+      body: JSON.stringify({ password: 'Contract-Test-Password-1' })
+    });
+    token = (again.data as { token?: string }).token ?? '';
+  });
+  it('GET /api/admin/subscribers → SubscriberListResponse', async () => {
+    const { status, data } = await call('/api/admin/subscribers', { headers: jsonAuth() });
+    expect(status).toBe(200);
+    expectSchema(SubscriberListResponseSchema, data);
+  });
+
+  it('GET /api/admin/webmentions → WebmentionListResponse', async () => {
+    const { status, data } = await call('/api/admin/webmentions', { headers: jsonAuth() });
+    expect(status).toBe(200);
+    expectSchema(WebmentionListResponseSchema, data);
+  });
+
+  it('GET /api/stats/trend → StatsTrendResponse', async () => {
+    const { status, data } = await call('/api/stats/trend', { headers: jsonAuth() });
+    expect(status).toBe(200);
+    expectSchema(StatsTrendResponseSchema, data);
+  });
+
+  it('GET /api/admin/stats/sources → StatsSourcesResponse', async () => {
+    const { status, data } = await call('/api/admin/stats/sources', { headers: jsonAuth() });
+    expect(status).toBe(200);
+    expectSchema(StatsSourcesResponseSchema, data);
+  });
+
+  it('订阅者接口未授权返回 401', async () => {
+    const { status, data } = await call('/api/admin/subscribers');
     expect(status).toBe(401);
     expectSchema(ErrorResponseSchema, data);
   });

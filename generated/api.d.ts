@@ -426,6 +426,140 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/subscribers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 订阅者列表
+         * @description 返回全部订阅者（含待确认与已退订）、状态计数与分组统计。`enabled` 表示是否配置了发信。
+         */
+        get: operations["getApiAdminSubscribers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/subscribers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除订阅者 */
+        delete: operations["deleteApiAdminSubscribersById"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/subscribers/broadcast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 群发邮件
+         * @description 按分组或全量投递到发件队列（mail_outbox），由定时任务逐条发送。未配置发信时返回 503。
+         */
+        post: operations["postApiAdminSubscribersBroadcast"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/webmentions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Webmention 列表
+         * @description 站外提及本站文章的通知，可审核或删除。
+         */
+        get: operations["getApiAdminWebmentions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/webmentions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除 Webmention */
+        delete: operations["deleteApiAdminWebmentionsById"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/stats/trend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 访问趋势
+         * @description 按天返回浏览量/点赞数，用于趋势图。
+         */
+        get: operations["getApiStatsTrend"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/stats/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 来源分析
+         * @description 按来源/设备/国家/平台/厂商聚合的访问量，含各自总量。
+         */
+        get: operations["getApiAdminStatsSources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -733,6 +867,105 @@ export interface components {
             result: {
                 [key: string]: unknown;
             };
+        };
+        SubscriberListResponse: {
+            /** @constant */
+            ok: true;
+            enabled: boolean;
+            counts: {
+                total: number;
+                active: number;
+                pending: number;
+                unsubscribed: number;
+            };
+            groups: {
+                name: string;
+                count: number;
+            }[];
+            subscribers: components["schemas"]["SubscriberItem"][];
+        };
+        SubscriberItem: {
+            id: string;
+            email: string;
+            /** @enum {string} */
+            status: "active" | "pending" | "unsubscribed";
+            locale?: string;
+            created_at: number;
+            confirmed_at?: number | null;
+            unsubscribed_at?: number | null;
+            last_notified_at?: number | null;
+            groups: string[];
+        };
+        SubscriberBroadcastResponse: {
+            /** @constant */
+            ok: true;
+            queued: number;
+            groups: string[];
+        };
+        /** @description 注意：数组字段名是 mentions，不是 webmentions */
+        WebmentionListResponse: {
+            /** @constant */
+            ok: true;
+            total: number;
+            mentions: components["schemas"]["WebmentionItem"][];
+        };
+        WebmentionItem: {
+            id: number;
+            source: string;
+            target: string;
+            post_id?: string | null;
+            author_name?: string;
+            author_url?: string;
+            title?: string;
+            excerpt?: string;
+            status: string;
+            created_at: number;
+            updated_at: number;
+        };
+        StatsTrendResponse: {
+            /** @constant */
+            ok: true;
+            trend: {
+                date: string;
+                views: number;
+                likes: number;
+            }[];
+        };
+        StatsSourcesResponse: {
+            /** @constant */
+            ok: true;
+            days: number;
+            since: string;
+            referrers: {
+                name: string;
+                views: number;
+                count?: number;
+            }[];
+            devices: {
+                name: string;
+                views: number;
+                count?: number;
+            }[];
+            countries: {
+                name: string;
+                views: number;
+                count?: number;
+            }[];
+            platforms: {
+                name: string;
+                views: number;
+                count?: number;
+            }[];
+            vendors: {
+                name: string;
+                views: number;
+                count?: number;
+            }[];
+            refTotal: number;
+            devTotal: number;
+            countryTotal: number;
+            platformTotal: number;
+            vendorTotal: number;
         };
         HealthResponse: {
             ok: boolean;
@@ -1839,6 +2072,220 @@ export interface operations {
             };
             /** @description 未配置备份桶 */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getApiAdminSubscribers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 订阅者名单 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriberListResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteApiAdminSubscribersById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    postApiAdminSubscribersBroadcast: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已入队 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriberBroadcastResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未配置发信 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getApiAdminWebmentions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Webmention 列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebmentionListResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteApiAdminWebmentionsById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getApiStatsTrend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 趋势数据 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatsTrendResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getApiAdminStatsSources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 来源分布 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatsSourcesResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

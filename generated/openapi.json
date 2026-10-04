@@ -36,6 +36,15 @@
       "name": "备份"
     },
     {
+      "name": "订阅"
+    },
+    {
+      "name": "Webmention"
+    },
+    {
+      "name": "统计"
+    },
+    {
       "name": "系统"
     }
   ],
@@ -1119,6 +1128,424 @@
         "required": [
           "ok",
           "result"
+        ],
+        "additionalProperties": false
+      },
+      "SubscriberListResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "number"
+              },
+              "active": {
+                "type": "number"
+              },
+              "pending": {
+                "type": "number"
+              },
+              "unsubscribed": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "total",
+              "active",
+              "pending",
+              "unsubscribed"
+            ],
+            "additionalProperties": false
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "name",
+                "count"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "subscribers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubscriberItem"
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "enabled",
+          "counts",
+          "groups",
+          "subscribers"
+        ],
+        "additionalProperties": false
+      },
+      "SubscriberItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "pending",
+              "unsubscribed"
+            ]
+          },
+          "locale": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "number"
+          },
+          "confirmed_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "unsubscribed_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "last_notified_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "status",
+          "created_at",
+          "groups"
+        ],
+        "additionalProperties": false
+      },
+      "SubscriberBroadcastResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "queued": {
+            "type": "number"
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "queued",
+          "groups"
+        ],
+        "additionalProperties": false
+      },
+      "WebmentionListResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "total": {
+            "type": "number"
+          },
+          "mentions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebmentionItem"
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "total",
+          "mentions"
+        ],
+        "additionalProperties": false,
+        "description": "注意：数组字段名是 mentions，不是 webmentions"
+      },
+      "WebmentionItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "source": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "post_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "author_name": {
+            "type": "string"
+          },
+          "author_url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "excerpt": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "number"
+          },
+          "updated_at": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "target",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "StatsTrendResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "trend": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date": {
+                  "type": "string"
+                },
+                "views": {
+                  "type": "number"
+                },
+                "likes": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "date",
+                "views",
+                "likes"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "trend"
+        ],
+        "additionalProperties": false
+      },
+      "StatsSourcesResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "days": {
+            "type": "number"
+          },
+          "since": {
+            "type": "string"
+          },
+          "referrers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "views": {
+                  "type": "number"
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "name",
+                "views"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "devices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "views": {
+                  "type": "number"
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "name",
+                "views"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "countries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "views": {
+                  "type": "number"
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "name",
+                "views"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "views": {
+                  "type": "number"
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "name",
+                "views"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "vendors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "views": {
+                  "type": "number"
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "name",
+                "views"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "refTotal": {
+            "type": "number"
+          },
+          "devTotal": {
+            "type": "number"
+          },
+          "countryTotal": {
+            "type": "number"
+          },
+          "platformTotal": {
+            "type": "number"
+          },
+          "vendorTotal": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "ok",
+          "days",
+          "since",
+          "referrers",
+          "devices",
+          "countries",
+          "platforms",
+          "vendors",
+          "refTotal",
+          "devTotal",
+          "countryTotal",
+          "platformTotal",
+          "vendorTotal"
         ],
         "additionalProperties": false
       },
@@ -2972,6 +3399,284 @@
           }
         },
         "description": "危险操作：会按备份内容覆盖现有数据表。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/subscribers": {
+      "get": {
+        "tags": [
+          "订阅"
+        ],
+        "summary": "订阅者列表",
+        "operationId": "getApiAdminSubscribers",
+        "responses": {
+          "200": {
+            "description": "订阅者名单",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriberListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "返回全部订阅者（含待确认与已退订）、状态计数与分组统计。`enabled` 表示是否配置了发信。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/subscribers/{id}": {
+      "delete": {
+        "tags": [
+          "订阅"
+        ],
+        "summary": "删除订阅者",
+        "operationId": "deleteApiAdminSubscribersById",
+        "responses": {
+          "200": {
+            "description": "已删除",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/subscribers/broadcast": {
+      "post": {
+        "tags": [
+          "订阅"
+        ],
+        "summary": "群发邮件",
+        "operationId": "postApiAdminSubscribersBroadcast",
+        "responses": {
+          "200": {
+            "description": "已入队",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriberBroadcastResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "未配置发信",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "按分组或全量投递到发件队列（mail_outbox），由定时任务逐条发送。未配置发信时返回 503。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/webmentions": {
+      "get": {
+        "tags": [
+          "Webmention"
+        ],
+        "summary": "Webmention 列表",
+        "operationId": "getApiAdminWebmentions",
+        "responses": {
+          "200": {
+            "description": "Webmention 列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebmentionListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "站外提及本站文章的通知，可审核或删除。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/webmentions/{id}": {
+      "delete": {
+        "tags": [
+          "Webmention"
+        ],
+        "summary": "删除 Webmention",
+        "operationId": "deleteApiAdminWebmentionsById",
+        "responses": {
+          "200": {
+            "description": "已删除",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/api/stats/trend": {
+      "get": {
+        "tags": [
+          "统计"
+        ],
+        "summary": "访问趋势",
+        "operationId": "getApiStatsTrend",
+        "responses": {
+          "200": {
+            "description": "趋势数据",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsTrendResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "按天返回浏览量/点赞数，用于趋势图。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/stats/sources": {
+      "get": {
+        "tags": [
+          "统计"
+        ],
+        "summary": "来源分析",
+        "operationId": "getApiAdminStatsSources",
+        "responses": {
+          "200": {
+            "description": "来源分布",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsSourcesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "按来源/设备/国家/平台/厂商聚合的访问量，含各自总量。",
         "security": [
           {
             "bearerAuth": []

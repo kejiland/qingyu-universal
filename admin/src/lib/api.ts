@@ -7,6 +7,8 @@
  * ============================================================ */
 import type { components, paths } from '@api-types';
 
+export type { components, paths };
+
 export type PostSummary = components['schemas']['PostSummary'];
 export type PostDetail = components['schemas']['PostDetail'];
 export type Comment = components['schemas']['Comment'];
@@ -166,6 +168,20 @@ export const api = {
   /* 认证补充 */
   changePassword: (current: string, password: string) =>
     request<{ ok: true; message: string }>('/api/admin/password', { method: 'POST', ...json({ current, password }) }),
+
+  /* 订阅者 */
+  listSubscribers: () => request<components['schemas']['SubscriberListResponse']>('/api/admin/subscribers'),
+  deleteSubscriber: (id: string) => request<{ ok: true }>(`/api/admin/subscribers/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  broadcast: (payload: Record<string, unknown>) =>
+    request<components['schemas']['SubscriberBroadcastResponse']>('/api/admin/subscribers/broadcast', { method: 'POST', ...json(payload) }),
+
+  /* Webmention */
+  listWebmentions: () => request<components['schemas']['WebmentionListResponse']>('/api/admin/webmentions'),
+  deleteWebmention: (id: number) => request<{ ok: true }>(`/api/admin/webmentions/${id}`, { method: 'DELETE' }),
+
+  /* 统计 */
+  statsTrend: () => request<components['schemas']['StatsTrendResponse']>('/api/stats/trend'),
+  statsSources: () => request<components['schemas']['StatsSourcesResponse']>('/api/admin/stats/sources'),
 
   /* 设置 */
   getSettings: () => request<{ ok: true; settings: Record<string, string> }>('/api/settings'),

@@ -57,6 +57,24 @@ const routes: RouteRecordRaw[] = [
     component: () => import('./views/LogsView.vue'),
     meta: { title: '日志' }
   },
+  {
+    path: '/subscribers',
+    name: 'subscribers',
+    component: () => import('./views/SubscribersView.vue'),
+    meta: { title: '订阅者' }
+  },
+  {
+    path: '/webmentions',
+    name: 'webmentions',
+    component: () => import('./views/WebmentionsView.vue'),
+    meta: { title: 'Webmention' }
+  },
+  {
+    path: '/stats',
+    name: 'stats',
+    component: () => import('./views/StatsView.vue'),
+    meta: { title: '统计' }
+  },
   // 仍未迁移的模块（订阅者 / 统计 / Webmention）：占位页 + 跳转旧版，功能不丢失
   {
     path: '/:pathMatch(.*)*',

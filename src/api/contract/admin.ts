@@ -241,3 +241,98 @@ export const BackupCreateResponseSchema = z
 export const BackupRestoreResponseSchema = z
   .object({ ok: z.literal(true), result: z.record(z.string(), z.unknown()) })
   .meta({ id: 'BackupRestoreResponse' });
+
+/* ---------- 订阅者 ---------- */
+
+export const SubscriberItemSchema = z
+  .object({
+    id: z.string(),
+    email: z.string(),
+    status: z.enum(['active', 'pending', 'unsubscribed']),
+    locale: z.string().optional(),
+    created_at: z.number(),
+    confirmed_at: z.number().nullable().optional(),
+    unsubscribed_at: z.number().nullable().optional(),
+    last_notified_at: z.number().nullable().optional(),
+    groups: z.array(z.string())
+  })
+  .meta({ id: 'SubscriberItem' });
+
+export const SubscriberListResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    /** 是否配置了发信（SMTP 或 Resend）；未配置时只能查看名单 */
+    enabled: z.boolean(),
+    counts: z.object({
+      total: z.number(),
+      active: z.number(),
+      pending: z.number(),
+      unsubscribed: z.number()
+    }),
+    groups: z.array(z.object({ name: z.string(), count: z.number() })),
+    subscribers: z.array(SubscriberItemSchema)
+  })
+  .meta({ id: 'SubscriberListResponse' });
+
+export const SubscriberGroupListResponseSchema = z
+  .object({ ok: z.literal(true), groups: z.array(z.object({ name: z.string(), count: z.number() })) })
+  .meta({ id: 'SubscriberGroupListResponse' });
+
+export const SubscriberBroadcastResponseSchema = z
+  .object({ ok: z.literal(true), queued: z.number(), groups: z.array(z.string()) })
+  .meta({ id: 'SubscriberBroadcastResponse' });
+
+/* ---------- Webmention ---------- */
+
+export const WebmentionItemSchema = z
+  .object({
+    id: z.number(),
+    source: z.string(),
+    target: z.string(),
+    post_id: z.string().nullable().optional(),
+    author_name: z.string().optional(),
+    author_url: z.string().optional(),
+    title: z.string().optional(),
+    excerpt: z.string().optional(),
+    status: z.string(),
+    created_at: z.number(),
+    updated_at: z.number()
+  })
+  .meta({ id: 'WebmentionItem' });
+
+export const WebmentionListResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    total: z.number(),
+    mentions: z.array(WebmentionItemSchema)
+  })
+  .meta({ id: 'WebmentionListResponse', description: '注意：数组字段名是 mentions，不是 webmentions' });
+
+/* ---------- 统计 ---------- */
+
+export const StatsTrendResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    trend: z.array(z.object({ date: z.string(), views: z.number(), likes: z.number() }))
+  })
+  .meta({ id: 'StatsTrendResponse' });
+
+const SourceRow = z.object({ name: z.string(), views: z.number(), count: z.number().optional() });
+
+export const StatsSourcesResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    days: z.number(),
+    since: z.string(),
+    referrers: z.array(SourceRow),
+    devices: z.array(SourceRow),
+    countries: z.array(SourceRow),
+    platforms: z.array(SourceRow),
+    vendors: z.array(SourceRow),
+    refTotal: z.number(),
+    devTotal: z.number(),
+    countryTotal: z.number(),
+    platformTotal: z.number(),
+    vendorTotal: z.number()
+  })
+  .meta({ id: 'StatsSourcesResponse' });

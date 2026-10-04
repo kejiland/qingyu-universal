@@ -3,7 +3,7 @@ import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   FileText, Image as ImageIcon, MessageSquare, Settings, Users, DatabaseBackup,
-  ScrollText, LogOut, Moon, Sun, Menu, X, ExternalLink, PenLine
+  ScrollText, LogOut, Moon, Sun, Menu, X, ExternalLink, PenLine, AtSign, BarChart3
 } from '@lucide/vue';
 import { api, session } from '../../lib/api';
 import { toast } from '../../lib/toast';
@@ -17,14 +17,16 @@ const navGroups = [
     items: [
       { to: '/posts', label: '文章', icon: FileText, match: /^\/posts/ },
       { to: '/media', label: '媒体库', icon: ImageIcon, match: /^\/media/ },
-      { to: '/comments', label: '评论', icon: MessageSquare, match: /^\/comments/ }
+      { to: '/comments', label: '评论', icon: MessageSquare, match: /^\/comments/ },
+      { to: '/webmentions', label: 'Webmention', icon: AtSign, match: /^\/webmentions/ }
     ]
   },
   {
     label: '站点',
     items: [
       { to: '/settings', label: '设置', icon: Settings, match: /^\/settings/ },
-      { to: '/subscribers', label: '订阅者', icon: Users, match: /^\/subscribers/ }
+      { to: '/subscribers', label: '订阅者', icon: Users, match: /^\/subscribers/ },
+      { to: '/stats', label: '统计', icon: BarChart3, match: /^\/stats/ }
     ]
   },
   {

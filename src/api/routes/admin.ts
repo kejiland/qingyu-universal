@@ -27,7 +27,12 @@ import {
   MediaUploadTicketSchema,
   MessageResponseSchema,
   PasswordBodySchema,
-  SetupBodySchema
+  SetupBodySchema,
+  StatsSourcesResponseSchema,
+  StatsTrendResponseSchema,
+  SubscriberBroadcastResponseSchema,
+  SubscriberListResponseSchema,
+  WebmentionListResponseSchema
 } from '../contract/admin.js';
 import { proxyToUpstream, type ApiRoute } from '../registry.js';
 
@@ -306,6 +311,103 @@ export const adminRoutes: ApiRoute[] = [
     responses: {
       200: { description: '恢复完成', schema: BackupRestoreResponseSchema },
       503: { description: '未配置备份桶', schema: ErrorResponseSchema },
+      ...AUTH_ERRORS
+    },
+    handler: proxyToUpstream
+  },
+
+  /* ---------- 订阅者 ---------- */
+  {
+    method: 'GET',
+    path: '/api/admin/subscribers',
+    tags: ['订阅'],
+    auth: 'admin',
+    summary: '订阅者列表',
+    description: '返回全部订阅者（含待确认与已退订）、状态计数与分组统计。`enabled` 表示是否配置了发信。',
+    responses: {
+      200: { description: '订阅者名单', schema: SubscriberListResponseSchema },
+      ...AUTH_ERRORS
+    },
+    handler: proxyToUpstream
+  },
+  {
+    method: 'DELETE',
+    path: '/api/admin/subscribers/:id',
+    tags: ['订阅'],
+    auth: 'admin',
+    summary: '删除订阅者',
+    responses: {
+      200: { description: '已删除', schema: OkResponseSchema },
+      ...AUTH_ERRORS
+    },
+    handler: proxyToUpstream
+  },
+  {
+    method: 'POST',
+    path: '/api/admin/subscribers/broadcast',
+    tags: ['订阅'],
+    auth: 'admin',
+    summary: '群发邮件',
+    description: '按分组或全量投递到发件队列（mail_outbox），由定时任务逐条发送。未配置发信时返回 503。',
+    responses: {
+      200: { description: '已入队', schema: SubscriberBroadcastResponseSchema },
+      503: { description: '未配置发信', schema: ErrorResponseSchema },
+      ...AUTH_ERRORS
+    },
+    handler: proxyToUpstream
+  },
+
+  /* ---------- Webmention ---------- */
+  {
+    method: 'GET',
+    path: '/api/admin/webmentions',
+    tags: ['Webmention'],
+    auth: 'admin',
+    summary: 'Webmention 列表',
+    description: '站外提及本站文章的通知，可审核或删除。',
+    responses: {
+      200: { description: 'Webmention 列表', schema: WebmentionListResponseSchema },
+      ...AUTH_ERRORS
+    },
+    handler: proxyToUpstream
+  },
+  {
+    method: 'DELETE',
+    path: '/api/admin/webmentions/:id',
+    tags: ['Webmention'],
+    auth: 'admin',
+    summary: '删除 Webmention',
+    request: { params: CommentIdParamSchema },
+    responses: {
+      200: { description: '已删除', schema: OkResponseSchema },
+      ...AUTH_ERRORS
+    },
+    handler: proxyToUpstream
+  },
+
+  /* ---------- 统计 ---------- */
+  {
+    method: 'GET',
+    path: '/api/stats/trend',
+    tags: ['统计'],
+    auth: 'admin',
+    summary: '访问趋势',
+    description: '按天返回浏览量/点赞数，用于趋势图。',
+    responses: {
+      200: { description: '趋势数据', schema: StatsTrendResponseSchema },
+      ...AUTH_ERRORS
+    },
+    handler: proxyToUpstream
+  },
+  {
+    method: 'GET',
+    path: '/api/admin/stats/sources',
+    tags: ['统计'],
+    auth: 'admin',
+    summary: '来源分析',
+    description: '按来源/设备/国家/平台/厂商聚合的访问量，含各自总量。',
+    responses: {
+      200: { description: '来源分布', schema: StatsSourcesResponseSchema },
       ...AUTH_ERRORS
     },
     handler: proxyToUpstream
