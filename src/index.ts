@@ -108,7 +108,12 @@ const app = createApp({
   validateResponses: config.validateResponses,
   logger: { warn: (message) => logger.warn(message), error: (message) => logger.error(message) },
   startTime: startedAt,
-  onRequest: (info) => logger.info(info, 'http')
+  // quiet 的请求（正常返回的静态资源）走 debug，不刷屏
+  onRequest: (info) => {
+    const { quiet, ...rest } = info;
+    if (quiet) logger.debug(rest, 'http');
+    else logger.info(rest, 'http');
+  }
 });
 
 /** 终端显示宽度：CJK 字符占两列，直接用 padEnd 会错位。 */

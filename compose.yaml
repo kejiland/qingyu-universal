@@ -37,6 +37,13 @@ services:
       - "${APP_BIND:-127.0.0.1:8787}:8787"
     networks:
       - qingyu
+    # 限制容器日志大小：Docker 默认不轮转，小 VPS 上日志会把磁盘写满。
+    # 每容器最多 3×10MB，超出自动丢弃最旧的。
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   caddy:
     image: caddy:2-alpine
@@ -62,6 +69,11 @@ services:
         condition: service_healthy
     networks:
       - qingyu
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   qingyu-data:

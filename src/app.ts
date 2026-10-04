@@ -49,7 +49,7 @@ export interface AppDeps {
   validateResponses?: ResponseValidation;
   logger?: { warn: (message: string) => void; error: (message: string) => void };
   /** 请求日志注入点，便于测试时静音。 */
-  onRequest?: (info: { method: string; path: string; status: number; ms: number }) => void;
+  onRequest?: (info: { method: string; path: string; status: number; ms: number; quiet?: boolean }) => void;
 }
 
 export function createApp(deps: AppDeps): Hono {
@@ -61,7 +61,18 @@ export function createApp(deps: AppDeps): Hono {
     const started = performance.now();
     await next();
     const ms = Math.round((performance.now() - started) * 10) / 10;
-    deps.onRequest?.({ method: c.req.method, path: new URL(c.req.url).pathname, status: c.res.status, ms });
+    const path = new URL(c.req.url).pathname;
+    // 静态资源（css/js/图片/字体）不按 info 记录 —— 一次页面浏览就有几十个这种请求，
+    // 而 Docker 默认不限制日志大小，小 VPS 上会慢慢把磁盘写满。
+    // 它们降到 debug（默认不输出），需要排查时把 LOG_LEVEL 调成 debug 即可。
+    const isStatic = /\.(css|js|mjs|map|png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|mp3|m4a|ogg|opus|wav|flac)$/i.test(path);
+    deps.onRequest?.({
+      method: c.req.method,
+      path,
+      status: c.res.status,
+      ms,
+      quiet: isStatic && c.res.status < 400
+    });
   });
 
   /* ---------- 探针 ---------- */
