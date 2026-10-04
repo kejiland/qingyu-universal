@@ -68,9 +68,15 @@ ensure_curl() {
 # （例如 WSL 里 PATH 上有 Windows 侧的 docker，但守护进程连不上）
 docker_ready() {
   have docker || return 1
-  docker compose version >/dev/null 2>&1 || return 1
-  docker info >/dev/null 2>&1 || return 1
-  return 0
+  # 非 root 且不在 docker 组时，守护进程只能用 sudo 访问 —— 先试直接访问再试 sudo，
+  # 否则会被误判成「Docker 未安装」而重复走安装流程
+  if docker info >/dev/null 2>&1; then
+    docker compose version >/dev/null 2>&1
+    return $?
+  fi
+  have sudo || return 1
+  sudo docker info >/dev/null 2>&1 || return 1
+  sudo docker compose version >/dev/null 2>&1
 }
 
 # ---------- 参数解析 ----------
@@ -125,10 +131,41 @@ EOF
 # ---------- 运行环境检查 ----------
 need_root() {
   if [ "$(id -u)" -ne 0 ]; then
-    have sudo || die "需要 root 权限（或安装 sudo）"
+    have sudo || die "需要 root 权限（安装 Docker、写入 ${INSTALL_DIR}、绑定端口都需要）。请改用 root，或先安装 sudo。"
     SUDO="sudo"
+    # 立刻验证 sudo 是否可用，避免装到一半才卡在密码提示上
+    if ! $SUDO -n true 2>/dev/null; then
+      if [ -r /dev/tty ]; then
+        log "需要 sudo 权限，请输入密码："
+        $SUDO -v < /dev/tty || die "sudo 认证失败"
+      else
+        die "当前用户需要 sudo 密码，但此处无法交互输入。请改用 root 执行，或先执行 sudo -v。"
+      fi
+    fi
   else
     SUDO=""
+  fi
+}
+
+# 准备安装目录。
+# 用 sudo 创建后**把所有权交给当前用户**：这样后续复制源码、写 .env、
+# 读配置都不再需要提权，也不会出现 .env 变成 root 独有（脚本自己要读它）
+# 或「非 root 往 /opt 写入刷屏 permission denied」的问题。
+prepare_install_dir() {
+  if [ "$(id -u)" -ne 0 ]; then
+    $SUDO mkdir -p "$INSTALL_DIR"
+    $SUDO chown "$(id -u):$(id -g)" "$INSTALL_DIR" 2>/dev/null || true
+  else
+    mkdir -p "$INSTALL_DIR"
+  fi
+}
+
+# Docker 命令前缀：非 root 且当前用户访问不了守护进程（不在 docker 组）时用 sudo
+resolve_docker() {
+  if [ "$(id -u)" -ne 0 ] && ! docker info >/dev/null 2>&1; then
+    DOCKER="$SUDO docker"
+  else
+    DOCKER="docker"
   fi
 }
 
@@ -160,7 +197,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" >/dev/null 2>&1 && p
 SOURCE_ROOT="$(cd -- "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd || true)"
 
 fetch_source() {
-  mkdir -p "$INSTALL_DIR"
+  prepare_install_dir
   # 情况一：从仓库内运行（本地已有完整代码）→ 直接同步过去
   if [ -n "${SOURCE_ROOT:-}" ] && [ -f "$SOURCE_ROOT/compose.yaml" ] && [ -f "$SOURCE_ROOT/deploy/Dockerfile" ]; then
     log "使用本地代码：$SOURCE_ROOT"
@@ -572,14 +609,14 @@ preflight() {
 compose() {
   cd "$INSTALL_DIR"
   if [ -n "$IMAGE" ]; then export QINGYU_IMAGE="$IMAGE"; fi
-  docker compose "$@"
+  ${DOCKER:-docker} compose "$@"
 }
 
 wait_healthy() {
   log "等待服务就绪…"
   local i=0
   while [ $i -lt 60 ]; do
-    if docker compose ps --format json 2>/dev/null | grep -q '"Health":"healthy"'; then
+    if ${DOCKER:-docker} compose ps --format json 2>/dev/null | grep -q '"Health":"healthy"'; then
       log "服务已健康"
       return 0
     fi
@@ -643,6 +680,7 @@ summary() {
 # ---------- 各子命令 ----------
 cmd_install() {
   need_root
+  resolve_docker
   ensure_curl
   install_docker
   fetch_source
@@ -685,7 +723,7 @@ cmd_restore() {
   compose stop app
   local name
   name="$(basename "$file")"
-  docker cp "$file" qingyu-app:/data/restore-incoming.db
+  ${DOCKER:-docker} cp "$file" qingyu-app:/data/restore-incoming.db
   compose run --rm --no-deps app node dist/cli/restore.js /data/restore-incoming.db
   compose up -d app
   log "恢复完成"
