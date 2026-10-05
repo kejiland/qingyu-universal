@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 function paramsOf(url: string): URLSearchParams {
-  return new URL(url).searchParams;
+  return new URL(url, 'https://blog.example.com').searchParams;
 }
 
 describe('本地存储适配器', () => {
@@ -32,6 +32,11 @@ describe('本地存储适配器', () => {
     expect(params.get('ct')).toBe('image/png');
     expect(Number(params.get('exp'))).toBeGreaterThan(Math.floor(Date.now() / 1000));
     expect(params.get('sig')).toBeTruthy();
+  });
+
+  it('浏览器上传可生成同源相对地址', async () => {
+    const url = await storage.presignPut(env, 'media/c.png', 3600, 'media', 'image/png', true);
+    expect(url.startsWith('/api/local-upload?')).toBe(true);
   });
 
   it('verify 接受合法签名、拒绝篡改与过期', async () => {

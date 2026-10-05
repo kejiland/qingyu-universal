@@ -23,7 +23,7 @@ const b64url = (input: Uint8Array | string): string =>
 export interface LocalStorageOptions {
   uploadDir: string;
   secret: string;
-  /** 对外基地址：用于生成浏览器可直接 PUT 的绝对地址。 */
+  /** 服务端内部基地址；浏览器上传会改用同源相对地址。 */
   baseUrl: string;
 }
 
@@ -46,8 +46,8 @@ export class LocalStorage implements LocalStorageLike {
     return b64url(crypto.createHmac('sha256', this.#secret).update(payload).digest());
   }
 
-  /** 生成上传地址（与 S3 预签名 URL 同形：一个可直接 PUT 的绝对地址）。 */
-  async presignPut(_env: WorkerEnv, key: string, expiresSec?: number, _bucket?: string, contentType?: string): Promise<string> {
+  /** 生成上传地址；relative=true 时返回同源相对地址，供浏览器直传。 */
+  async presignPut(_env: WorkerEnv, key: string, expiresSec?: number, _bucket?: string, contentType?: string, relative = false): Promise<string> {
     const ttl = Number(expiresSec) || 3600;
     const expires = Math.floor(Date.now() / 1000) + ttl;
     const type = contentType ?? '';
@@ -57,7 +57,8 @@ export class LocalStorage implements LocalStorageLike {
       ct: type,
       sig: this.#sign('PUT', key, expires, type)
     });
-    return `${this.#baseUrl}/api/local-upload?${params.toString()}`;
+    const path = `/api/local-upload?${params.toString()}`;
+    return relative ? path : `${this.#baseUrl}${path}`;
   }
 
   /** 生成私有读取地址（备份对象使用，需签名）。 */

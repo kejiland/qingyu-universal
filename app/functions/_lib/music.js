@@ -72,9 +72,10 @@ async function signS3(env, method, path, canonicalQuery, canonicalHeaders, signe
  *  bucket 可选：缺省用 env.R2_BUCKET；媒体桶传入独立 bucket 名（如 qingyu-media）
  *  contentType 可选：把 Content-Type 纳入签名，防止上传后被改写为其他 MIME 类型。
  *  Content-Length 由浏览器自动生成，不能纳入签名；规范化差异会导致 R2 返回无 CORS 头的 403。 */
-export async function presignPut(env, key, expiresSec, bucket, contentType) {
+export async function presignPut(env, key, expiresSec, bucket, contentType, relative) {
   // [self-host] 未配置 S3 时，改由本地磁盘签名上传端点承接
-  if (env && env.LOCAL_STORAGE) return env.LOCAL_STORAGE.presignPut(env, key, expiresSec, bucket, contentType);
+  // [self-host] 本地模式返回相对上传地址，避免 SITE_URL 与浏览器来源不一致
+  if (env && env.LOCAL_STORAGE) return env.LOCAL_STORAGE.presignPut(env, key, expiresSec, bucket, contentType, relative);
   expiresSec = expiresSec || 3600;
   const b = bucket || env.R2_BUCKET;
   const p = await r2SignParams(env);
@@ -130,6 +131,19 @@ const MAX_SIZE = 30 * 1024 * 1024; // 单曲 ≤ 30MB
 function trimBase(value) {
   return String(value || '').replace(/\/+$/, '');
 }
+/** 本地模式返回同源相对公开地址，避免绑定某个访问域名。 */
+export function publicUrlForKey(env, key, base, request) {
+  const cleanKey = String(key || '').replace(/^\/+/, '');
+  if (env && env.LOCAL_STORAGE) {
+    if (request && request.url) {
+      try { return new URL('/' + cleanKey, request.url).toString(); } catch (e) {}
+    }
+    return '/' + cleanKey;
+  }
+  const trimmed = trimBase(base);
+  return trimmed ? trimmed + '/' + cleanKey : '';
+}
+
 function originOf(value) {
   try { return new URL(trimBase(value)).origin; } catch (e) { return ''; }
 }
@@ -196,7 +210,15 @@ export async function r2DeleteObject(env, key, bucket) {
  *  同时识别媒体桶与音乐桶公开域名，兼容切换上传目标前后的历史记录。 */
 export function resolveR2Object(publicUrl, env) {
   try {
-    const u = new URL(String(publicUrl || ''));
+    // [self-host] 本地模式从相对公开地址解析音乐对象
+    const raw = String(publicUrl || '');
+    const u = env && env.LOCAL_STORAGE
+      ? new URL(raw, 'http://local-storage.invalid')
+      : new URL(raw);
+    if (env && env.LOCAL_STORAGE) {
+      if (u.pathname.indexOf('/music/') !== 0) return null;
+      return { key: u.pathname.slice(1), bucket: musicStorage(env).bucket };
+    }
     if (u.pathname.indexOf('/music/') !== 0) return null;
     const key = u.pathname.slice(1);
     const candidates = [];
@@ -285,8 +307,8 @@ export async function handleMusicUploadUrl(request, env) {
   const key = 'music/' + randomId() + '.' + ext;
   const contentType = AUDIO_EXTS[ext];
   const storage = musicStorage(env);
-  const uploadUrl = await presignPut(env, key, 3600, storage.bucket, contentType);
-  const publicUrl = storage.publicBase ? storage.publicBase + '/' + key : '';
+  const uploadUrl = await presignPut(env, key, 3600, storage.bucket, contentType, true);
+  const publicUrl = publicUrlForKey(env, key, storage.publicBase, request);
 
   return json({ ok: true, uploadUrl, publicUrl, key, contentType, expiresIn: 3600 }, 200, request, env, { 'Cache-Control': 'no-store' });
 }

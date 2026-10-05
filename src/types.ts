@@ -59,7 +59,7 @@ export type MailSender = (to: string, subject: string, html: string) => Promise<
 
 /** 本地磁盘存储适配器（在对象存储未配置时接管上传/下载/删除）。 */
 export interface LocalStorageLike {
-  presignPut(env: WorkerEnv, key: string, expiresSec?: number, bucket?: string, contentType?: string): Promise<string>;
+  presignPut(env: WorkerEnv, key: string, expiresSec?: number, bucket?: string, contentType?: string, relative?: boolean): Promise<string>;
   presignGet(env: WorkerEnv, key: string, expiresSec?: number, bucket?: string): Promise<string>;
   deleteObject(env: WorkerEnv, key: string, bucket?: string): Promise<boolean>;
 }

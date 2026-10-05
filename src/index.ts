@@ -36,7 +36,7 @@ const assets = createAssets(config.publicDir);
 
 const storage =
   config.storageMode === 'local'
-    ? createLocalStorage({ uploadDir: config.uploadDir, secret: config.secret, baseUrl: config.siteUrl })
+    ? createLocalStorage({ uploadDir: config.uploadDir, secret: config.secret, baseUrl: `http://127.0.0.1:${config.port}` })
     : undefined;
 
 const ai = config.ai.baseUrl ? createAI(config.ai) : undefined;

@@ -44,9 +44,24 @@ function replaceLine(lines, match, ...replacement) {
 
 /* ---------- 对象存储：本地磁盘适配器 ---------- */
 edit('app/functions/_lib/music.js', (l) => {
-  insertAfter(l, 'export async function presignPut(env, key, expiresSec, bucket, contentType) {',
-    '  // [self-host] 未配置 S3 时，改由本地磁盘签名上传端点承接',
-    '  if (env && env.LOCAL_STORAGE) return env.LOCAL_STORAGE.presignPut(env, key, expiresSec, bucket, contentType);');
+  const putHook = '  if (env && env.LOCAL_STORAGE) return env.LOCAL_STORAGE.presignPut(env, key, expiresSec, bucket, contentType, relative);';
+  if (!l.includes(putHook)) {
+    const oldHook = '  if (env && env.LOCAL_STORAGE) return env.LOCAL_STORAGE.presignPut(env, key, expiresSec, bucket, contentType);';
+    const oldIndex = l.indexOf(oldHook);
+    if (oldIndex >= 0) {
+      l.splice(oldIndex, 1,
+        '  // [self-host] 本地模式返回相对上传地址，避免 SITE_URL 与浏览器来源不一致',
+        putHook);
+    } else {
+      const sigIndex = l.findIndex((line) => line.includes('export async function presignPut(env, key, expiresSec, bucket, contentType'));
+      if (sigIndex < 0) throw new Error('锚点缺失: music.js presignPut');
+      l.splice(sigIndex + 1, 0,
+        '  // [self-host] 本地模式返回相对上传地址，避免 SITE_URL 与浏览器来源不一致',
+        putHook);
+    }
+  }
+  replaceLine(l, 'export async function presignPut(env, key, expiresSec, bucket, contentType) {',
+    'export async function presignPut(env, key, expiresSec, bucket, contentType, relative) {');
   insertAfter(l, 'export async function presignGet(env, key, expiresSec, bucket) {',
     '  // [self-host] 备份对象读取同样支持本地磁盘',
     '  if (env && env.LOCAL_STORAGE) return env.LOCAL_STORAGE.presignGet(env, key, expiresSec, bucket);');
@@ -60,6 +75,82 @@ edit('app/functions/_lib/music.js', (l) => {
   replaceLine(l, 'return { endpoint, host, amzDate, dateStamp, scope };',
     '  return { endpoint, host, amzDate, dateStamp, scope, region };');
   replaceLine(l, "'auto', 's3');", "  const keyBytes = await signingKey(env.R2_SECRET_ACCESS_KEY, p.dateStamp, p.region || 'auto', 's3');");
+
+  if (!l.some((line) => line.includes('export function publicUrlForKey'))) {
+    const i = l.findIndex((line) => line.includes('function originOf(value) {'));
+    if (i < 0) throw new Error('锚点缺失: music.js originOf');
+    l.splice(i, 0,
+      '/** 本地模式返回同源相对公开地址，避免绑定某个访问域名。 */',
+      'export function publicUrlForKey(env, key, base, request) {',
+      "  const cleanKey = String(key || '').replace(/^\\/+/, '');",
+      "  if (env && env.LOCAL_STORAGE) {",
+      "    if (request && request.url) {",
+      "      try { return new URL('/' + cleanKey, request.url).toString(); } catch (e) {}",
+      '    }',
+      "    return '/' + cleanKey;",
+      '  }',
+      '  const trimmed = trimBase(base);',
+      "  return trimmed ? trimmed + '/' + cleanKey : '';",
+      '}',
+      '');
+  }
+  const localMusicKeyMarker = '    // [self-host] 本地模式从相对公开地址解析音乐对象';
+  if (!l.includes(localMusicKeyMarker)) {
+    const i = l.findIndex((line) => line.includes("const u = new URL(String(publicUrl || ''));"));
+    if (i < 0) throw new Error('锚点缺失: music.js resolveR2Object');
+    l.splice(i, 1,
+      localMusicKeyMarker,
+      "    const raw = String(publicUrl || '');",
+      '    const u = env && env.LOCAL_STORAGE',
+      "      ? new URL(raw, 'http://local-storage.invalid')",
+      '      : new URL(raw);',
+      '    if (env && env.LOCAL_STORAGE) {',
+      "      if (u.pathname.indexOf('/music/') !== 0) return null;",
+      "      return { key: u.pathname.slice(1), bucket: musicStorage(env).bucket };",
+      '    }');
+  }
+  replaceLine(l, '  const uploadUrl = await presignPut(env, key, 3600, storage.bucket, contentType);',
+    '  const uploadUrl = await presignPut(env, key, 3600, storage.bucket, contentType, true);');
+  replaceLine(l, "  const publicUrl = storage.publicBase ? storage.publicBase + '/' + key : '';",
+    '  const publicUrl = publicUrlForKey(env, key, storage.publicBase, request);');
+});
+
+/* ---------- 媒体：本地模式使用同源相对地址 ---------- */
+edit('app/functions/_lib/media.js', (l) => {
+  replaceLine(l, "import { presignPut, r2DeleteObject } from './music.js';",
+    "import { presignPut, publicUrlForKey, r2DeleteObject } from './music.js';");
+  const localMediaKeyMarker = '    // [self-host] 本地模式从相对公开地址提取对象 key';
+  if (!l.includes(localMediaKeyMarker)) {
+    const i = l.findIndex((line) => line.includes("const u = new URL(String(publicUrl || ''));"));
+    if (i < 0) throw new Error('锚点缺失: media.js extractMediaR2Key');
+    l.splice(i, 1,
+      localMediaKeyMarker,
+      "    const raw = String(publicUrl || '');",
+      '    const u = env && env.LOCAL_STORAGE',
+      "      ? new URL(raw, 'http://local-storage.invalid')",
+      '      : new URL(raw);',
+      '    if (env && env.LOCAL_STORAGE) {',
+      "      return u.pathname.indexOf('/media/') === 0 ? u.pathname.slice(1) : '';",
+      '    }');
+  }
+  replaceLine(l, '  const uploadUrl = await presignPut(env, key, 3600, env.R2_MEDIA_BUCKET, contentType);',
+    '  const uploadUrl = await presignPut(env, key, 3600, env.R2_MEDIA_BUCKET, contentType, true);');
+  replaceLine(l, "  const publicUrl = publicBase ? publicBase + '/' + key : '';",
+    '  const publicUrl = publicUrlForKey(env, key, env.R2_MEDIA_PUBLIC_BASE, request);');
+  replaceLine(l, "    thumbUploadUrl = await presignPut(env, thumbKey, 3600, env.R2_MEDIA_BUCKET, 'image/webp');",
+    "    thumbUploadUrl = await presignPut(env, thumbKey, 3600, env.R2_MEDIA_BUCKET, 'image/webp', true);");
+  replaceLine(l, "    thumbPublicUrl = publicBase ? publicBase + '/' + thumbKey : '';",
+    '    thumbPublicUrl = publicUrlForKey(env, thumbKey, env.R2_MEDIA_PUBLIC_BASE, request);');
+});
+
+/* ---------- OG 图片：本地模式使用同源相对地址 ---------- */
+edit('app/functions/_lib/og.js', (l) => {
+  replaceLine(l, "import { presignPut } from './music.js';",
+    "import { presignPut, publicUrlForKey } from './music.js';");
+  replaceLine(l, "  const uploadUrl = await presignPut(env, key, 900, s.bucket, 'image/png');",
+    "  const uploadUrl = await presignPut(env, key, 900, s.bucket, 'image/png', true);");
+  replaceLine(l, "  return json({ ok: true, uploadUrl, publicUrl: s.publicBase + '/' + key, key, expiresIn: 900 }, 200, request, env, { 'Cache-Control': 'no-store' });",
+    "  return json({ ok: true, uploadUrl, publicUrl: publicUrlForKey(env, key, s.publicBase, request), key, expiresIn: 900 }, 200, request, env, { 'Cache-Control': 'no-store' });");
 });
 
 /* ---------- 邮件：SMTP 适配器（保留 Resend） ---------- */

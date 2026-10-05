@@ -13,7 +13,7 @@
  * 降级：未配置 R2 媒体桶时，api/media/upload-url 返回 503；只读列表仍可用。
  * ============================================================ */
 import { getCorsHeaders, json, corsPreflight, isWriteAuthed, unauthorized, dbAll, dbRun } from './api-core.js';
-import { presignPut, r2DeleteObject } from './music.js';
+import { presignPut, publicUrlForKey, r2DeleteObject } from './music.js';
 
 const IMAGE_EXTS = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml', avif: 'image/avif', bmp: 'image/bmp', ico: 'image/x-icon' };
 const MAX_SIZE = 10 * 1024 * 1024; // 单图 ≤ 10MB
@@ -31,7 +31,14 @@ function randomId() {
  *  避免外链 `https://evil.example/media/x` 被当作桶内对象去签删除请求。 */
 export function extractMediaR2Key(publicUrl, env) {
   try {
-    const u = new URL(String(publicUrl || ''));
+    // [self-host] 本地模式从相对公开地址提取对象 key
+    const raw = String(publicUrl || '');
+    const u = env && env.LOCAL_STORAGE
+      ? new URL(raw, 'http://local-storage.invalid')
+      : new URL(raw);
+    if (env && env.LOCAL_STORAGE) {
+      return u.pathname.indexOf('/media/') === 0 ? u.pathname.slice(1) : '';
+    }
     const base = String((env && env.R2_MEDIA_PUBLIC_BASE) || '').replace(/\/+$/, '');
     if (base) {
       let baseOrigin = '';
@@ -69,14 +76,14 @@ export async function handleMediaUploadUrl(request, env) {
   const base = 'media/' + randomId();
   const key = base + '.' + ext;
   const contentType = IMAGE_EXTS[ext];
-  const uploadUrl = await presignPut(env, key, 3600, env.R2_MEDIA_BUCKET, contentType);
+  const uploadUrl = await presignPut(env, key, 3600, env.R2_MEDIA_BUCKET, contentType, true);
   const publicBase = String(env.R2_MEDIA_PUBLIC_BASE || '').replace(/\/+$/, '');
-  const publicUrl = publicBase ? publicBase + '/' + key : '';
+  const publicUrl = publicUrlForKey(env, key, env.R2_MEDIA_PUBLIC_BASE, request);
   let thumbKey = '', thumbUploadUrl = '', thumbPublicUrl = '';
   if (makeThumb) {
     thumbKey = base + '-thumb.webp';
-    thumbUploadUrl = await presignPut(env, thumbKey, 3600, env.R2_MEDIA_BUCKET, 'image/webp');
-    thumbPublicUrl = publicBase ? publicBase + '/' + thumbKey : '';
+    thumbUploadUrl = await presignPut(env, thumbKey, 3600, env.R2_MEDIA_BUCKET, 'image/webp', true);
+    thumbPublicUrl = publicUrlForKey(env, thumbKey, env.R2_MEDIA_PUBLIC_BASE, request);
   }
 
   return json({ ok: true, uploadUrl, publicUrl, thumbUploadUrl, thumbPublicUrl, key, thumbKey, contentType, expiresIn: 3600 }, 200, request, env, { 'Cache-Control': 'no-store' });

@@ -156,14 +156,15 @@ if (signed.status === 200 && signed.data.uploadUrl) {
     '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6360000002000100ffff03000006000557bfabd40000000049454e44ae426082',
     'hex'
   );
-  const put = await fetch(signed.data.uploadUrl, {
+  const uploadUrl = new URL(signed.data.uploadUrl, BASE).toString();
+  const put = await fetch(uploadUrl, {
     method: 'PUT',
     headers: { 'Content-Type': 'image/png' },
     body: png
   });
   ok('媒体直传上传成功', put.status === 200 || put.status === 204, `status=${put.status}`);
 
-  const fetched = await fetch(signed.data.publicUrl ?? '');
+  const fetched = await fetch(new URL(signed.data.publicUrl ?? '', BASE));
   ok(
     '上传后的媒体可公开访问',
     fetched.status === 200 && Number(fetched.headers.get('content-length') ?? 0) === png.length,

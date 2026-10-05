@@ -3,7 +3,7 @@
  * 复用媒体桶；未配置媒体桶时回退音乐桶。图片由浏览器 Canvas 生成。
  * ============================================================ */
 import { json, corsPreflight, isWriteAuthed, unauthorized } from './api-core.js';
-import { presignPut } from './music.js';
+import { presignPut, publicUrlForKey } from './music.js';
 
 function storage(env) {
   const mediaBucket = String((env && env.R2_MEDIA_BUCKET) || '').trim();
@@ -29,6 +29,6 @@ export async function handleOgUploadUrl(request, env) {
   const safe = postId.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100) || 'post';
   const key = 'og/' + safe + '-' + Date.now().toString(36) + '.png';
   const s = storage(env);
-  const uploadUrl = await presignPut(env, key, 900, s.bucket, 'image/png');
-  return json({ ok: true, uploadUrl, publicUrl: s.publicBase + '/' + key, key, expiresIn: 900 }, 200, request, env, { 'Cache-Control': 'no-store' });
+  const uploadUrl = await presignPut(env, key, 900, s.bucket, 'image/png', true);
+  return json({ ok: true, uploadUrl, publicUrl: publicUrlForKey(env, key, s.publicBase, request), key, expiresIn: 900 }, 200, request, env, { 'Cache-Control': 'no-store' });
 }
