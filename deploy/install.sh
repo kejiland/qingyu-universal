@@ -751,16 +751,21 @@ cmd_install() {
 
 cmd_upgrade() {
   need_root
+  resolve_docker
   [ -d "$INSTALL_DIR" ] || die "未找到安装目录：$INSTALL_DIR"
   update_source
   resolve_mode
   # 先备份，再升级
   cmd_backup || warn "升级前备份失败，继续升级"
-  log "拉取镜像 / 重建容器…"
+  # 注入构建版本（git 短 SHA），让 /healthz 能回答「升级到底生效没有」
+  BUILD_REVISION="$(resolve_revision)"
+  [ -n "$BUILD_REVISION" ] || BUILD_REVISION=unknown
+  export BUILD_REVISION
+  log "重建容器…（版本 $BUILD_REVISION）"
   compose pull --ignore-pull-failures 2>/dev/null || true
   compose up -d --build
   wait_healthy
-  log "升级完成"
+  log "升级完成（版本 $BUILD_REVISION）"
 }
 
 cmd_backup() {

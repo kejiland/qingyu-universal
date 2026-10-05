@@ -241,6 +241,46 @@ Windows（Docker Desktop）：
 
 部署完成后打开 `https://blog.example.com/admin`，填入脚本输出的 **初始化密钥** 设置管理员密码。
 
+### 更新到新版本
+
+**一条命令，永远有效**（从任何目录执行都行）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh \
+  | bash -s -- upgrade
+```
+
+它先取最新的安装脚本、再取最新的代码，因此**不会出现「用旧脚本更新」的死循环**。
+升级前会自动备份数据库，`.env` 与 `data/` 不受影响。
+
+升级完成后验证：
+
+```bash
+curl -s http://localhost:8080/healthz   # 端口换成你的
+# → {"version":"0.3.0","revision":"374a49d", ...}
+```
+
+`revision` 是构建时的 commit 短 SHA —— 有它才能确认升级真的生效了。
+
+#### 开发时：直接同步本地代码
+
+如果你在本地改了代码、想立刻同步到测试环境，**不需要先提交或推送**，
+直接从源码目录执行 upgrade 即可 —— 脚本会把本地代码复制过去而不是下载：
+
+```bash
+cd ~/qingyu-universal          # 你的源码目录
+./deploy/install.sh upgrade    # 默认同步到 /opt/qingyu-universal
+# 或指定目标：./deploy/install.sh upgrade --dir /opt/qingyu-universal
+```
+
+三种取码路径由脚本自动判断：
+
+| 你的情况 | 脚本的行为 |
+| --- | --- |
+| 从源码目录执行 | 复制本地代码（开发循环） |
+| 安装目录是 git 仓库 | `git pull --ff-only` |
+| 压缩包安装（curl 装出来的） | 下载 GitHub 最新代码包 |
+
 ### 常用运维命令
 
 ```bash
