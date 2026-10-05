@@ -131,15 +131,10 @@ const MAX_SIZE = 30 * 1024 * 1024; // 单曲 ≤ 30MB
 function trimBase(value) {
   return String(value || '').replace(/\/+$/, '');
 }
-/** 本地模式返回同源相对公开地址，避免绑定某个访问域名。 */
+/** 本地模式返回同源相对公开地址，不绑定访问域名或 WSL 网关。 */
 export function publicUrlForKey(env, key, base, request) {
   const cleanKey = String(key || '').replace(/^\/+/, '');
-  if (env && env.LOCAL_STORAGE) {
-    if (request && request.url) {
-      try { return new URL('/' + cleanKey, request.url).toString(); } catch (e) {}
-    }
-    return '/' + cleanKey;
-  }
+  if (env && env.LOCAL_STORAGE) return '/' + cleanKey;
   const trimmed = trimBase(base);
   return trimmed ? trimmed + '/' + cleanKey : '';
 }

@@ -13,6 +13,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type { LocalStorageLike, WorkerEnv } from '../types.js';
+import type { D1Database } from './d1.js';
 
 /** 允许写入/读取的对象前缀——白名单之外一律拒绝，避免任意路径写入。 */
 const ALLOWED_PREFIXES = ['media/', 'music/', 'backups/', 'og/'] as const;
@@ -118,6 +119,67 @@ export class LocalStorage implements LocalStorageLike {
   }
 }
 
+const LOCAL_OBJECT_PATH = /^\/(media|music|og)\//;
+
+function isLocalOrSiteHost(hostname: string, siteUrl: string): boolean {
+  const host = hostname.toLowerCase();
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]' || host === '0.0.0.0') {
+    return true;
+  }
+  if (/^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)) {
+    return true;
+  }
+  try {
+    return new URL(siteUrl).hostname.toLowerCase() === host;
+  } catch {
+    return false;
+  }
+}
+
+/** 把历史遗留的绝对本地上传地址改回根相对地址，避免绑定 WSL 网关或临时 IP。 */
+export function normalizeLocalObjectUrls(db: D1Database, siteUrl: string): number {
+  const tables = [
+    { table: 'media', columns: ['url', 'thumb_url'] },
+    { table: 'music', columns: ['url', 'cover'] },
+    { table: 'posts', columns: ['cover', 'og_image'] }
+  ];
+  let changedRows = 0;
+
+  for (const { table, columns } of tables) {
+    let rows: Array<Record<string, unknown>>;
+    try {
+      rows = db.native.prepare(`SELECT id, ${columns.join(',')} FROM ${table}`).all() as unknown as Array<Record<string, unknown>>;
+    } catch {
+      continue;
+    }
+
+    for (const row of rows) {
+      const updates: Array<[string, string]> = [];
+      for (const column of columns) {
+        const value = row[column];
+        if (typeof value !== 'string' || !value || value.startsWith('/')) continue;
+        let parsed: URL;
+        try {
+          parsed = new URL(value);
+        } catch {
+          continue;
+        }
+        if (!LOCAL_OBJECT_PATH.test(parsed.pathname)) continue;
+        if (!isLocalOrSiteHost(parsed.hostname, siteUrl)) continue;
+        updates.push([column, parsed.pathname + parsed.search + parsed.hash]);
+      }
+      if (!updates.length) continue;
+      const assignments = updates.map(([column]) => `${column} = ?`).join(', ');
+      db.native.prepare(`UPDATE ${table} SET ${assignments} WHERE id = ?`).run(
+        ...updates.map(([, value]) => value),
+        String(row.id)
+      );
+      changedRows += 1;
+    }
+  }
+
+  return changedRows;
+}
 export function createLocalStorage(options: LocalStorageOptions): LocalStorage {
   return new LocalStorage(options);
 }

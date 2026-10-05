@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createLocalStorage, type LocalStorage } from '../src/bindings/storage.js';
+import { createLocalStorage, normalizeLocalObjectUrls, type LocalStorage } from '../src/bindings/storage.js';
+import { createD1 } from '../src/bindings/d1.js';
 import type { WorkerEnv } from '../src/types.js';
 
 let dir: string;
@@ -83,5 +84,39 @@ describe('本地存储适配器', () => {
     expect(await storage.deleteObject(env, 'media/gone.png')).toBe(true);
     expect(fs.existsSync(target!)).toBe(false);
     expect(await storage.deleteObject(env, '../outside.txt')).toBe(false);
+  });
+
+  it('normalizeLocalObjectUrls 修正历史绝对地址，保留相对地址和外链', () => {
+    const db = createD1(path.join(dir, 'urls.db'));
+    try {
+      db.native.exec(`
+        CREATE TABLE media (id TEXT PRIMARY KEY, url TEXT, thumb_url TEXT);
+        CREATE TABLE music (id TEXT PRIMARY KEY, url TEXT, cover TEXT);
+        CREATE TABLE posts (id TEXT PRIMARY KEY, cover TEXT, og_image TEXT);
+      `);
+      db.native.prepare('INSERT INTO media (id,url,thumb_url) VALUES (?,?,?)')
+        .run('m1', 'http://172.27.32.1:8080/media/a.svg', 'http://172.27.32.1:8080/media/a-thumb.webp');
+      db.native.prepare('INSERT INTO music (id,url,cover) VALUES (?,?,?)')
+        .run('s1', 'http://127.0.0.1:8787/music/a.mp3', 'https://cdn.example.com/music/cover.jpg');
+      db.native.prepare('INSERT INTO posts (id,cover,og_image) VALUES (?,?,?)')
+        .run('p1', 'http://192.168.1.2:8080/media/cover.png', 'https://cdn.example.com/og.png');
+
+      const changed = normalizeLocalObjectUrls(db, 'http://218.33.111.11:8080');
+      expect(changed).toBe(3);
+      expect(db.native.prepare('SELECT url, thumb_url FROM media WHERE id = ?').get('m1')).toEqual({
+        url: '/media/a.svg',
+        thumb_url: '/media/a-thumb.webp'
+      });
+      expect(db.native.prepare('SELECT url, cover FROM music WHERE id = ?').get('s1')).toEqual({
+        url: '/music/a.mp3',
+        cover: 'https://cdn.example.com/music/cover.jpg'
+      });
+      expect(db.native.prepare('SELECT cover, og_image FROM posts WHERE id = ?').get('p1')).toEqual({
+        cover: '/media/cover.png',
+        og_image: 'https://cdn.example.com/og.png'
+      });
+    } finally {
+      db.close();
+    }
   });
 });

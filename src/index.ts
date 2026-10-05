@@ -12,7 +12,7 @@ import { loadConfig, describeConfig } from './config.js';
 import { createD1 } from './bindings/d1.js';
 import { createKV } from './bindings/kv.js';
 import { createAssets } from './bindings/assets.js';
-import { createLocalStorage } from './bindings/storage.js';
+import { createLocalStorage, normalizeLocalObjectUrls } from './bindings/storage.js';
 import { createAI } from './bindings/ai.js';
 import { createSmtpSender, type SmtpSender } from './bindings/mail.js';
 import { buildWorkerEnv } from './bindings/worker-env.js';
@@ -66,6 +66,10 @@ const env: WorkerEnv = buildWorkerEnv(config, bindings);
 
 /* ---------- 数据库结构 ---------- */
 const migration = runMigrations(db, config.migrationsDir, (message) => logger.info(message));
+if (config.storageMode === 'local') {
+  const normalized = normalizeLocalObjectUrls(db, config.siteUrl);
+  if (normalized > 0) logger.info(`[storage] 已修正 ${normalized} 行本地对象地址`);
+}
 
 /* ---------- 上游应用（Cloudflare Workers 形态） ---------- */
 const workerEntry = pathToFileURL(path.join(config.appDir, 'worker.js')).href;
