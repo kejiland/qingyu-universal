@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "轻语博客 API",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "description": "契约来自 src/api/routes/*.ts 的路由注册表：同一份 zod schema 同时驱动运行时校验、本文档与客户端类型生成。未列出的 /api/* 路径仍由上游提供，行为与 Cloudflare 版一致。"
   },
   "servers": [
@@ -43,6 +43,21 @@
     },
     {
       "name": "统计"
+    },
+    {
+      "name": "站点"
+    },
+    {
+      "name": "Feed"
+    },
+    {
+      "name": "SEO"
+    },
+    {
+      "name": "AI"
+    },
+    {
+      "name": "音乐"
     },
     {
       "name": "系统"
@@ -2691,7 +2706,7 @@
                 "properties": {
                   "url": {
                     "type": "string",
-                    "pattern": "^https?:\\/\\/"
+                    "pattern": "^(?:https?:\\/\\/|\\/(?:media|music|og)\\/)"
                   },
                   "name": {
                     "type": "string"
@@ -3441,6 +3456,46 @@
             "bearerAuth": []
           }
         ]
+      },
+      "post": {
+        "tags": [
+          "订阅"
+        ],
+        "summary": "新增订阅者",
+        "operationId": "postApiAdminSubscribers",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "201": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/admin/subscribers/{id}": {
@@ -3677,6 +3732,1068 @@
           }
         },
         "description": "按来源/设备/国家/平台/厂商聚合的访问量，含各自总量。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/popular": {
+      "get": {
+        "tags": [
+          "文章"
+        ],
+        "summary": "热门文章",
+        "operationId": "getApiPopular",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/subscribe": {
+      "post": {
+        "tags": [
+          "订阅"
+        ],
+        "summary": "订阅邮件",
+        "operationId": "postApiSubscribe",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "201": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/subscribe/confirm": {
+      "get": {
+        "tags": [
+          "订阅"
+        ],
+        "summary": "确认订阅",
+        "operationId": "getApiSubscribeConfirm",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/subscribe/unsubscribe": {
+      "get": {
+        "tags": [
+          "订阅"
+        ],
+        "summary": "取消订阅",
+        "operationId": "getApiSubscribeUnsubscribe",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/errors": {
+      "post": {
+        "tags": [
+          "日志"
+        ],
+        "summary": "上报前端错误",
+        "operationId": "postApiErrors",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "201": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webmention": {
+      "post": {
+        "tags": [
+          "Webmention"
+        ],
+        "summary": "接收 Webmention",
+        "operationId": "postApiWebmention",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "201": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Webmention"
+        ],
+        "summary": "Webmention 列表",
+        "operationId": "getApiWebmention",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/preview": {
+      "get": {
+        "tags": [
+          "文章"
+        ],
+        "summary": "预览受保护文章",
+        "operationId": "getApiPreview",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/comments/{id}/like": {
+      "post": {
+        "tags": [
+          "评论"
+        ],
+        "summary": "评论点赞",
+        "operationId": "postApiCommentsByIdLike",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/posts/{id}/comments/{cid}": {
+      "delete": {
+        "tags": [
+          "评论"
+        ],
+        "summary": "删除文章评论",
+        "operationId": "deleteApiPostsByIdCommentsByCid",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/posts/{id}/relations": {
+      "get": {
+        "tags": [
+          "文章"
+        ],
+        "summary": "文章关联",
+        "operationId": "getApiPostsByIdRelations",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/posts/{id}/stats": {
+      "post": {
+        "tags": [
+          "统计"
+        ],
+        "summary": "文章统计上报",
+        "operationId": "postApiPostsByIdStats",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/posts/{id}/revisions": {
+      "get": {
+        "tags": [
+          "文章"
+        ],
+        "summary": "文章修订列表",
+        "operationId": "getApiPostsByIdRevisions",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/posts/{id}/revisions/{rid}": {
+      "get": {
+        "tags": [
+          "文章"
+        ],
+        "summary": "文章修订详情",
+        "operationId": "getApiPostsByIdRevisionsByRid",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/posts/{id}/revisions/{rid}/restore": {
+      "post": {
+        "tags": [
+          "文章"
+        ],
+        "summary": "恢复文章修订",
+        "operationId": "postApiPostsByIdRevisionsByRidRestore",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "201": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/site-files": {
+      "get": {
+        "tags": [
+          "站点"
+        ],
+        "summary": "站点文件列表",
+        "operationId": "getApiSite-files",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "站点"
+        ],
+        "summary": "保存站点文件",
+        "operationId": "putApiSite-files",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/site-files/{name}": {
+      "get": {
+        "tags": [
+          "站点"
+        ],
+        "summary": "读取站点文件",
+        "operationId": "getApiSite-filesByName",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "站点"
+        ],
+        "summary": "写入站点文件",
+        "operationId": "putApiSite-filesByName",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "站点"
+        ],
+        "summary": "删除站点文件",
+        "operationId": "deleteApiSite-filesByName",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/feed.xml": {
+      "get": {
+        "tags": [
+          "Feed"
+        ],
+        "summary": "RSS Feed",
+        "operationId": "getApiFeed.xml",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sitemap.xml": {
+      "get": {
+        "tags": [
+          "SEO"
+        ],
+        "summary": "Sitemap",
+        "operationId": "getApiSitemap.xml",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/feed.xml": {
+      "get": {
+        "tags": [
+          "Feed"
+        ],
+        "summary": "RSS Feed（兼容路径）",
+        "operationId": "getFeed.xml",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sitemap.xml": {
+      "get": {
+        "tags": [
+          "SEO"
+        ],
+        "summary": "Sitemap（兼容路径）",
+        "operationId": "getSitemap.xml",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ai/ping": {
+      "get": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "AI 可用性检查",
+        "operationId": "getApiAiPing",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "AI 可用性检查",
+        "operationId": "postApiAiPing",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ai/summary": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "AI 摘要",
+        "operationId": "postApiAiSummary",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "201": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ai/assist": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "AI 写作助手",
+        "operationId": "postApiAiAssist",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "201": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/ai/comments": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "AI 评论分析",
+        "operationId": "postApiAiComments",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "201": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/music/upload-url": {
+      "post": {
+        "tags": [
+          "音乐"
+        ],
+        "summary": "音乐上传签名",
+        "operationId": "postApiMusicUpload-url",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/music": {
+      "get": {
+        "tags": [
+          "音乐"
+        ],
+        "summary": "音乐列表",
+        "operationId": "getApiMusic",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "音乐"
+        ],
+        "summary": "登记音乐",
+        "operationId": "postApiMusic",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "201": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/music/{id}": {
+      "put": {
+        "tags": [
+          "音乐"
+        ],
+        "summary": "更新音乐",
+        "operationId": "putApiMusicById",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "音乐"
+        ],
+        "summary": "删除音乐",
+        "operationId": "deleteApiMusicById",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/og-upload-url": {
+      "post": {
+        "tags": [
+          "媒体"
+        ],
+        "summary": "分享图上传签名",
+        "operationId": "postApiAdminOg-upload-url",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "201": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/post-analytics": {
+      "get": {
+        "tags": [
+          "统计"
+        ],
+        "summary": "文章分析",
+        "operationId": "getApiAdminPost-analytics",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/preview-link": {
+      "post": {
+        "tags": [
+          "文章"
+        ],
+        "summary": "生成预览链接",
+        "operationId": "postApiAdminPreview-link",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "201": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/health": {
+      "get": {
+        "tags": [
+          "系统"
+        ],
+        "summary": "后台健康检查",
+        "operationId": "getApiAdminHealth",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/tags": {
+      "get": {
+        "tags": [
+          "文章"
+        ],
+        "summary": "标签列表",
+        "operationId": "getApiAdminTags",
+        "responses": {
+          "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
         "security": [
           {
             "bearerAuth": []

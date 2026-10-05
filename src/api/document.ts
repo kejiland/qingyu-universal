@@ -8,11 +8,12 @@ import { VERSION } from '../config.js';
 import { buildOpenApiDocument } from './openapi.js';
 import { adminRoutes } from './routes/admin.js';
 import { postRoutes } from './routes/posts.js';
+import { miscRoutes } from './routes/misc.js';
 
 export const API_TITLE = '轻语博客 API';
 
 export function createApiDocument(serverUrl: string): Record<string, unknown> {
-  return buildOpenApiDocument([...postRoutes, ...adminRoutes], {
+  return buildOpenApiDocument([...postRoutes, ...adminRoutes, ...miscRoutes], {
     title: API_TITLE,
     version: VERSION,
     description:
