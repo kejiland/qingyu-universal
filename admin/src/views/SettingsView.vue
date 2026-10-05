@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { Save, Loader2, KeyRound, ExternalLink, Info } from '@lucide/vue';
+import { Save, Loader2, KeyRound, ArrowRight } from '@lucide/vue';
 import { api, ApiError } from '../lib/api';
 import { toast } from '../lib/toast';
 
@@ -40,7 +40,8 @@ function safeParse(raw: unknown): Record<string, unknown> {
 async function saveSite(): Promise<void> {
   saving.value = true;
   try {
-    await api.saveSettings({ site: { name: site.value.name.trim(), desc: site.value.desc.trim(), avatar: site.value.avatar.trim() } });
+    const payload = { name: site.value.name.trim(), desc: site.value.desc.trim(), avatar: site.value.avatar.trim() };
+    await api.saveSettings({ site: payload, site_info: payload });
     toast.success('站点信息已保存（标题、分享卡片会立即更新）');
   } catch (e) {
     toast.error(e instanceof ApiError ? e.message : '保存失败');
@@ -77,7 +78,7 @@ async function changePassword(): Promise<void> {
 <template>
   <div v-if="loading" class="card h-64 shimmer" />
 
-  <div v-else class="grid gap-6 lg:grid-cols-[1fr_320px] items-start">
+  <div v-else class="grid gap-6 max-w-3xl items-start">
     <div class="space-y-6">
       <!-- 站点信息 -->
       <section class="card p-5">
@@ -137,18 +138,16 @@ async function changePassword(): Promise<void> {
       </section>
     </div>
 
-    <!-- 侧栏：其余设置仍在旧版 -->
-    <aside class="card p-5 lg:sticky lg:top-24">
-      <div class="flex items-center gap-2 text-[13px] font-semibold mb-3">
-        <Info :size="15" class="text-accent" /> 其余设置
-      </div>
+    <!-- 高级设置入口 -->
+    <aside class="card p-5">
+      <h2 class="text-[15px] font-semibold mb-1">高级设置</h2>
       <p class="text-[12.5px] text-ink-muted leading-relaxed mb-4">
-        导航菜单、页脚、功能开关、广告位、敏感词等仍在新版界面迁移中，
-        当前可在旧版后台配置——数据与新版完全共用。
+        导航菜单、页脚、公告、作者资料、功能开关、评论规则、友链与广告位已迁移到新版。
       </p>
-      <a href="/admin-legacy" class="btn btn-secondary w-full">
-        <ExternalLink :size="15" /> 前往旧版设置
-      </a>
+      <RouterLink to="/settings/advanced" class="btn btn-primary w-full">
+        <span>打开高级设置</span>
+        <ArrowRight :size="15" />
+      </RouterLink>
     </aside>
   </div>
 </template>

@@ -46,6 +46,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '设置' }
   },
   {
+    path: '/settings/advanced',
+    name: 'settings-advanced',
+    component: () => import('./views/AdvancedSettingsView.vue'),
+    meta: { title: '高级设置' }
+  },
+  {
     path: '/backups',
     name: 'backups',
     component: () => import('./views/BackupsView.vue'),
@@ -75,7 +81,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('./views/StatsView.vue'),
     meta: { title: '统计' }
   },
-  // 仍未迁移的模块（订阅者 / 统计 / Webmention）：占位页 + 跳转旧版，功能不丢失
+  // 未登记的管理路径显示占位页
   {
     path: '/:pathMatch(.*)*',
     name: 'placeholder',

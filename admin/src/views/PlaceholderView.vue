@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
-import { Construction, ExternalLink } from '@lucide/vue';
+import { Construction } from '@lucide/vue';
 
 const route = useRoute();
 
@@ -15,7 +15,7 @@ const sections: Record<string, { title: string; desc: string }> = {
 };
 
 const info = computed(
-  () => sections[route.path] ?? { title: (route.meta.title as string) ?? '该模块', desc: '这个模块尚未迁移到新版界面。' }
+  () => sections[route.path] ?? { title: (route.meta.title as string) ?? '页面不存在', desc: '这个管理路径不存在，或已经被移动到其他位置。' }
 );
 </script>
 
@@ -28,17 +28,8 @@ const info = computed(
     <h2 class="text-[17px] font-semibold">{{ info.title }}</h2>
     <p class="text-[13.5px] text-ink-muted mt-2 max-w-[420px] leading-relaxed">{{ info.desc }}</p>
 
-    <p class="text-[13px] text-ink-soft mt-5 max-w-[440px] leading-relaxed">
-      新版后台正在逐模块迁移。为避免功能中断，<strong>该模块暂时仍在旧版后台可用</strong>，
-      数据完全一致。
-    </p>
-
     <div class="flex items-center gap-2 mt-6">
-      <a href="/admin-legacy" class="btn btn-primary">
-        <ExternalLink :size="16" />
-        前往旧版后台
-      </a>
-      <RouterLink to="/posts" class="btn btn-secondary">返回文章</RouterLink>
+      <RouterLink to="/posts" class="btn btn-primary">返回文章</RouterLink>
     </div>
   </div>
 </template>

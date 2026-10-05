@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { Check, Clock, Trash2, MessageSquare, Loader2, Inbox, ExternalLink } from '@lucide/vue';
+import { Check, Clock, Trash2, MessageSquare, Loader2, Inbox } from '@lucide/vue';
 import { api, ApiError, type CommentAdminItem } from '../lib/api';
 import { formatDateTime } from '../lib/format';
 import { toast } from '../lib/toast';
@@ -106,9 +106,6 @@ onMounted(load);
           {{ tab[1] }} <span class="ml-1 tabular-nums text-ink-muted">{{ tab[2] }}</span>
         </button>
       </div>
-      <a href="/admin-legacy" class="btn btn-ghost btn-sm ml-auto">
-        <ExternalLink :size="14" /> 旧版评论管理
-      </a>
     </div>
 
     <!-- 批量操作条 -->

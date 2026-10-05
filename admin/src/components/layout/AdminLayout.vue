@@ -3,7 +3,7 @@ import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   FileText, Image as ImageIcon, MessageSquare, Settings, Users, DatabaseBackup,
-  ScrollText, LogOut, Moon, Sun, Menu, X, ExternalLink, PenLine, AtSign, BarChart3
+  ScrollText, LogOut, Moon, Sun, Menu, X, PenLine, AtSign, BarChart3
 } from '@lucide/vue';
 import { api, session } from '../../lib/api';
 import { toast } from '../../lib/toast';
@@ -133,14 +133,6 @@ async function logout(): Promise<void> {
 
       <!-- 底部操作 -->
       <div class="shrink-0 border-t border-line p-3 space-y-1">
-        <a
-          href="/admin-legacy"
-          class="flex items-center gap-2.5 h-9 px-2.5 rounded-[9px] text-sm text-ink-soft
-                 hover:bg-surface-2 hover:text-ink transition-colors"
-        >
-          <ExternalLink :size="17" />
-          <span>旧版后台</span>
-        </a>
         <button
           class="w-full flex items-center gap-2.5 h-9 px-2.5 rounded-[9px] text-sm text-ink-soft
                  hover:bg-surface-2 hover:text-ink transition-colors disabled:opacity-50"
