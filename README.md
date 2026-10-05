@@ -239,7 +239,7 @@ Windows（Docker Desktop）：
 .\deploy\install.ps1 -Domain blog.example.com
 ```
 
-部署完成后打开 `https://blog.example.com/admin`，填入脚本输出的 **初始化密钥** 设置管理员密码。
+部署完成后打开 `https://blog.example.com/admin`，填入脚本输出的 **初始化密钥** 设置管理员密码。以后随时可用 `./deploy/install.sh info` 找回访问地址、初始化密钥、版本和运行状态。
 
 ### 更新到新版本
 
@@ -289,6 +289,7 @@ cd ~/qingyu-universal          # 你的源码目录
 ./deploy/install.sh restore <快照>    # 从快照恢复
 ./deploy/install.sh logs             # 查看日志
 ./deploy/install.sh status           # 容器与健康状态
+./deploy/install.sh info             # 查看访问地址、初始化密钥、版本、文章数等部署信息
 ./deploy/install.sh uninstall        # 停止并删除容器（数据卷保留）
 ```
 

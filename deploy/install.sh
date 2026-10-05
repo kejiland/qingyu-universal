@@ -9,7 +9,7 @@
 #     curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh | bash -s -- --domain blog.example.com
 #
 # 常用子命令：
-#     install（默认） | upgrade | backup | restore <file> | logs | status | uninstall
+#     install（默认） | upgrade | backup | restore <file> | logs | status | info | uninstall
 #
 # 设计原则：可重复执行；已存在的 .env 与数据库绝不覆盖。
 # ============================================================
@@ -84,7 +84,7 @@ COMMAND="install"
 ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    install|upgrade|backup|restore|logs|status|uninstall|help) COMMAND="$1" ;;
+    install|upgrade|backup|restore|logs|status|info|uninstall|help) COMMAND="$1" ;;
     --domain)   DOMAIN="${2:-}"; shift ;;
     --email)    EMAIL="${2:-}"; shift ;;
     --dir)      INSTALL_DIR="${2:-}"; shift ;;
@@ -110,6 +110,7 @@ usage() {
   restore <快照文件>       从快照恢复（请先 docker compose stop app）
   logs                    查看应用日志
   status                  查看容器与健康状态
+  info                    查看部署信息（访问地址、初始化密钥、版本、文章数…）
   uninstall               停止并删除容器（数据卷保留，需手动删除）
 
 选项：
@@ -707,6 +708,7 @@ summary() {
   echo "      docker compose -f ${INSTALL_DIR}/compose.yaml logs -f app"
   echo "      ${INSTALL_DIR}/deploy/install.sh upgrade"
   echo "      ${INSTALL_DIR}/deploy/install.sh backup"
+  echo "      ${INSTALL_DIR}/deploy/install.sh info      # 随时查看访问地址、初始化密钥和版本"
   echo
   if [ "$(env_value COMPOSE_PROFILES)" = "domain" ]; then
     echo "    已启用自动 HTTPS。证书首次签发通常需要十几秒，可通过 deploy/install.sh logs 查看。"
@@ -788,6 +790,126 @@ cmd_restore() {
 }
 
 cmd_logs()     { compose logs -f app; }
+# 把秒数格式化成「2h 13m」这样的人类可读形式
+human_uptime() {
+  local s="${1:-0}"
+  local d=$((s / 86400)) h=$(((s % 86400) / 3600)) m=$(((s % 3600) / 60))
+  if [ "$d" -gt 0 ]; then printf '%dd %dh' "$d" "$h"
+  elif [ "$h" -gt 0 ]; then printf '%dh %dm' "$h" "$m"
+  else printf '%dm' "$m"; fi
+}
+
+# 从 /healthz 的紧凑 JSON 里读取受控字段，避免依赖外部 jq。
+health_string_field() {
+  printf '%s' "$health" | sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p"
+}
+
+health_number_field() {
+  printf '%s' "$health" | sed -n "s/.*\"$1\":\([0-9][0-9]*\).*/\1/p"
+}
+
+# 显示这份部署的配置与运行状态。
+# 重点是把只在首次部署时打印过一次、之后很容易丢的信息（访问地址、
+# 初始化密钥）随时能查回来。
+cmd_info() {
+  local env_file="$INSTALL_DIR/.env"
+  if [ ! -f "$env_file" ]; then
+    die "未找到 $env_file —— 这个目录还没有部署过？用 --dir 指定安装目录"
+  fi
+
+  local site_url domain app_bind profiles setup_key write_token deploy_time
+  site_url="$(env_value SITE_URL)"
+  domain="$(env_value SITE_DOMAIN)"
+  app_bind="$(env_value APP_BIND)"
+  profiles="$(env_value COMPOSE_PROFILES)"
+  setup_key="$(env_value BLOG_ADMIN_SETUP_KEY)"
+  write_token="$(env_value BLOG_WRITE_TOKEN)"
+  deploy_time="$(sed -n '1s/^# 由 deploy\/install.sh 于 \(.*\) 生成$/\1/p' "$env_file" | head -n1)"
+  local port="${app_bind##*:}"
+
+  echo
+  echo "  轻语博客 · 部署信息"
+  echo "  ────────────────────────────────────────────────────"
+  echo "    访问地址      ${site_url:-（未设置）}"
+  echo "    管理后台      ${site_url:-}/admin"
+  if [ -n "$setup_key" ]; then
+    echo "    初始化密钥    ${setup_key}"
+    echo "                  （首次打开后台设置管理员密码时需要；重置密码也需要）"
+  else
+    echo "    初始化密钥    （未设置——首次初始化无保护，建议补上）"
+  fi
+  if [ -n "$write_token" ]; then
+    echo "    写入令牌      ${write_token:0:8}…（脚本/CI 调用写接口用，完整值见 .env）"
+  fi
+
+  echo
+  echo "  部署方式"
+  echo "  ────────────────────────────────────────────────────"
+  if [ "$profiles" = "domain" ]; then
+    echo "    模式          域名 + 自动 HTTPS"
+    echo "    域名          ${domain:-（未设置）}"
+    echo "    对外端口      80 / 443（由 Caddy 占用）"
+  else
+    echo "    模式          纯 HTTP（未启用 Caddy / 无证书）"
+    echo "    端口          ${port:-（未知）}"
+    if [ -n "$domain" ]; then
+      echo "    域名          ${domain}"
+    fi
+  fi
+  echo "    安装目录      ${INSTALL_DIR}"
+  [ -n "$deploy_time" ] && echo "    部署时间      ${deploy_time}"
+  echo "    数据目录      ${INSTALL_DIR}/data（容器内 /data 卷）"
+
+  # 运行状态：容器在跑就问 /healthz，否则跳过
+  local hp health
+  hp="$(local_health_port)"; [ -n "$hp" ] || hp=8787
+  health="$(curl -fsS --max-time 3 "http://127.0.0.1:${hp}/healthz" 2>/dev/null)" || health=""
+  echo
+  if [ -z "$health" ]; then
+    echo "  运行状态"
+    echo "  ────────────────────────────────────────────────────"
+    echo "    ⚠ 服务未响应（容器可能没在运行）——执行 ./deploy/install.sh status 查看"
+  else
+    echo "  运行状态"
+    echo "  ────────────────────────────────────────────────────"
+    local version revision storage database_status posts applied skipped uptime
+    version="$(health_string_field version)"
+    revision="$(health_string_field revision)"
+    storage="$(health_string_field storage)"
+    database_status="$(health_string_field databaseStatus)"
+    posts="$(health_number_field posts)"
+    applied="$(health_number_field applied)"
+    skipped="$(health_number_field skipped)"
+    uptime="$(health_number_field uptime)"
+
+    [ -n "$version" ] && echo "    版本          ${version}"
+    [ -n "$revision" ] && [ "$revision" != "null" ] && echo "    构建版本      ${revision}"
+    [ -n "$posts" ] && echo "    文章数        ${posts}"
+    if [ -n "$storage" ]; then
+      [ "$storage" = "local" ] && storage="本地磁盘" || storage="S3 兼容对象存储"
+      echo "    存储方式      ${storage}"
+    fi
+    if [ -n "$applied" ] || [ -n "$skipped" ]; then
+      echo "    数据库迁移    已应用 ${applied:-0} / 已跳过 ${skipped:-0}"
+    fi
+    [ -n "$uptime" ] && echo "    运行时长      $(human_uptime "$uptime")"
+    if [ "$database_status" = "error" ]; then
+      echo "    数据库        SQLite（异常）"
+    else
+      echo "    数据库        SQLite（${INSTALL_DIR}/data/qingyu.db）"
+    fi
+  fi
+
+  # 安全提示
+  if [ "$profiles" != "domain" ]; then
+    echo
+    echo "  安全提示"
+    echo "  ────────────────────────────────────────────────────"
+    echo "    ⚠ 当前为纯 HTTP，管理后台的登录密码是明文传输的。"
+    echo "      让出 80/443 后执行 ./deploy/install.sh upgrade --domain 你的域名 可启用 HTTPS"
+  fi
+  echo
+}
 cmd_status()   { compose ps; echo; curl -fsS "http://127.0.0.1:$(local_health_port)/healthz" || true; echo; }
 cmd_uninstall() {
   warn "将停止并删除容器（数据卷 qingyu-data 会保留）"
@@ -803,6 +925,7 @@ case "$COMMAND" in
   restore) cmd_restore ;;
   logs) cmd_logs ;;
   status) cmd_status ;;
+  info) cmd_info ;;
   uninstall) cmd_uninstall ;;
   *) usage; die "未知命令：$COMMAND" ;;
 esac
