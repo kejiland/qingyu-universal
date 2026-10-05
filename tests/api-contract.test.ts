@@ -163,6 +163,33 @@ describe('API 契约', () => {
     expect((data as { comment: { post_id?: unknown } }).comment.post_id).toBeUndefined();
   });
 
+  it('留言板评论（gb-note）不依赖 posts 表也能发表', async () => {
+    const created = await call('/api/posts/gb-note/comments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ author: '留言板契约', content: '留言板评论' })
+    });
+    expect(created.status).toBe(201);
+    expectSchema(CommentCreateResponseSchema, created.data);
+
+    const listed = await call('/api/posts/gb-note/comments');
+    expect(listed.status).toBe(200);
+    expectSchema(CommentListResponseSchema, listed.data);
+    const first = (listed.data as { comments: Array<{ post_id: string; content: string }> }).comments[0];
+    expect(first?.post_id).toBe('gb-note');
+    expect(first?.content).toBe('留言板评论');
+  });
+
+  it('向不存在的文章发评论返回 404，而不是外键 500', async () => {
+    const { status, data } = await call('/api/posts/no-such-post/comments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ author: '测试', content: '不应写入' })
+    });
+    expect(status).toBe(404);
+    expectSchema(ErrorResponseSchema, data);
+  });
+
   it('GET /api/posts/:id/comments → 列表项含 post_id 与 rowid', async () => {
     const { status, data } = await call(`/api/posts/${postId}/comments`);
     expect(status).toBe(200);

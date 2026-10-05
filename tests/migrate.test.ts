@@ -61,10 +61,10 @@ describe('外键约束与级联', () => {
     return { db, dir };
   }
 
-  it('7 张关联表都建立了指向 posts 的 CASCADE 外键', () => {
+  it('6 张关联表建立了指向 posts 的 CASCADE 外键（评论由触发器清理）', () => {
     const { db, dir } = freshDb();
     try {
-      const expected = ['comments', 'stats', 'stats_daily', 'stats_sources', 'post_revisions', 'webmentions', 'mail_outbox'];
+      const expected = ['stats', 'stats_daily', 'stats_sources', 'post_revisions', 'webmentions', 'mail_outbox'];
       for (const table of expected) {
         const fks = db.native.prepare(`PRAGMA foreign_key_list(${table})`).all() as Array<{
           table: string;
@@ -81,7 +81,7 @@ describe('外键约束与级联', () => {
     }
   });
 
-  it('删除文章时 7 张关联表全部级联清理', () => {
+  it('删除文章时关联数据与评论全部清理', () => {
     const { db, dir } = freshDb();
     try {
       const id = 'p1';
@@ -107,13 +107,18 @@ describe('外键约束与级联', () => {
     }
   });
 
-  it('插入指向不存在文章的关联数据会被拒绝', () => {
+  it('评论允许内置留言板目标，统计仍拒绝孤儿数据', () => {
     const { db, dir } = freshDb();
     try {
+      // 留言板没有对应帖子，但评论表允许这个内置目标。
+      db.native
+        .prepare('INSERT INTO comments (id,post_id,author,content,date) VALUES (?,?,?,?,?)')
+        .run('c-gb', 'gb-note', 'a', '留言', '2026-01-01');
+      expect(db.scalar<number>("SELECT COUNT(*) FROM comments WHERE post_id = 'gb-note'")).toBe(1);
+
+      // 其它关联表仍然保持指向 posts 的外键保护。
       expect(() =>
-        db.native
-          .prepare('INSERT INTO comments (id,post_id,author,content,date) VALUES (?,?,?,?,?)')
-          .run('c1', 'no-such-post', 'a', 'b', '2026-01-01')
+        db.native.prepare('INSERT INTO stats (post_id,likes,views) VALUES (?,?,?)').run('no-such-post', 1, 1)
       ).toThrow(/FOREIGN KEY constraint failed/);
     } finally {
       db.close();

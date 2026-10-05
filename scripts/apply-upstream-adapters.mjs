@@ -153,6 +153,30 @@ edit('app/functions/_lib/og.js', (l) => {
     "  return json({ ok: true, uploadUrl, publicUrl: publicUrlForKey(env, key, s.publicBase, request), key, expiresIn: 900 }, 200, request, env, { 'Cache-Control': 'no-store' });");
 });
 
+/* ---------- 评论目标：文章或内置留言板 ---------- */
+edit('app/functions/_lib/api-core.js', (l) => {
+  const targets = "const SYNTHETIC_COMMENT_TARGETS = ['gb-note', 'gb-idea'];";
+  if (!l.includes(targets)) {
+    const i = l.findIndex((line) => line.includes('const COMMENT_CAPS ='));
+    if (i < 0) throw new Error('锚点缺失: api-core.js COMMENT_CAPS');
+    l.splice(i, 0, targets, '');
+  }
+  const checkMarker = '    // [self-host] 评论目标是文章或内置留言板；避免不存在文章触发外键 500';
+  const commentStart = l.findIndex((line) => line.includes('export async function handleComments(request, env, postId)'));
+  const checkIndex = l.findIndex((line, index) => index > commentStart && line.includes(checkMarker));
+  if (checkIndex < 0) {
+    if (commentStart < 0) throw new Error('锚点缺失: api-core.js handleComments');
+    const i = l.findIndex((line, index) => index > commentStart && line.includes('const body = await request.json().catch(() => null);'));
+    if (i < 0) throw new Error('锚点缺失: api-core.js 评论请求体');
+    l.splice(i + 1, 0,
+      checkMarker,
+      '    if (SYNTHETIC_COMMENT_TARGETS.indexOf(postId) < 0) {',
+      "      const target = await dbFirst(env.DB, 'SELECT id FROM posts WHERE id = ?', postId);",
+      "      if (!target) return json({ error: '文章不存在或已删除' }, 404, request, env);",
+      '    }');
+  }
+});
+
 /* ---------- 邮件：SMTP 适配器（保留 Resend） ---------- */
 edit('app/functions/_lib/subscribe.js', (l) => {
   replaceLine(l, 'return !!(env && env.RESEND_API_KEY && env.BLOG_MAIL_FROM && env.SITE_URL);',

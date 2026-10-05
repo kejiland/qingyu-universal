@@ -548,6 +548,8 @@ async function commentBlocklist(env) {
   } catch (e) { return []; }
 }
 
+const SYNTHETIC_COMMENT_TARGETS = ['gb-note', 'gb-idea'];
+
 const COMMENT_CAPS = { author: 30, content: 1000, perPost: 300, perMin: 5, likePerMin: 30 };
 
 /** 清除字符串中的 ASCII 控制字符（保留 \n \t）：防注入 / 干扰渲染的隐形字符 */
@@ -620,6 +622,11 @@ export async function handleComments(request, env, postId) {
       console.warn('[comments] env.BLOG(KV) 未绑定，评论频率限制已禁用');
     }
     const body = await request.json().catch(() => null);
+    // [self-host] 评论目标是文章或内置留言板；避免不存在文章触发外键 500
+    if (SYNTHETIC_COMMENT_TARGETS.indexOf(postId) < 0) {
+      const target = await dbFirst(env.DB, 'SELECT id FROM posts WHERE id = ?', postId);
+      if (!target) return json({ error: '文章不存在或已删除' }, 404, request, env);
+    }
     // 反机器人（可在后台「功能开关」关闭）：
     //   ① 蜜罐字段被填写 → 静默丢弃（返回成功但不入库，机器人无法判断是否命中）；
     //   ② 表单渲染到提交过快（且客户端上报了 ts）→ 拒绝。旧客户端不带 ts，不受影响。
