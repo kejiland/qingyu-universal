@@ -31,7 +31,7 @@ const config = loadConfig();
 
 /* ---------- 绑定装配 ---------- */
 const db = createD1(config.dbPath);
-const kv = createKV(db);
+const kv = createKV(db, config.redisUrl);
 const assets = createAssets(config.publicDir);
 
 const storage =

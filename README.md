@@ -241,6 +241,8 @@ Windows（Docker Desktop）：
 
 部署完成后打开 `https://blog.example.com/admin`，填入脚本输出的 **初始化密钥** 设置管理员密码。以后随时可用 `./deploy/install.sh info` 找回访问地址、初始化密钥、版本和运行状态。
 
+> Fly.io / Render / Railway / Kubernetes / Redis / 多架构镜像与签名见 [多云与生产部署](docs/DEPLOYMENT.md)。
+
 WSL2（Docker Desktop）默认只把端口映射到 Windows 的 `localhost`。如果要在局域网或公网访问，运行 Windows 侧脚本（会请求管理员权限）：
 
 ```powershell
@@ -614,11 +616,14 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
 - [x] **v0.5** 后台模块迁移全部完成（订阅者 / Webmention / 统计）
 - [x] **v0.5.1** 归档 / 标签 / 分类页服务端渲染
 - [x] **v0.6** comments.parent_id 自引用外键（删除父评论时级联清理回复）
-- [x] **v0.7-a** 撤下旧后台入口；高级设置完整迁移到新版（旧路径保留为紧急回退）`n- [ ] **v0.7-b** 公开站前端拆分（Astro/SSR 取代 296 KB 的 app.js）
-- [ ] **v0.3** 契约覆盖剩余约 50 个接口（管理认证 / 媒体 / 订阅 / 备份）
-- [ ] **v0.3.1** PostgreSQL 适配、Redis/Valkey 限流
-- [ ] **v0.4** PaaS 模板（Railway / Render / Fly.io / Cloud Run）、多架构镜像发布
-- [ ] **v0.5** Helm Chart、SQLite → PostgreSQL 迁移工具、镜像签名与 SBOM
+- [x] **v0.7-a** 撤下旧后台入口；高级设置完整迁移到新版（旧路径保留为紧急回退）
+- [ ] **v0.7-b** 公开站前端拆分（Astro/SSR 取代 296 KB 的 app.js）
+- [ ] **v0.3** 契约覆盖剩余接口（管理认证 / 媒体 / 订阅 / 备份）
+- [x] **v0.3.1-a** Redis / Valkey 可选限流（配置 `REDIS_URL` 即启用）
+- [ ] **v0.3.1-b** PostgreSQL 适配
+- [x] **v0.4** Fly.io / Render / Railway 模板、多架构 GHCR 镜像、SBOM 与 cosign 签名
+- [x] **v0.5-a** Helm Chart、镜像签名与 SBOM
+- [ ] **v0.5-b** SQLite → PostgreSQL 迁移工具
 
 ## 许可证
 

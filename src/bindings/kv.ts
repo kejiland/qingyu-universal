@@ -7,6 +7,7 @@
  * 云端 KV 更强一致（KV 最终一致，这里强一致），限流因此更准确。
  * ============================================================ */
 import type { D1Database } from './d1.js';
+import { Redis } from 'ioredis';
 import type { KVGetOptions, KVNamespaceLike } from '../types.js';
 
 const DDL = [
@@ -108,6 +109,117 @@ export class KVNamespace implements KVNamespaceLike {
   }
 }
 
-export function createKV(db: D1Database): KVNamespace {
-  return new KVNamespace(db);
+function decodeRedisValue(value: string | null, options?: KVGetOptions | KVGetOptions['type']): unknown {
+  if (value === null) return null;
+  const type = typeof options === 'string' ? options : options?.type;
+  switch (type) {
+    case 'json':
+      try {
+        return JSON.parse(value);
+      } catch {
+        return null;
+      }
+    case 'arrayBuffer':
+      return new TextEncoder().encode(value).buffer;
+    case 'stream':
+      return new Response(value).body;
+    default:
+      return value;
+  }
+}
+
+class RedisKVNamespace implements KVNamespaceLike {
+  readonly #client: Redis;
+  #deadUntil = 0;
+
+  constructor(url: string) {
+    this.#client = new Redis(url, {
+      lazyConnect: true,
+      enableOfflineQueue: false,
+      connectTimeout: 1500,
+      maxRetriesPerRequest: 1,
+      retryStrategy: (times) => Math.min(times * 250, 3000)
+    });
+    this.#client.on('error', () => {
+      /* 连接失败由调用侧回退到 SQLite；这里吞掉事件避免进程崩溃。 */
+    });
+  }
+
+  isAvailable(): boolean {
+    return Date.now() >= this.#deadUntil;
+  }
+
+  markDead(): void {
+    this.#deadUntil = Date.now() + 30_000;
+  }
+
+  async get(key: string, options?: KVGetOptions | KVGetOptions['type']): Promise<unknown> {
+    return decodeRedisValue(await this.#client.get(String(key)), options);
+  }
+
+  async put(key: string, value: unknown, options?: { expiration?: number; expirationTtl?: number }): Promise<void> {
+    let stored: string;
+    if (typeof value === 'string') stored = value;
+    else if (value instanceof ArrayBuffer) stored = new TextDecoder().decode(value);
+    else if (ArrayBuffer.isView(value)) stored = Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString('utf8');
+    else stored = JSON.stringify(value);
+
+    const k = String(key);
+    if (options?.expirationTtl) await this.#client.set(k, stored, 'EX', Number(options.expirationTtl));
+    else if (options?.expiration) await this.#client.set(k, stored, 'PXAT', Number(options.expiration) * 1000);
+    else await this.#client.set(k, stored);
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.#client.del(String(key));
+  }
+
+  async close(): Promise<void> {
+    await this.#client.quit().catch(() => this.#client.disconnect());
+  }
+}
+
+/**
+ * 默认使用 SQLite KV；配置 REDIS_URL 后优先走 Redis/Valkey。
+ * Redis 短暂不可用时回退到本地 KV，避免限流/会话功能直接把站点打挂。
+ */
+export function createKV(db: D1Database, redisUrl = ''): KVNamespaceLike {
+  const local = new KVNamespace(db);
+  if (!redisUrl) return local;
+  const redis = new RedisKVNamespace(redisUrl);
+
+  return {
+    async get(key, options) {
+      if (redis.isAvailable()) {
+        try {
+          return await redis.get(key, options);
+        } catch {
+          redis.markDead();
+        }
+      }
+      return local.get(key, options);
+    },
+    async put(key, value, options) {
+      if (redis.isAvailable()) {
+        try {
+          await redis.put(key, value, options);
+          return;
+        } catch {
+          redis.markDead();
+        }
+      }
+      await local.put(key, value, options);
+    },
+    async delete(key) {
+      if (redis.isAvailable()) {
+        try {
+          await redis.delete(key);
+          return;
+        } catch {
+          redis.markDead();
+        }
+      }
+      await local.delete(key);
+    }
+  };
 }

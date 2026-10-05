@@ -105,6 +105,7 @@ const EnvSchema = z.object({
 
   /* 其它 */
   COMMENT_BLOCKLIST: z.string().default(''),
+  REDIS_URL: z.string().trim().default(''),
   INSTANCE_ID: z.string().trim().default('1'),
   API_VALIDATE_RESPONSES: z.enum(['off', 'warn', 'strict']).optional(),
   CRON_TIMEZONE: z.string().trim().default('UTC'),
@@ -143,6 +144,7 @@ export interface AppConfig {
   readonly dbPath: string;
   readonly uploadDir: string;
   readonly secret: string;
+  readonly redisUrl: string;
   readonly trustProxy: boolean;
   readonly geoipHeader: string;
   readonly logLevel: string;
@@ -239,6 +241,7 @@ export function loadConfig(): AppConfig {
     dbPath: path.join(dataDir, 'qingyu.db'),
     uploadDir: path.join(dataDir, 'uploads'),
     secret,
+    redisUrl: env.REDIS_URL,
     trustProxy: env.TRUST_PROXY,
     geoipHeader: env.GEOIP_HEADER,
     logLevel: env.LOG_LEVEL,
@@ -277,6 +280,8 @@ export function describeConfig(config: AppConfig): Array<[string, string]> {
     ['监听地址', `http://${config.host}:${config.port}`],
     ['数据库', `${config.dbPath}（SQLite / WAL）`],
     ['存储方式', config.storageMode === 's3' ? `S3 兼容对象存储（${config.s3.endpoint}）` : `本地磁盘 ${config.uploadDir}`],
+    ['Redis/Valkey', config.redisUrl ? '已配置（限流/去重走 Redis）' : '未配置（使用 SQLite KV）'],
+
     ['AI 助手', config.ai.baseUrl ? `已启用（${config.ai.model || '默认模型'}）` : '未配置'],
     ['邮件通知', config.mail.smtp.host ? 'SMTP' : config.mail.resendApiKey ? 'Resend' : '未配置'],
     ['管理员密钥', config.admin.setupKey ? '已设置' : '未设置（首次初始化无保护，建议补上）']

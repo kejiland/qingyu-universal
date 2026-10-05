@@ -45,6 +45,23 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  redis:
+    image: redis:7-alpine
+    container_name: qingyu-redis
+    restart: unless-stopped
+    profiles:
+      - redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    networks:
+      - qingyu
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   caddy:
     image: caddy:2-alpine
     container_name: qingyu-caddy
@@ -77,6 +94,7 @@ services:
 
 volumes:
   qingyu-data:
+  redis-data:
   caddy-data:
   caddy-config:
 

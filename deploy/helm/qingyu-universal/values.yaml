@@ -1,0 +1,54 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/kejiland/qingyu-universal
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 8787
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: blog.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 10Gi
+
+env:
+  SITE_URL: http://localhost:8787
+  SITE_DOMAIN: ""
+  HOST: 0.0.0.0
+  PORT: "8787"
+  DATA_DIR: /data
+  TRUST_PROXY: "1"
+  LOG_LEVEL: info
+  LOG_PRETTY: "0"
+  CRON_TIMEZONE: UTC
+  INSTANCE_ID: "1"
+  REDIS_URL: ""
+
+secrets:
+  adminSetupKey: ""
+  writeToken: ""
+  previewSecret: ""
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

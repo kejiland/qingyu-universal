@@ -1,0 +1,15 @@
+{{ .Chart.Name }} 已部署。
+
+查看状态：
+  kubectl get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+
+访问方式：
+{{- if .Values.ingress.enabled }}
+  http{{ if .Values.ingress.tls }}s{{ end }}://{{ (index .Values.ingress.hosts 0).host }}
+{{- else }}
+  kubectl port-forward svc/{{ include "qingyu.fullname" . }} 8787:{{ .Values.service.port }}
+  然后打开 http://localhost:8787
+{{- end }}
+
+首次部署请执行：
+  kubectl get secret {{ include "qingyu.fullname" . }} -o jsonpath='{.data.BLOG_ADMIN_SETUP_KEY}' | base64 -d

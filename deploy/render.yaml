@@ -1,0 +1,32 @@
+# 轻语博客 · Render Blueprint
+# 把仓库连接到 Render 后，可直接从 Blueprint 创建服务。
+services:
+  - type: web
+    name: qingyu-universal
+    runtime: docker
+    dockerfilePath: ./deploy/Dockerfile
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 8787
+      - key: DATA_DIR
+        value: /data
+      - key: TRUST_PROXY
+        value: "1"
+      - key: LOG_PRETTY
+        value: "0"
+      - key: SITE_URL
+        sync: false
+      - key: BLOG_ADMIN_SETUP_KEY
+        generateValue: true
+      - key: BLOG_WRITE_TOKEN
+        generateValue: true
+    disk:
+      name: qingyu-data
+      mountPath: /data
+      sizeGB: 1

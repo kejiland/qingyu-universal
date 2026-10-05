@@ -3,11 +3,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createD1, type D1Database } from '../src/bindings/d1.js';
-import { createKV, type KVNamespace } from '../src/bindings/kv.js';
+import { createKV } from '../src/bindings/kv.js';
 
 let dir: string;
 let db: D1Database;
-let kv: KVNamespace;
+let kv: ReturnType<typeof createKV>;
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qingyu-kv-'));

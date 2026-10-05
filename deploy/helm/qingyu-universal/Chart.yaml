@@ -1,0 +1,6 @@
+apiVersion: v2
+name: qingyu-universal
+description: 轻语博客自托管通用版
+type: application
+version: 0.1.0
+appVersion: "0.3.0"
