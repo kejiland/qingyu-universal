@@ -306,7 +306,7 @@ describe('后台域 API 契约', () => {
       headers: jsonAuth(),
       body: JSON.stringify({
         name: 'contract.png',
-        url: 'https://cdn.example.com/media/contract.png',
+        url: '/media/contract.png',
         type: 'image/png',
         size: 512
       })

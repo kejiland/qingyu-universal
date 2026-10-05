@@ -1654,8 +1654,11 @@ export async function handleMedia(request, env) {
     // 协议白名单：仅允许 http(s)——R2 公开地址或外部图床链接。
     // 拒绝 javascript: / vbscript: / data: 等，杜绝把脚本类内容登记为媒体。
     // 图片本体一律走 R2 预签名直传，不再接受 data:image base64 内嵌。
-    if (!/^https?:\/\//i.test(url)) {
-      return json({ error: '仅支持 http/https 链接（图片请走 R2 直传上传）' }, 400, request, env);
+    // [self-host] 本地存储上传返回根相对 /media/...，允许作为站内对象登记
+    const isHttpUrl = /^https?:\/\//i.test(url);
+    const isLocalObjectUrl = /^\/(?:media|music|og)\//i.test(url);
+    if (!isHttpUrl && !isLocalObjectUrl) {
+      return json({ error: '仅支持 http/https 或站内 /media、/music、/og 链接' }, 400, request, env);
     }
     const id = 'm-' + randomToken(12);
     const name = String((body && body.name) || id).slice(0, 200);

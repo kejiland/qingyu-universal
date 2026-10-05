@@ -81,10 +81,10 @@ export const MediaUploadBodySchema = z.object({
 /**
  * 登记媒体的请求体。
  * 注意 id **不在其中**——上游会用 'm-' + randomToken(12) 自行生成，
- * 客户端传来的 id 会被忽略。url 必须是 http/https（拒绝 data:/javascript:）。
+ * 客户端传来的 id 会被忽略。url 必须为 http/https 或站内 /media、/music、/og 地址（拒绝 data:/javascript:）。
  */
 export const MediaRegisterBodySchema = z.object({
-  url: z.string().regex(/^https?:\/\//i, { message: '仅支持 http/https 链接' }),
+  url: z.string().regex(/^(?:https?:\/\/|\/(?:media|music|og)\/)/i, { message: '仅支持 http/https 或站内 /media、/music、/og 链接' }),
   name: z.string().optional(),
   type: z.string().optional(),
   size: z.number().optional(),

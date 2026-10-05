@@ -172,6 +172,21 @@ edit('app/functions/_lib/api-core.js', (l) => {
   }
 });
 
+/* ---------- 媒体登记：允许本地存储的根相对地址 ---------- */
+edit('app/functions/_lib/api-core.js', (l) => {
+  const marker = '    // [self-host] 本地存储上传返回根相对 /media/...，允许作为站内对象登记';
+  if (!l.includes(marker)) {
+    const i = l.findIndex((line) => line.includes("if (!/^https?:\\/\\//i.test(url)) {"));
+    if (i < 0) throw new Error('锚点缺失: api-core.js media url 校验');
+    l.splice(i, 3,
+      marker,
+      '    const isHttpUrl = /^https?:\\/\\//i.test(url);',
+      '    const isLocalObjectUrl = /^\\/(?:media|music|og)\\//i.test(url);',
+      '    if (!isHttpUrl && !isLocalObjectUrl) {',
+      "      return json({ error: '仅支持 http/https 或站内 /media、/music、/og 链接' }, 400, request, env);",
+      '    }');
+  }
+});
 /* ---------- 邮件：SMTP 适配器（保留 Resend） ---------- */
 edit('app/functions/_lib/subscribe.js', (l) => {
   replaceLine(l, 'return !!(env && env.RESEND_API_KEY && env.BLOG_MAIL_FROM && env.SITE_URL);',
