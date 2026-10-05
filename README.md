@@ -242,6 +242,7 @@ Windows（Docker Desktop）：
 部署完成后打开 `https://blog.example.com/admin`，填入脚本输出的 **初始化密钥** 设置管理员密码。以后随时可用 `./deploy/install.sh info` 找回访问地址、初始化密钥、版本和运行状态。
 
 > Fly.io / Render / Railway / Kubernetes / Redis / 多架构镜像与签名见 [多云与生产部署](docs/DEPLOYMENT.md)。
+> PostgreSQL schema 与数据迁移见 [PostgreSQL 迁移](docs/POSTGRES.md)。
 
 WSL2（Docker Desktop）默认只把端口映射到 Windows 的 `localhost`。如果要在局域网或公网访问，运行 Windows 侧脚本（会请求管理员权限）：
 
@@ -623,7 +624,7 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
 - [ ] **v0.3.1-b** PostgreSQL 适配
 - [x] **v0.4** Fly.io / Render / Railway 模板、多架构 GHCR 镜像、SBOM 与 cosign 签名
 - [x] **v0.5-a** Helm Chart、镜像签名与 SBOM
-- [ ] **v0.5-b** SQLite → PostgreSQL 迁移工具
+- [x] **v0.5-b** PostgreSQL schema 与 SQLite → PostgreSQL 数据迁移工具
 
 ## 许可证
 
