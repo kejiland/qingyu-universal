@@ -435,7 +435,9 @@ persist_mirror_env() {
   grep -q '^NPM_REGISTRY='  "$env_file" 2>/dev/null || need=1
   [ "$need" = "1" ] || return 0
   local block
-  block="$(printf '\n# 国内网络加速（deploy/install.sh --mirror 生成）\n')"
+  block='
+# 国内网络加速（deploy/install.sh --mirror 生成）
+'
   grep -q '^QINGYU_MIRROR=' "$env_file" 2>/dev/null || block="${block}QINGYU_MIRROR=1
 "
   grep -q '^NPM_REGISTRY='  "$env_file" 2>/dev/null || block="${block}NPM_REGISTRY=${NPM_REGISTRY_OPT}
