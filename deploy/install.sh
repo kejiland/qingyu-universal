@@ -1,16 +1,3 @@
-
-# 安装过程分步显示：让第一次用脚本的人知道「现在到哪一步了、还剩几步」。
-STEP_NO=0
-STEP_TOTAL=0
-step_begin() {
-  [ -n "$STEP_TOTAL" ] || return 0
-  STEP_NO=$((STEP_NO + 1))
-  printf '\n\033[1;35m┌─ 第 %d/%d 步\033[0m  \033[1m%s\033[0m\n' "$STEP_NO" "$STEP_TOTAL" "$*"
-}
-step_end() {
-  [ -n "$STEP_TOTAL" ] || return 0
-  printf '\033[1;35m└─ 第 %d/%d 步完成\033[0m\n' "$STEP_NO" "$STEP_TOTAL"
-}
 #!/usr/bin/env bash
 # ============================================================
 # 轻语博客 · 自托管通用版 —— 一键部署脚本
@@ -54,6 +41,71 @@ PURGE=0
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
+
+# 安装过程分步显示：让第一次用脚本的人知道「现在到哪一步了、还剩几步」。
+STEP_NO=0
+STEP_TOTAL=0
+step_begin() {
+  [ -n "$STEP_TOTAL" ] || return 0
+  STEP_NO=$((STEP_NO + 1))
+  printf '\n\033[1;35m┌─ 第 %d/%d 步\033[0m  \033[1m%s\033[0m\n' "$STEP_NO" "$STEP_TOTAL" "$*"
+  STEP_NAME="$*"
+}
+step_end() {
+  [ -n "$STEP_TOTAL" ] || return 0
+  printf '\033[1;35m└─ 第 %d/%d 步完成\033[0m\n' "$STEP_NO" "$STEP_TOTAL"
+}
+
+on_error() {
+  local code="${1:-1}" line="${2:-?}" cmd="${3:-}"
+  trap - ERR
+  echo
+  warn "这一步没能完成（退出码 $code）"
+  [ -n "$STEP_NAME" ] && warn "当前步骤：$STEP_NAME"
+  [ -n "$line" ] && warn "出错位置：install.sh 第 $line 行"
+  echo
+  echo "  先试这几招（按顺序，成功了就继续）："
+  echo
+  case "$cmd" in
+    *docker*compose*|*"docker compose"*)
+      warn "看起来是容器相关命令失败"
+      echo "    1) $0 doctor              # 一键体检，看看 Docker / 容器 / 端口哪一项坏了"
+      echo "    2) $0 logs                # 看应用自己在报什么"
+      echo "    3) docker ps -a           # 确认容器状态"
+      ;;
+    *pull*|*curl*|*wget*|*fetch*|*clone*|*npm*)
+      warn "看起来是「拉代码 / 下载镜像」时网络不通"
+      echo "    1) $0 install --mirror    # 国内网络加速（重新走一遍安装即可）"
+      echo "    2) curl -I https://ghcr.io  # 测一下能不能连上镜像仓库"
+      echo "    3) $0 --help              # 查看全部参数"
+      ;;
+    *apt*|*yum*|*dnf*|*apk*|*systemctl*)
+      warn "看起来是系统包管理器 / 服务没能正常工作"
+      echo "    1) 换国内镜像源后重试：sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list"
+      echo "    2) 确认网络：ping -c2 mirrors.aliyun.com"
+      ;;
+    *mkdir*|*mount*|*"touch"*|*"cp "*)
+      warn "看起来是文件写入被拒绝"
+      echo "    1) 用 root 运行本脚本（sudo bash deploy/install.sh install）"
+      echo "    2) 确认磁盘没满：df -h /"
+      ;;
+    *chmod*|*"chown"*)
+      warn "看起来是权限不足"
+      echo "    1) 用 root 运行：sudo bash deploy/install.sh install"
+      ;;
+    *)
+      warn "通用排查"
+      echo "    1) $0 doctor              # 一键体检"
+      echo "    2) $0 logs                # 看详细日志"
+      echo "    3) 上一条命令：$cmd"
+      ;;
+  esac
+  echo
+  warn "配置和数据都还在（不会因为这次失败被清空），修好后重新执行同一条命令即可"
+  echo
+  exit "$code"
+}
+
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -2469,8 +2521,8 @@ maybe_show_menu() {
     echo "  9) 启动服务        把停过的服务再拉起来"
     echo " 10) 回滚到上一版    升级出问题时退回"
     echo " 11) 卸载            删除容器（数据卷保留）"
-echo " 12) 定时备份        每天自动快照，只保留最近 7 份"
-echo " 13) 打包迁移        打成 tar.gz，方便搬到新服务器"
+    echo " 12) 定时备份        每天自动快照，只保留最近 7 份"
+    echo " 13) 打包迁移        打成 tar.gz，方便搬到新服务器"
     echo "  0) 退出"
     echo
     echo "  提示：改端口 / 站点地址 → 编辑 ${INSTALL_DIR}/.env 后选 7 生效"
@@ -2488,12 +2540,17 @@ echo " 13) 打包迁移        打成 tar.gz，方便搬到新服务器"
     9)  COMMAND="start" ;;
     10) COMMAND="rollback" ;;
     11) COMMAND="uninstall" ;;
-  12) COMMAND="autobackup" ;;
-  13) COMMAND="migrate" ;;
+    12) COMMAND="autobackup" ;;
+    13) COMMAND="migrate" ;;
     0)  log "已退出（再次运行本脚本可重新打开菜单）"; exit 0 ;;
     *)  warn "没看懂这个选择（请输入 0-13），先退出"; exit 1 ;;
   esac
 }
+
+# 出错时自动给出「失败原因 + 可执行解法」，而不是只留一行红字
+if [ -z "${QINGYU_NO_ERR_HELP:-}" ]; then
+  trap 'on_error $? "$LINENO" "$BASH_COMMAND"' ERR
+fi
 
 maybe_show_menu
 
