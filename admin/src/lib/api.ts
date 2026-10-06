@@ -51,6 +51,31 @@ export interface MusicUploadTicket {
   expiresIn: number;
 }
 
+/** 文章分析（兼容接口，schema 尚未登记）。range=all|30|7 */
+export interface PostAnalyticsItem {
+  id: string;
+  title: string;
+  date: string;
+  excerpt: string;
+  status: string;
+  tags: string[];
+  series: string;
+  seriesOrder: number;
+  views: number;
+  likes: number;
+  comments: number;
+  score: number;
+  trend: Array<{ date: string; views: number; likes: number; comments: number }>;
+}
+
+export interface PostAnalyticsResponse {
+  ok: true;
+  range: string;
+  trendDays: number;
+  summary: { views: number; likes: number; comments: number; posts: number };
+  items: PostAnalyticsItem[];
+}
+
 /* ---------- 错误与请求 ---------- */
 
 export class ApiError extends Error {
@@ -229,6 +254,8 @@ export const api = {
   /* 统计 */
   statsTrend: () => request<components['schemas']['StatsTrendResponse']>('/api/stats/trend'),
   statsSources: () => request<components['schemas']['StatsSourcesResponse']>('/api/admin/stats/sources'),
+  postAnalytics: (range: 'all' | '30' | '7' = 'all') =>
+    request<PostAnalyticsResponse>(`/api/admin/post-analytics?range=${range}`),
 
   /* 设置 */
   getSettings: () => request<{ ok: true; settings: Record<string, string> }>('/api/settings'),

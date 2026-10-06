@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import {
   FileText, Image as ImageIcon, MessageSquare, Settings, Users, DatabaseBackup,
   ScrollText, LogOut, Moon, Sun, Menu, X, PenLine, AtSign, BarChart3, Sparkles,
-  Tag, Layers, Clock, Music, Download, Gauge
+  Tag, Layers, Clock, Music, Download, Gauge, TrendingUp
 } from '@lucide/vue';
 import { api, session } from '../../lib/api';
 import { toast } from '../../lib/toast';
@@ -49,6 +49,7 @@ const navGroups: NavGroup[] = [
       { to: '/settings', label: '设置', icon: Settings, match: /^\/settings/ },
       { to: '/subscribers', label: '订阅者', icon: Users, match: /^\/subscribers/ },
       { to: '/stats', label: '统计', icon: BarChart3, match: /^\/stats/ },
+      { to: '/analytics', label: '详细统计', icon: TrendingUp, match: /^\/analytics/ },
       { to: '/music', label: '音乐管理', icon: Music, match: /^\/music/ }
     ]
   },

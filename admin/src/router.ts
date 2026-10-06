@@ -116,6 +116,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('./views/StatsView.vue'),
     meta: { title: '统计' }
   },
+  {
+    path: '/analytics',
+    name: 'analytics',
+    component: () => import('./views/AnalyticsView.vue'),
+    meta: { title: '详细统计' }
+  },
   // 未登记的管理路径显示占位页
   {
     path: '/:pathMatch(.*)*',
