@@ -99,6 +99,15 @@ describe('公开站视觉打磨（v0.8）', () => {
     expect(post).toContain('formatDate(post.date)');
   });
 
+
+  it('Service Worker 对带 ?v= 的静态资源按完整 URL 精确命中', () => {
+    const sw = read('sw.js');
+    expect(sw).toContain("searchParams.has('v')");
+    expect(sw).toMatch(/var cached = await caches\.match\(request\);/);
+    // 精确命中失败、且带版本号时，不允许退回 ignoreSearch（会吃到旧字节）
+    expect(sw).toMatch(/if \(!cached && !versioned\) cached = await caches\.match\(request, \{ ignoreSearch: true \}\);/);
+  });
+
   it('卡片摘要在 content 为空时回退到 search 全文', () => {
     expect(read('app.js')).toContain("stripMd(p.content || p.search || '')");
   });

@@ -301,6 +301,30 @@ function ensurePolishShell() {
     report.push('_headers 缓存规则补齐 polish.min.css');
   }
 }
+function patchSwCacheStrategy() {
+  let sw = read('sw.js');
+  if (sw.includes('searchParams.has(\'v\')')) return;
+  const nl = sw.includes('\r\n') ? '\r\n' : '\n';
+  const oldFn = [
+    'async function staleWhileRevalidate(request) {',
+    '  var cached = await caches.match(request, { ignoreSearch: true });',
+    '  var network = fetch(request).then(async function (response) {'
+  ].join(nl);
+  const newFn = [
+    'async function staleWhileRevalidate(request) {',
+    '  /* 静态资源带 ?v= 版本号：必须按完整 URL 精确命中，不能 ignoreSearch。',
+    '   * 否则新版 ?v=X 会先匹配到旧版 ?v=Y 的缓存字节，表现为「CSS 已更新、JS 还是旧的」。',
+    '   * 无版本号的 URL 才退回忽略参数匹配。 */',
+    '  var versioned = new URL(request.url).searchParams.has(\'v\');',
+    '  var cached = await caches.match(request);',
+    '  if (!cached && !versioned) cached = await caches.match(request, { ignoreSearch: true });',
+    '  var network = fetch(request).then(async function (response) {'
+  ].join(nl);
+  if (!sw.includes(oldFn)) throw new Error('sw.js 未找到 staleWhileRevalidate 锚点');
+  sw = sw.replace(oldFn, newFn);
+  write('sw.js', sw);
+  report.push('sw.js 静态缓存改为按 ?v= 精确命中');
+}
 let app = read('app.js');
 if (app.includes('function ensureLegacyAdmin()')) {
   if (!fs.existsSync(path.join(PUB, 'admin-legacy.js'))) {
@@ -318,6 +342,7 @@ if (!fs.existsSync(path.join(PUB, 'boot.js'))) write('boot.js', BOOT_SOURCE);
 app = patchDisplayPolish(app);
 write('app.js', app);
 ensurePolishShell();
+patchSwCacheStrategy();
 patchShellReferences();
 
 console.log(report.join('\n'));

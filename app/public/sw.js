@@ -8,7 +8,7 @@
  * ============================================================ */
 'use strict';
 
-var CACHE_VERSION = '2.10.62';
+var CACHE_VERSION = '2.10.63';
 var SHELL_CACHE = 'qingyu-shell-' + CACHE_VERSION;
 var RUNTIME_CACHE = 'qingyu-runtime-' + CACHE_VERSION;
 var SHELL = [
@@ -106,7 +106,12 @@ async function networkFirstApi(request) {
 }
 
 async function staleWhileRevalidate(request) {
-  var cached = await caches.match(request, { ignoreSearch: true });
+  /* 静态资源带 ?v= 版本号：必须按完整 URL 精确命中，不能 ignoreSearch。
+   * 否则新版 ?v=X 会先匹配到旧版 ?v=Y 的缓存字节，表现为「CSS 已更新、JS 还是旧的」。
+   * 无版本号的 URL 才退回忽略参数匹配。 */
+  var versioned = new URL(request.url).searchParams.has('v');
+  var cached = await caches.match(request);
+  if (!cached && !versioned) cached = await caches.match(request, { ignoreSearch: true });
   var network = fetch(request).then(async function (response) {
     if (response && response.ok) {
       var cache = await caches.open(RUNTIME_CACHE);
