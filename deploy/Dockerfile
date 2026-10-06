@@ -7,10 +7,13 @@
 # 构建：docker build -f deploy/Dockerfile -t qingyu-universal .
 # ============================================================
 FROM node:24-alpine AS admin-build
+# 国内加速（--mirror）时由 compose 注入 npmmirror 源；留空走官方源
+ARG NPM_REGISTRY=""
 WORKDIR /app/admin
 
 COPY admin/package.json admin/package-lock.json ./
-RUN npm ci --no-audit --no-fund
+RUN if [ -n "$NPM_REGISTRY" ]; then npm config set registry "$NPM_REGISTRY"; fi \
+ && npm ci --no-audit --no-fund
 
 COPY admin/ ./
 # 后台的类型来自服务端契约（@api-types 别名指向 ../generated）
@@ -19,6 +22,8 @@ RUN npm run build
 
 # ------------------------------------------------------------
 FROM node:24-alpine AS server-build
+# 国内加速（--mirror）时由 compose 注入 npmmirror 源；留空走官方源
+ARG NPM_REGISTRY=""
 
 # 构建版本（git 短 SHA），由 compose 的 build.args 注入。
 # 打进镜像后由 /healthz 与启动横幅输出 —— 用于确认「升级到底生效没有」。
@@ -27,7 +32,8 @@ ENV BUILD_REVISION=$BUILD_REVISION
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+RUN if [ -n "$NPM_REGISTRY" ]; then npm config set registry "$NPM_REGISTRY"; fi \
+ && npm ci --no-audit --no-fund
 
 COPY tsconfig.json ./
 COPY scripts ./scripts

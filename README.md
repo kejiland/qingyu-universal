@@ -49,6 +49,25 @@ curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/depl
 脚本会自动：安装 Docker → 判断部署模式 → 生成 `.env` 与随机密钥 → 构建镜像 →
 启动容器 → 等待健康检查 → 输出**访问地址**与初始化密钥。
 
+### 国内服务器：网络卡就加 `--mirror`
+
+国内机房直连 GitHub、Docker Hub、npm 经常超时，加上 `--mirror` 会自动改走国内源：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh \
+  | bash -s -- --mirror
+```
+
+它只做三件事，任何一步失败都会自动回落官方源，**不会因为加速站挂了而装不上**：
+
+| 加速项 | 做法 |
+| --- | --- |
+| 代码下载 | GitHub 克隆 / 压缩包 / 版本查询先走加速前缀（`--github-proxy` 可换成你自己的） |
+| Docker 镜像 | 往 `/etc/docker/daemon.json` 写 `registry-mirrors`（已有配置一律不动） |
+| npm 依赖 | 构建镜像时把 registry 换成 `registry.npmmirror.com` |
+
+选择会写进 `.env`，以后 `upgrade` 不用重复加；想关掉用 `--no-mirror`。
+
 ### 最省事的用法（推荐）
 
 ```bash
@@ -249,7 +268,7 @@ curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/depl
 ./deploy/install.sh upgrade --domain your.domain.com
 ```
 
-可用选项：`--port <端口>`、`--ip <地址>`（不填自动探测公网 IP）。
+可用选项：`--port <端口>`、`--ip <地址>`（不填自动探测公网 IP）、`--mirror`（国内网络加速）。
 
 从已克隆的仓库运行（推荐，可用本地最新代码）：
 
@@ -689,6 +708,7 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
 - [x] **v0.7-b** 公开站前端拆分（SSR 首屏 + 轻量启动器按需加载；旧后台独立分包，弃用 Astro 重写）
 - [x] **v0.8** 公开站视觉打磨：日期规范成 YYYY-MM-DD、卡片摘要回退到 search 全文、独立叠加样式 `polish.min.css`
 - [x] **v0.9** 部署脚本一键体检 `doctor`：Docker / 容器 / 端口 / 防火墙 / 公网地址 / 磁盘 / 错误日志，每项给 ✅⚠️❌ 加一句修复命令
+- [x] **v0.9-a** 国内网络加速 `--mirror`：GitHub 代码加速、Docker Hub `registry-mirrors`、npm npmmirror，失败自动回落官方源
 - [x] **v0.3** 路径级契约覆盖完成（60 条路径；兼容接口响应字段将逐步收紧）
 - [x] **v0.3.1-a** Redis / Valkey 可选限流（配置 `REDIS_URL` 即启用）
 - [x] **v0.3.1-b** PostgreSQL 运行时适配（配置 `DATABASE_URL` 即切换）

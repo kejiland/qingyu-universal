@@ -25,6 +25,11 @@ APP_PORT=""
 ASSUME_YES=0
 EMAIL="${ACME_EMAIL:-}"
 IMAGE="${QINGYU_IMAGE:-}"
+# 国内网络加速（--mirror）：GitHub 代码 / Docker Hub 镜像 / npm 依赖。
+# 留空 = 先看 .env 里是否记着上次的选择，保证升级时自动沿用。
+MIRROR="${QINGYU_MIRROR:-}"
+GITHUB_PROXY="${QINGYU_GITHUB_PROXY:-}"
+NPM_REGISTRY_OPT="${QINGYU_NPM_REGISTRY:-}"
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
@@ -120,6 +125,9 @@ while [ $# -gt 0 ]; do
     -y|--yes)   ASSUME_YES=1 ;;
     --ip)       IP_ADDR="${2:-}"; shift ;;
     --image)    IMAGE="${2:-}"; shift ;;
+    --mirror)         MIRROR=1 ;;
+    --no-mirror)      MIRROR=0 ;;
+    --github-proxy)   GITHUB_PROXY="${2:-}"; MIRROR=1; shift ;;
     -h|--help)  COMMAND="help" ;;
     *)          ARGS+=("$1") ;;
   esac
@@ -160,6 +168,9 @@ usage() {
   --dir    <目录>         安装目录，默认 /opt/qingyu-universal
   --ref    <分支/标签>     下载的代码版本，默认 main
   --image  <镜像>         使用预构建镜像而不是本地构建
+  --mirror            国内网络加速：GitHub 代码、Docker 镜像、npm 依赖都走国内源
+                      （国内服务器 / 网络卡时加它；选择会记进 .env，下次升级自动沿用）
+  --github-proxy <前缀> 指定自己的 GitHub 加速前缀，例如 https://ghfast.top
 EOF
 }
 
@@ -207,8 +218,11 @@ prepare_install_dir() {
 atom_revision() {
   local ref="${1:-$REF}" body="" sha=""
   [ -n "$ref" ] || return 0
-  body=$(curl -fsS --max-time 8 -H 'User-Agent: curl' \
-         "https://github.com/$REPO/commits/$ref.atom" 2>/dev/null) || body=""
+  local u
+  while IFS= read -r u; do
+    body=$(curl -fsS --max-time 8 -H 'User-Agent: curl' "$u" 2>/dev/null) || body=""
+    [ -n "$body" ] && break
+  done < <(github_urls "$REPO/commits/$ref.atom")
   if [ -n "$body" ]; then
     sha=$(printf '%s' "$body" | grep -oE 'Grit::Commit/[0-9a-f]{40}' | sed -n '1s|.*/||p') || sha=""
   fi
@@ -279,6 +293,161 @@ detect_distro() {
   if [ -f /etc/os-release ]; then . /etc/os-release; echo "${ID:-linux}"; else echo linux; fi
 }
 
+# ============================================================
+# 国内网络加速（--mirror）
+# ------------------------------------------------------------
+# 只做三件事，而且每件都有「失败就回落官方源」的兜底：
+#   1) GitHub 代码：克隆 / 压缩包 / 版本查询先走加速前缀
+#   2) Docker Hub：往 /etc/docker/daemon.json 写 registry-mirrors
+#   3) npm：构建镜像时把 registry 换成 npmmirror
+# 只在显式传 --mirror、或 .env 里记着 QINGYU_MIRROR=1 时生效。
+# ============================================================
+
+# 没显式指定时，沿用 .env 里记下的选择（升级时不用重复加 --mirror）
+resolve_mirror() {
+  if [ -z "$MIRROR" ]; then
+    if [ -f "$INSTALL_DIR/.env" ] && grep -q '^QINGYU_MIRROR=1' "$INSTALL_DIR/.env" 2>/dev/null; then
+      MIRROR=1
+    else
+      MIRROR=0
+    fi
+  fi
+  [ "$MIRROR" = "1" ] || return 0
+  [ -n "$NPM_REGISTRY_OPT" ] || NPM_REGISTRY_OPT="https://registry.npmmirror.com"
+  log "已启用国内加速：GitHub 代码 / Docker Hub 镜像 / npm 依赖"
+}
+
+# GitHub 加速前缀（按顺序试；都试不通就用官方直连）
+github_proxy_list() {
+  if [ -n "$GITHUB_PROXY" ]; then printf '%s\n' "${GITHUB_PROXY%/}"; return 0; fi
+  printf '%s\n' "https://ghfast.top" "https://gh-proxy.com" "https://ghproxy.net"
+}
+
+# 同一个 GitHub 资源的候选地址。
+# 入参既可以是相对路径（owner/repo/archive/...），也可以是完整 URL（自动剥掉域名）。
+github_urls() {
+  local path="${1#https://github.com/}" p
+  if [ "${MIRROR:-0}" = "1" ]; then
+    while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      printf '%s\n' "${p}/https://github.com/$path"
+    done < <(github_proxy_list)
+  fi
+  printf '%s\n' "https://github.com/$path"
+}
+
+# git clone 的候选地址（加速服务对 .git 的支持和普通下载不一样，单独一份）
+git_clone_urls() {
+  if [ "${MIRROR:-0}" = "1" ]; then
+    if [ -n "$GITHUB_PROXY" ]; then
+      printf '%s\n' "${GITHUB_PROXY%/}/https://github.com/$REPO.git"
+    fi
+    printf '%s\n' "https://gitclone.com/github.com/$REPO.git"
+  fi
+  printf '%s\n' "https://github.com/$REPO.git"
+}
+
+# 下载 GitHub 上的资源：逐个候选地址试，成功返回 0，全失败返回 1（由调用方决定要不要报错）
+gh_fetch() {
+  local path="$1" out="$2" u
+  while IFS= read -r u; do
+    if curl -fsSL --connect-timeout 8 --max-time 180 "$u" -o "$out" 2>/dev/null; then
+      return 0
+    fi
+    rm -f "$out"
+  done < <(github_urls "$path")
+  return 1
+}
+
+# Debian / Ubuntu 走阿里云的 docker-ce 源（get.docker.com 国内经常超时）。
+# 成功返回 0；不适合当前系统或失败返回 1，由调用方回落官方一键脚本。
+install_docker_mirror() {
+  local distro codename arch
+  distro="$(detect_distro)"
+  case "$distro" in debian|ubuntu) ;; *) return 1 ;; esac
+  [ -r /etc/os-release ] || return 1
+  codename="$([ -r /etc/os-release ] && . /etc/os-release; echo "${VERSION_CODENAME:-}")"
+  [ -n "$codename" ] || return 1
+  arch="$(dpkg --print-architecture 2>/dev/null || echo amd64)"
+  log "用阿里云镜像源安装 Docker（${distro} ${codename}）"
+  $SUDO apt-get update -qq || return 1
+  $SUDO apt-get install -y -qq ca-certificates curl gnupg || return 1
+  $SUDO install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL --connect-timeout 8 "https://mirrors.aliyun.com/docker-ce/linux/${distro}/gpg" \
+    | $SUDO gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg || return 1
+  printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/%s %s stable\n' \
+    "$arch" "$distro" "$codename" | $SUDO tee /etc/apt/sources.list.d/docker.list >/dev/null
+  $SUDO apt-get update -qq || return 1
+  $SUDO apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || return 1
+  have docker
+}
+
+# Docker Hub 镜像加速：写 /etc/docker/daemon.json 的 registry-mirrors。
+# 已有配置一律不动（怕把用户自己的加速地址或 runtime 配置弄坏）。
+configure_registry_mirror() {
+  [ "${MIRROR:-0}" = "1" ] || return 0
+  # Docker Desktop 自己管 daemon.json，不碰
+  if ${DOCKER:-docker} info 2>/dev/null | grep -qi 'docker desktop'; then
+    log "检测到 Docker Desktop，镜像加速请在 Desktop 的设置里配置"
+    return 0
+  fi
+  local dj="/etc/docker/daemon.json"
+  if [ -f "$dj" ] && grep -q 'registry-mirrors' "$dj" 2>/dev/null; then
+    log "Docker 镜像加速已配置，保持不变"
+    return 0
+  fi
+  if [ -f "$dj" ]; then
+    warn "/etc/docker/daemon.json 已存在但没有 registry-mirrors，为不破坏原配置未自动改写"
+    warn "  可手动加上：\"registry-mirrors\": [\"https://docker.m.daocloud.io\"] 后重启 Docker"
+    return 0
+  fi
+  $SUDO mkdir -p /etc/docker
+  $SUDO tee "$dj" >/dev/null <<'EOF'
+{
+  "registry-mirrors": [
+    "https://docker.m.daocloud.io",
+    "https://docker.1panel.live",
+    "https://mirror.baidubce.com"
+  ]
+}
+EOF
+  log "已写入 Docker 镜像加速（/etc/docker/daemon.json）"
+  $SUDO systemctl restart docker >/dev/null 2>&1 \
+    || $SUDO service docker restart >/dev/null 2>&1 || true
+  local i=0
+  while [ "$i" -lt 20 ]; do
+    if ${DOCKER:-docker} info >/dev/null 2>&1; then
+      log "Docker 已重启并就绪"
+      return 0
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  warn "Docker 重启后还没就绪，请检查：systemctl status docker"
+}
+
+# 升级时把 --mirror 的选择追加进已有的 .env（首次安装由 ensure_env 直接写入）
+persist_mirror_env() {
+  [ "${MIRROR:-0}" = "1" ] || return 0
+  local env_file="$INSTALL_DIR/.env" need=0
+  [ -f "$env_file" ] || return 0
+  grep -q '^QINGYU_MIRROR=' "$env_file" 2>/dev/null || need=1
+  grep -q '^NPM_REGISTRY='  "$env_file" 2>/dev/null || need=1
+  [ "$need" = "1" ] || return 0
+  local block
+  block="$(printf '\n# 国内网络加速（deploy/install.sh --mirror 生成）\n')"
+  grep -q '^QINGYU_MIRROR=' "$env_file" 2>/dev/null || block="${block}QINGYU_MIRROR=1
+"
+  grep -q '^NPM_REGISTRY='  "$env_file" 2>/dev/null || block="${block}NPM_REGISTRY=${NPM_REGISTRY_OPT}
+"
+  if [ -w "$env_file" ]; then
+    printf '%s' "$block" >> "$env_file"
+  else
+    printf '%s' "$block" | $SUDO tee -a "$env_file" >/dev/null
+  fi
+  log "已把国内加速设置写入 .env（下次升级自动沿用）"
+}
+
 install_docker() {
   if docker_ready; then
     log "Docker 与 Compose 已就绪（$(docker --version)）"
@@ -291,7 +460,13 @@ install_docker() {
     $SUDO rc-update add docker default || true
     $SUDO service docker start || true
   else
-    curl -fsSL https://get.docker.com | $SUDO sh
+    # 国内服务器先试阿里云的 docker-ce 源（get.docker.com 国内经常超时），
+    # 失败或不是 Debian 系就回落官方一键脚本
+    if [ "${MIRROR:-0}" = "1" ] && install_docker_mirror; then
+      log "Docker 安装完成（阿里云镜像源）"
+    else
+      curl -fsSL https://get.docker.com | $SUDO sh
+    fi
     $SUDO systemctl enable --now docker || true
   fi
   have docker || die "Docker 安装失败，请手动安装后重试"
@@ -309,7 +484,12 @@ clone_source() {
   local tmp
   tmp="$(mktemp -d)"
   log "用 Git 获取代码：$REPO@$REF"
-  if ! git clone --quiet "https://github.com/$REPO.git" "$tmp/src" 2>/dev/null; then
+  local git_url cloned=0
+  while IFS= read -r git_url; do
+    rm -rf "$tmp/src"
+    if git clone --quiet "$git_url" "$tmp/src" 2>/dev/null; then cloned=1; break; fi
+  done < <(git_clone_urls)
+  if [ "$cloned" -ne 1 ]; then
     rm -rf "$tmp"
     return 1
   fi
@@ -387,25 +567,26 @@ download_source() {
   case "$full" in
     *[!0-9a-fA-F]*)
       # 分支 / 标签
-      url1="https://github.com/$REPO/archive/refs/heads/$full.tar.gz"
-      url2="https://github.com/$REPO/archive/refs/tags/$full.tar.gz"
-      url3="https://github.com/$REPO/archive/$full.tar.gz"
+      url1="$REPO/archive/refs/heads/$full.tar.gz"
+      url2="$REPO/archive/refs/tags/$full.tar.gz"
+      url3="$REPO/archive/$full.tar.gz"
       ;;
     *)
       # commit（回滚走这里）：GitHub 支持直接按 SHA 打包
-      url1="https://github.com/$REPO/archive/$full.tar.gz"
+      url1="$REPO/archive/$full.tar.gz"
       url2=""
       url3=""
       ;;
   esac
+  # gh_fetch 先试加速地址（--mirror），失败自动回落官方直连
   if [ -n "$url2" ]; then
-    curl -fsSL "$url1" -o "$tmp/src.tgz" \
-      || curl -fsSL "$url2" -o "$tmp/src.tgz" \
-      || { [ -n "$url3" ] && curl -fsSL "$url3" -o "$tmp/src.tgz"; } \
-      || die "下载失败：https://github.com/$REPO（请确认仓库与分支/标签/版本）"
+    gh_fetch "$url1" "$tmp/src.tgz" \
+      || gh_fetch "$url2" "$tmp/src.tgz" \
+      || gh_fetch "$url3" "$tmp/src.tgz" \
+      || die "下载失败：https://github.com/$REPO（请确认仓库与分支/标签/版本；国内网络可加 --mirror 或 --github-proxy）"
   else
-    curl -fsSL "$url1" -o "$tmp/src.tgz" \
-      || die "下载失败：https://github.com/$REPO/archive/$full（版本可能已被删除）"
+    gh_fetch "$url1" "$tmp/src.tgz" \
+      || die "下载失败：https://github.com/$REPO/archive/$full（版本可能已被删除；国内网络可加 --mirror）"
   fi
   tar -xzf "$tmp/src.tgz" -C "$tmp"
   local extracted
@@ -578,6 +759,11 @@ ensure_env() {
     return
   fi
   local setup_key write_token site_url app_bind compose_profiles trust_proxy
+  local mirror_flag=0 npm_registry=""
+  if [ "${MIRROR:-0}" = "1" ]; then
+    mirror_flag=1
+    npm_registry="$NPM_REGISTRY_OPT"
+  fi
   local database_url postgres_db postgres_user postgres_password
   setup_key="qy-$(rand_short)"
   write_token="$(rand)"
@@ -673,6 +859,10 @@ BLOG_MAIL_FROM=
 AI_BASE_URL=
 AI_API_KEY=
 AI_MODEL=
+# 国内网络加速（deploy/install.sh --mirror 生成；1 = 启用）
+QINGYU_MIRROR=$mirror_flag
+# 构建镜像时 npm 使用的源，留空 = 官方源
+NPM_REGISTRY=$npm_registry
 EOF
   chmod 600 "$env_file"
   SETUP_KEY_SHOWN="$setup_key"
@@ -1108,15 +1298,18 @@ summary() {
 cmd_install() {
   need_root
   resolve_docker
+  resolve_mirror
   ensure_curl
   ensure_git
   install_docker
+  configure_registry_mirror
   fetch_source
   interact_mode
   interact_database
   resolve_mode
   resolve_database
   ensure_env
+  persist_mirror_env
   preflight
   BUILD_REVISION="$(resolve_revision)"
   [ -n "$BUILD_REVISION" ] || BUILD_REVISION=unknown
@@ -1130,10 +1323,13 @@ cmd_install() {
 cmd_upgrade() {
   need_root
   resolve_docker
+  resolve_mirror
+  configure_registry_mirror
   [ -d "$INSTALL_DIR" ] || die "未找到安装目录：$INSTALL_DIR"
   ensure_git
   update_source
   resolve_mode
+  persist_mirror_env
   # 先备份，再升级
   cmd_backup || warn "升级前备份失败，继续升级"
   # 注入构建版本（git 短 SHA），让 /healthz 能回答「升级到底生效没有」
@@ -1470,6 +1666,9 @@ cmd_doctor() {
     doc_ok "Docker 运行中"
     if docker compose version >/dev/null 2>&1; then
       doc_ok "docker compose 可用"
+      if [ -f "$INSTALL_DIR/.env" ] && grep -q '^QINGYU_MIRROR=1' "$INSTALL_DIR/.env" 2>/dev/null; then
+        doc_ok "已启用国内加速（GitHub / Docker Hub / npm 镜像）"
+      fi
     else
       doc_fail "缺少 docker compose 插件" "安装 docker-compose-plugin 后重试"
     fi
