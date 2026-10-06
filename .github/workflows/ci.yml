@@ -157,6 +157,65 @@ jobs:
 
           docker logs qingyu-ci --tail 40
 
+  install-smoke:
+    name: 干净 Debian 一键安装验收
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+
+      # 关键：容器里什么都没有（无 curl / git / Docker），全靠 install.sh 自己检测安装。
+      # 挂宿主 Docker socket —— 脚本装出来的 CLI 直接用宿主守护进程构建和跑容器；
+      # --network host 让脚本在容器内也能访问到应用发布出来的端口做健康检查。
+      - name: 起一个「什么都没有」的 Debian
+        run: |
+          docker run -d --name debian-clean --network host \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD":/src:ro \
+            debian:bookworm-slim sleep infinity
+          # 最小镜像缺 tar / iproute2，先补齐脚本一定会用到的基础件
+          docker exec debian-clean bash -c '
+            set -eux
+            apt-get update -qq
+            apt-get install -y -qq ca-certificates procps iproute2 tar gzip
+          '
+
+      - name: 一键安装（curl / git / Docker 全部由脚本自动装）
+        run: |
+          docker exec debian-clean bash -c '
+            set -o pipefail
+            bash /src/deploy/install.sh --port 8788 -y 2>&1 | tee /tmp/install.log
+          '
+
+      - name: 验收：健康检查 + doctor 体检 + 幂等重跑
+        run: |
+          echo "== 1. 宿主机直连健康检查 =="
+          curl -fsS http://127.0.0.1:8788/healthz
+          echo
+
+          echo "== 2. 部署信息 =="
+          docker exec debian-clean bash /src/deploy/install.sh info | tail -n 20
+
+          echo "== 3. doctor 体检（应全绿或只有公网类提示） =="
+          docker exec debian-clean bash /src/deploy/install.sh doctor
+
+          echo "== 4. 幂等重跑：.env 必须原封不动 =="
+          docker exec debian-clean bash -c 'sha256sum /opt/qingyu-universal/.env > /tmp/env.sha'
+          docker exec debian-clean bash /src/deploy/install.sh --port 8788 -y \
+            2>&1 | tail -n 5
+          docker exec debian-clean sha256sum -c /tmp/env.sha
+
+      - name: 失败时留下现场
+        if: failure()
+        run: |
+          docker exec debian-clean sh -c "tail -n 120 /tmp/install.log" 2>/dev/null || true
+          docker ps -a || true
+          docker logs qingyu-app --tail 80 || true
+
+      - name: 清理
+        if: always()
+        run: docker rm -f debian-clean qingyu-app 2>/dev/null || true
+
   postgres:
     name: PostgreSQL 真实库集成测试
     runs-on: ubuntu-latest
