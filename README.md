@@ -811,6 +811,10 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
   - **相关阅读**：前台「相关阅读」本就已接，本轮把 `GET /api/posts/:id/relations` 从兼容占位收紧为强契约（关联项 / 反向链接的完整字段）
   - **单篇数据统计**：`GET /api/posts/:id/stats`（读计数）补登记进契约，`POST` 上报同时收紧（`views` / `like` 请求体 + 去重时的 `duplicated` 字段），三条兼容路由全部移出 misc
   - **契约与测试**：新增 `PostRelationItem` / `PostRelationsResponse` / `PostStatsBody` / `PostStatsResponse` / `OgUploadBody` / `OgUploadResponse` 六个 schema 与 4 条测试，测试 **151 passed / 5 skipped**
+- [x] **v0.9-y** 同步原版最近三项（`c10eb07` / `daf85a8` / `c9559ef`，上游 2.10.60 → 2.10.63）：
+  - **导航旧配置自动补齐**：老配置首次加载按 `navDefaultsVersion` 自动补上新增默认导航项，补过一次即记版本，用户删掉的项不会再被加回来（同步 2.10.63 时已带上）
+  - **导航显示开关**：高级设置 → 功能开关里的「显示新增导航项（分类 / 历史 / 系列 / 热门）」，关掉只隐藏这四项，自定义链接不受影响（同步 2.10.63 时已带上）
+  - **AI 结果不用等宽字体**：编辑器 AI 助手的结果区由 `<pre>` 改为正文样式（保留换行与滚动，跟随系统字体），不再整段等宽代码感
 - [x] **v0.3** 路径级契约覆盖完成（60 条路径；兼容接口响应字段将逐步收紧）
 - [x] **v0.3.1-a** Redis / Valkey 可选限流（配置 `REDIS_URL` 即启用）
 - [x] **v0.3.1-b** PostgreSQL 运行时适配（配置 `DATABASE_URL` 即切换）

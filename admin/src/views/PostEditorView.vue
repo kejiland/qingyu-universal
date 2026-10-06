@@ -680,7 +680,9 @@ async function copyText(text: string): Promise<void> {
           <p v-if="aiError" class="text-[12.5px] text-danger">{{ aiError }}</p>
 
           <div v-if="aiResult" class="rounded-xl border border-line bg-surface-2 p-3 space-y-2">
-            <pre class="whitespace-pre-wrap break-words max-h-44 overflow-auto text-[13px] leading-[1.7]">{{ aiResult }}</pre>
+            <div
+              class="max-h-44 overflow-auto text-[13px] leading-[1.7] break-words whitespace-pre-wrap"
+            >{{ aiResult }}</div>
             <div class="flex items-center gap-1.5 flex-wrap">
               <button class="btn btn-sm btn-primary" @click="aiApply('replace')">
                 <Check :size="14" />
