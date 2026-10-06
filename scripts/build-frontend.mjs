@@ -6,6 +6,7 @@ const jobs = [
   { src: 'app/public/app.js', out: 'app/public/app.min.js' },
   { src: 'app/public/admin-legacy.js', out: 'app/public/admin-legacy.min.js' },
   { src: 'app/public/boot.js', out: 'app/public/boot.min.js' },
+  { src: 'app/public/i18n.js', out: 'app/public/i18n.min.js' },
   { src: 'app/public/polish.css', out: 'app/public/polish.min.css', loader: 'css' }
 ];
 
