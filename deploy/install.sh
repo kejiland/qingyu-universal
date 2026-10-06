@@ -9,7 +9,8 @@
 #     curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh | bash -s -- --domain blog.example.com
 #
 # 常用子命令：
-#     install（默认） | upgrade | backup | restore <file> | logs | status | info | uninstall
+#     install（默认） | upgrade | backup | restore <file> | logs | status | info
+#     start | stop | restart | rollback | uninstall
 #
 # 设计原则：可重复执行；已存在的 .env 与数据库绝不覆盖。
 # ============================================================
@@ -64,6 +65,21 @@ ensure_curl() {
   have curl || die "curl 安装失败，请手动安装后重试"
 }
 
+# Git 用于「新装时留下版本历史」和「一键回滚」。
+# 它不是硬依赖：装不上就退回压缩包方式，回滚走下载历史版本的路，功能不缺失。
+ensure_git() {
+  have git && return 0
+  log "未检测到 git，正在安装…（用于版本管理与一键回滚）"
+  case "$(detect_distro)" in
+    alpine) $SUDO apk add --no-cache git ;;
+    debian|ubuntu|raspbian) $SUDO apt-get update -qq && $SUDO apt-get install -y -qq git ;;
+    fedora|rhel|centos|rocky|almalinux) $SUDO dnf install -y -q git ;;
+    arch|manjaro) $SUDO pacman -Sy --noconfirm git ;;
+    *) warn "当前系统无法自动安装 git，将改用压缩包方式（回滚功能不受影响）"; return 0 ;;
+  esac
+  have git || warn "git 自动安装失败，将改用压缩包方式（回滚功能不受影响）"
+}
+
 # 判断 Docker 是否真的可用：二进制存在不等于守护进程可达
 # （例如 WSL 里 PATH 上有 Windows 侧的 docker，但守护进程连不上）
 docker_ready() {
@@ -82,16 +98,18 @@ docker_ready() {
 # ---------- 参数解析 ----------
 COMMAND="install"
 ARGS=()
+# 用户是否显式传了 --ref（REF 本身有默认值，不记一笔区分不出来）
+REF_SET="${REF_SET:-0}"
 # 数据库选择（脚本开了 set -u，未设置的变量必须先给默认值）
 DB_KIND="${DB_KIND:-}"
 DATABASE_URL_OPT="${DATABASE_URL_OPT:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
-    install|upgrade|backup|restore|logs|status|info|uninstall|help) COMMAND="$1" ;;
+    install|upgrade|backup|restore|logs|status|info|start|stop|restart|rollback|uninstall|help) COMMAND="$1" ;;
     --domain)   DOMAIN="${2:-}"; shift ;;
     --email)    EMAIL="${2:-}"; shift ;;
     --dir)      INSTALL_DIR="${2:-}"; shift ;;
-    --ref)      REF="${2:-}"; shift ;;
+    --ref)      REF="${2:-}"; REF_SET=1; shift ;;
     --repo)     REPO="${2:-}"; shift ;;
     --port)     APP_PORT="${2:-}"; shift ;;
     --db)       DB_KIND="${2:-}"; shift ;;
@@ -111,8 +129,12 @@ usage() {
 
   install                 安装并启动（默认）
   upgrade                 拉取新版本并重建（保留数据）
+  rollback                回滚到上一个版本（回滚前自动备份）
   backup                  生成数据库快照到 data/backups
   restore <快照文件>       从快照恢复（请先 docker compose stop app）
+  start                   启动服务（停过之后再拉起来）
+  stop                    停止服务（配置和数据都保留）
+  restart                 重启应用（改完 .env 后用它生效）
   logs                    查看应用日志
   status                  查看容器与健康状态
   info                    查看部署信息（访问地址、初始化密钥、版本、文章数…）
@@ -169,30 +191,76 @@ prepare_install_dir() {
   fi
 }
 
-# 取构建版本（commit 短 SHA），用于确认「升级到底生效没有」。
-# 优先本地 git；否则读 GitHub 的 Atom feed —— 它走网页，不受 api.github.com
-# 的限流（未认证每小时 60 次，实测经常直接 403）。
-# 都取不到则返回空串，不影响部署。
+# 通过 GitHub 的 Atom feed 取某个分支 / 标签的完整 commit SHA。
+# 它走网页，不受 api.github.com 的限流（未认证每小时 60 次，实测经常直接 403）。
+# 取不到则返回空串，不影响部署。
 #
 # 注意：这里先把响应存进变量再解析，**不能**写成
 #   curl … | grep -m1 …
 # 因为脚本开了 set -o pipefail，而 grep -m1 命中后立即退出会让 curl 收到
 # SIGPIPE（141），pipefail 把整条管道判为失败 —— 而且这是竞态：
 # curl 先写完就正常，所以单独测试能过、在脚本里却拿到空值。
-resolve_revision() {
-  local sha="" body=""
-  if [ -d "$INSTALL_DIR/.git" ] && have git; then
-    sha=$(git -C "$INSTALL_DIR" rev-parse --short=7 HEAD 2>/dev/null) || sha=""
-  fi
-  if [ -z "$sha" ]; then
-    body=$(curl -fsS --max-time 8 -H 'User-Agent: curl' \
-           "https://github.com/$REPO/commits/$REF.atom" 2>/dev/null) || body=""
-    if [ -n "$body" ]; then
-      sha=$(printf '%s' "$body" | grep -oE 'Grit::Commit/[0-9a-f]{40}' | sed -n '1s|.*/||p') || sha=""
-      sha="${sha:0:7}"
-    fi
+atom_revision() {
+  local ref="${1:-$REF}" body="" sha=""
+  [ -n "$ref" ] || return 0
+  body=$(curl -fsS --max-time 8 -H 'User-Agent: curl' \
+         "https://github.com/$REPO/commits/$ref.atom" 2>/dev/null) || body=""
+  if [ -n "$body" ]; then
+    sha=$(printf '%s' "$body" | grep -oE 'Grit::Commit/[0-9a-f]{40}' | sed -n '1s|.*/||p') || sha=""
   fi
   printf '%s' "$sha"
+}
+
+# 把「分支 / 标签 / commit」统一成可下载的完整 SHA。
+# 纯十六进制（用户直接给了 commit）不联网；其余问一次 Atom feed。
+ref_to_full() {
+  local ref="${1:-}" body=""
+  [ -n "$ref" ] || return 0
+  case "$ref" in
+    *[!0-9a-fA-F]*) body="$(atom_revision "$ref")" ;;
+    *)
+      if [ "${#ref}" -ge 40 ]; then
+        printf '%s' "$ref"
+        return 0
+      fi
+      # 短 SHA：本地有 git 就本地展开，否则原样带回（GitHub 也认短 SHA）
+      if [ -d "$INSTALL_DIR/.git" ] && have git; then
+        body="$(git -C "$INSTALL_DIR" rev-parse --verify -q "$ref^{commit}" 2>/dev/null || true)"
+      elif [ -n "${SOURCE_ROOT:-}" ] && [ -d "$SOURCE_ROOT/.git" ] && have git; then
+        body="$(git -C "$SOURCE_ROOT" rev-parse --verify -q "$ref^{commit}" 2>/dev/null || true)"
+      fi
+      [ -n "$body" ] || body="$ref"
+      ;;
+  esac
+  printf '%s' "$body"
+}
+
+# 当前安装对应的完整 SHA（版本记录文件是压缩包安装的「版本账本」）
+resolve_revision_full() {
+  local sha=""
+  if [ -d "$INSTALL_DIR/.git" ] && have git; then
+    sha=$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null) || sha=""
+  fi
+  if [ -z "$sha" ]; then
+    sha="$(head -n1 "$(cur_ref_file)" 2>/dev/null || true)"
+    sha="$(printf '%s' "$sha" | tr -d '[:space:]')"
+  fi
+  if [ -z "$sha" ] && [ -n "${SOURCE_ROOT:-}" ] && [ -d "$SOURCE_ROOT/.git" ] && have git; then
+    sha=$(git -C "$SOURCE_ROOT" rev-parse HEAD 2>/dev/null) || sha=""
+  fi
+  if [ -z "$sha" ]; then
+    sha="$(atom_revision "$REF")"
+  fi
+  printf '%s' "$sha"
+}
+
+# 取构建版本（commit 短 SHA），用于确认「升级到底生效没有」。
+resolve_revision() {
+  local full=""
+  full="$(resolve_revision_full)"
+  if [ -n "$full" ]; then
+    printf '%.7s' "$full"
+  fi
 }
 # Docker 命令前缀：非 root 且当前用户访问不了守护进程（不在 docker 组）时用 sudo
 resolve_docker() {
@@ -230,6 +298,31 @@ install_docker() {
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" >/dev/null 2>&1 && pwd)"
 SOURCE_ROOT="$(cd -- "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd || true)"
 
+# 克隆到临时目录再整树覆盖 —— 安装目录里已有的 .env / data 不会被动到。
+# 成功后安装目录就是 git 检出，之后 upgrade / rollback 都走本地历史，又快又稳。
+clone_source() {
+  have git || return 1
+  local tmp
+  tmp="$(mktemp -d)"
+  log "用 Git 获取代码：$REPO@$REF"
+  if ! git clone --quiet "https://github.com/$REPO.git" "$tmp/src" 2>/dev/null; then
+    rm -rf "$tmp"
+    return 1
+  fi
+  if ! git -C "$tmp/src" checkout --quiet "$REF" 2>/dev/null \
+     && ! git -C "$tmp/src" checkout --quiet "origin/$REF" 2>/dev/null; then
+    rm -rf "$tmp"
+    # 用户明确指定了版本就必须精确命中；没指定就用克隆出来的默认分支
+    [ "$REF_SET" = "1" ] && die "找不到版本：$REF（请确认分支 / 标签 / commit 是否存在）"
+    return 1
+  fi
+  cp -a "$tmp/src"/. "$INSTALL_DIR/"
+  rm -rf "$tmp"
+  remember_cur_ref "$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || true)"
+  log "代码已就绪（git 检出，支持 upgrade / rollback）"
+  return 0
+}
+
 fetch_source() {
   prepare_install_dir
   # 情况一：从仓库内运行（本地已有完整代码）→ 直接同步过去
@@ -249,31 +342,114 @@ fetch_source() {
         --exclude='./.env' \
         . | tar -C "$INSTALL_DIR" -xf -
     fi
+    remember_cur_ref "$(git -C "$SOURCE_ROOT" rev-parse HEAD 2>/dev/null || true)"
     return
   fi
-  # 情况二：curl | bash → 下载代码包
+  # 情况二：已经是 git 检出 → 不重复下载
+  if [ -d "$INSTALL_DIR/.git" ] && have git; then
+    # 例外：用户明确给了 --ref，就按指定版本切换
+    if [ "$REF_SET" = "1" ]; then
+      update_source
+      return
+    fi
+    remember_cur_ref "$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || true)"
+    log "代码已是 git 检出，跳过下载"
+    return
+  fi
+  # 情况三：远程一键安装 → 优先克隆（带回完整历史），失败退回压缩包
+  clone_source && return 0
   download_source
 }
 
-# 下载最新代码包并覆盖到安装目录。
+# 下载指定版本的代码包并覆盖到安装目录。
 # 只覆盖代码，不动 .env 与 data —— 压缩包里本来就不含它们。
-# 供两种场景使用：curl|bash 首次安装，以及 upgrade（安装目录不是 git 仓库时）。
+# 用法：download_source            → 下载 $REF（默认当前分支）
+#       download_source <commit>   → 回滚时下载某个历史版本
 download_source() {
-  log "下载代码：$REPO@$REF"
+  local target="${1:-$REF}" full="" exact=0
+  log "下载代码：$REPO@$target"
   need_root
   ensure_curl
-  local tmp
+  full="$(ref_to_full "$target")"
+  [ -n "$full" ] || full="$target"
+  # 只有拿到精确 commit 才记账；只拿到分支名时宁可不记，
+  # 也绝不写一条「回滚到最新版」的假记录
+  case "$full" in
+    *[!0-9a-fA-F]*) exact=0 ;;
+    *) exact=1 ;;
+  esac
+  local tmp url1 url2 url3
   tmp="$(mktemp -d)"
-  curl -fsSL "https://github.com/$REPO/archive/refs/heads/$REF.tar.gz" -o "$tmp/src.tgz" \
-    || curl -fsSL "https://github.com/$REPO/archive/refs/tags/$REF.tar.gz" -o "$tmp/src.tgz" \
-    || die "下载失败：https://github.com/$REPO（请确认仓库与分支/标签）"
+  case "$full" in
+    *[!0-9a-fA-F]*)
+      # 分支 / 标签
+      url1="https://github.com/$REPO/archive/refs/heads/$full.tar.gz"
+      url2="https://github.com/$REPO/archive/refs/tags/$full.tar.gz"
+      url3="https://github.com/$REPO/archive/$full.tar.gz"
+      ;;
+    *)
+      # commit（回滚走这里）：GitHub 支持直接按 SHA 打包
+      url1="https://github.com/$REPO/archive/$full.tar.gz"
+      url2=""
+      url3=""
+      ;;
+  esac
+  if [ -n "$url2" ]; then
+    curl -fsSL "$url1" -o "$tmp/src.tgz" \
+      || curl -fsSL "$url2" -o "$tmp/src.tgz" \
+      || { [ -n "$url3" ] && curl -fsSL "$url3" -o "$tmp/src.tgz"; } \
+      || die "下载失败：https://github.com/$REPO（请确认仓库与分支/标签/版本）"
+  else
+    curl -fsSL "$url1" -o "$tmp/src.tgz" \
+      || die "下载失败：https://github.com/$REPO/archive/$full（版本可能已被删除）"
+  fi
   tar -xzf "$tmp/src.tgz" -C "$tmp"
   local extracted
   extracted="$(find "$tmp" -maxdepth 1 -type d -name '*qingyu*' | head -n1)"
   [ -n "$extracted" ] || extracted="$(find "$tmp" -maxdepth 1 -mindepth 1 -type d | head -n1)"
   cp -a "$extracted"/. "$INSTALL_DIR/"
   rm -rf "$tmp"
-  log "代码已更新到 $REF"
+  if [ "$exact" = "1" ]; then
+    remember_cur_ref "$full"
+    log "代码已更新到 $(printf '%.7s' "$full")"
+  else
+    warn "本次没能确认精确版本号，暂不生成回滚记录（下次升级会重新尝试）"
+    log "代码已更新到 $full"
+  fi
+}
+
+# ---------- 版本记录与回滚 ----------
+# 版本账本：cur 记「现在是哪版」，prev 记「上一版是哪版」。
+# 两个文件都放在安装目录里（已加入 .gitignore，不会污染 git status）。
+prev_ref_file() { printf '%s/.qingyu-prev-ref' "$INSTALL_DIR"; }
+cur_ref_file()  { printf '%s/.qingyu-cur-ref' "$INSTALL_DIR"; }
+
+read_ref_file() {
+  head -n1 "${1:-}" 2>/dev/null | tr -d '[:space:]' || true
+}
+
+# 两个版本号是否指向同一个 commit（兼容一长一短的 SHA 写法）
+refs_equal() {
+  local a b m
+  a="$(printf '%s' "${1:-}" | tr 'A-F' 'a-f')"
+  b="$(printf '%s' "${2:-}" | tr 'A-F' 'a-f')"
+  [ -n "$a" ] && [ -n "$b" ] || return 1
+  [ "$a" = "$b" ] && return 0
+  m="${#a}"; [ "${#b}" -lt "$m" ] && m="${#b}"
+  [ "$m" -ge 7 ] && [ "${a:0:$m}" = "${b:0:$m}" ]
+}
+
+# 记录「现在是哪个版本」——压缩包安装没有 git，靠这个小文件当版本账本
+remember_cur_ref() {
+  local sha="${1:-}"
+  [ -n "$sha" ] || return 0
+  printf '%s\n' "$sha" > "$(cur_ref_file)"
+}
+
+remember_prev_ref() {
+  local sha="${1:-}"
+  [ -n "$sha" ] || return 0
+  printf '%s\n' "$sha" > "$(prev_ref_file)"
 }
 
 # upgrade 专用的取码逻辑：
@@ -284,15 +460,67 @@ download_source() {
 # 用户执行了 upgrade 却拿不到新代码。
 update_source() {
   if [ -d "$INSTALL_DIR/.git" ] && have git; then
+    # 显式给了 --ref：切到那个版本（分支 / 标签 / commit 都行），并记下回滚点
+    if [ "$REF_SET" = "1" ]; then
+      log "切换到指定版本 $REF…"
+      git -C "$INSTALL_DIR" fetch --quiet origin --tags || warn "拉取远端失败，改用本地已有的版本"
+      local target=""
+      target="$(git -C "$INSTALL_DIR" rev-parse --verify -q "$REF^{commit}" 2>/dev/null || true)"
+      [ -n "$target" ] || target="$(git -C "$INSTALL_DIR" rev-parse --verify -q "origin/$REF^{commit}" 2>/dev/null || true)"
+      [ -n "$target" ] || die "找不到版本：$REF（请确认分支 / 标签是否存在）"
+      local cur
+      cur="$(git -C "$INSTALL_DIR" rev-parse HEAD)"
+      if [ "$cur" != "$target" ]; then
+        remember_prev_ref "$cur"
+        git -C "$INSTALL_DIR" reset --hard "$target" >/dev/null
+        remember_cur_ref "$target"
+        log "已切换到 ${target:0:7}（可用 rollback 回到 ${cur:0:7}）"
+      else
+        log "当前已经是 $REF"
+      fi
+      return 0
+    fi
     log "从 git 拉取最新代码…"
+    local before after
+    before="$(git -C "$INSTALL_DIR" rev-parse HEAD)"
     git -C "$INSTALL_DIR" pull --ff-only || warn "git pull 失败，继续用现有代码重建"
+    after="$(git -C "$INSTALL_DIR" rev-parse HEAD)"
+    remember_cur_ref "$after"
+    if [ "$before" != "$after" ]; then
+      remember_prev_ref "$before"
+      log "版本已更新 ${before:0:7} → ${after:0:7}（不满意可用 rollback 退回）"
+    fi
     return 0
   fi
+  # 本地 checkout 运行 → 复制本地代码，并记好回滚点
   if [ -n "${SOURCE_ROOT:-}" ] && [ -f "$SOURCE_ROOT/compose.yaml" ] && [ "$SOURCE_ROOT" != "$INSTALL_DIR" ]; then
+    local before_local after_local
+    before_local="$(read_ref_file "$(cur_ref_file)")"
     fetch_source
+    after_local="$(read_ref_file "$(cur_ref_file)")"
+    if [ -n "$before_local" ] && [ -n "$after_local" ] && ! refs_equal "$before_local" "$after_local"; then
+      remember_prev_ref "$before_local"
+      log "版本已更新（不满意可用 rollback 退回）"
+    fi
     return 0
   fi
-  download_source
+
+  # 压缩包安装：先记下「升级前」的版本，再取新代码
+  local before after
+  before="$(read_ref_file "$(cur_ref_file)")"
+  # 装过 git 之后，升级顺手把它变成 git 检出（以后升级更快、可精确回滚）
+  if [ ! -d "$INSTALL_DIR/.git" ] && have git && clone_source; then
+    after="$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || true)"
+  else
+    download_source
+    after="$(read_ref_file "$(cur_ref_file)")"
+  fi
+  if [ -n "$before" ] && [ -n "$after" ] && ! refs_equal "$before" "$after"; then
+    remember_prev_ref "$before"
+    log "版本已更新 ${before:0:7} → ${after:0:7}（不满意可用 rollback 退回）"
+  elif [ -z "$before" ] && [ -n "$after" ]; then
+    log "已记录当前版本 ${after:0:7}（从下一次升级起可用 rollback）"
+  fi
 }
 
 # ---------- 数据库选择 ----------
@@ -877,6 +1105,7 @@ cmd_install() {
   need_root
   resolve_docker
   ensure_curl
+  ensure_git
   install_docker
   fetch_source
   interact_mode
@@ -898,6 +1127,7 @@ cmd_upgrade() {
   need_root
   resolve_docker
   [ -d "$INSTALL_DIR" ] || die "未找到安装目录：$INSTALL_DIR"
+  ensure_git
   update_source
   resolve_mode
   # 先备份，再升级
@@ -911,6 +1141,95 @@ cmd_upgrade() {
   compose up -d --build
   wait_healthy
   log "升级完成（版本 $BUILD_REVISION）"
+}
+
+# ---------- 日常运维：启动 / 停止 / 重启 / 回滚 ----------
+cmd_start() {
+  need_root
+  resolve_docker
+  [ -d "$INSTALL_DIR" ] || die "未找到安装目录：$INSTALL_DIR"
+  log "启动服务…"
+  compose up -d
+  wait_healthy
+  log "已启动：$(env_value SITE_URL)"
+}
+
+cmd_stop() {
+  need_root
+  resolve_docker
+  [ -d "$INSTALL_DIR" ] || die "未找到安装目录：$INSTALL_DIR"
+  log "停止服务（配置与数据全部保留）…"
+  compose stop
+  log "已停止。重新启动：$0 start"
+}
+
+cmd_restart() {
+  need_root
+  resolve_docker
+  [ -d "$INSTALL_DIR" ] || die "未找到安装目录：$INSTALL_DIR"
+  log "重启应用（改完 .env 后用它生效）…"
+  compose restart app
+  wait_healthy
+  log "已重启：$(env_value SITE_URL)"
+}
+
+# 回滚到「上一次升级之前」的代码版本。
+# 两种安装形态都支持：
+#   · git 检出 → 本地 reset（不联网）
+#   · 压缩包   → 按版本号重新下载那个历史代码包
+# 注意：只回滚代码，数据库表结构不会自动倒退 —— 所以先备份。
+cmd_rollback() {
+  need_root
+  resolve_docker
+  [ -d "$INSTALL_DIR" ] || die "未找到安装目录：$INSTALL_DIR"
+
+  local prev cur
+  prev="$(read_ref_file "$(prev_ref_file)")"
+  [ -n "$prev" ] || die "还没有可回滚的版本记录。
+  提示：这份安装升级过一次之后才会生成记录。
+  如果你从未执行过 upgrade，先运行一次：$0 upgrade"
+
+  if [ -d "$INSTALL_DIR/.git" ] && have git; then
+    cur="$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || true)"
+  else
+    cur="$(read_ref_file "$(cur_ref_file)")"
+  fi
+  if [ -n "$cur" ] && refs_equal "$cur" "$prev"; then
+    die "当前已经是记录中的版本 $(printf '%.7s' "$prev")，无需回滚"
+  fi
+  [ -n "$cur" ] || warn "未记录当前版本号，回滚后将无法一键滚回（建议回滚前先 backup）"
+
+  # 升级时数据库已经迁移过，回滚代码不会把表结构退回去，先留个快照
+  cmd_backup || warn "备份失败，继续回滚 —— 请自行确认数据安全"
+
+  warn "准备把代码回滚到 $(printf '%.7s' "$prev")${cur:+（当前 $(printf '%.7s' "$cur")）}。"
+  warn "数据库表结构保持现状，不会自动回退；回滚后若报错，可用 restore 恢复快照。"
+  if [ "$ASSUME_YES" != "1" ]; then
+    if [ ! -r /dev/tty ]; then
+      die "当前不是交互环境，确认无误后加 -y 执行：$0 rollback -y"
+    fi
+    ask "确认回滚？" "n"
+    case "$REPLY" in
+      y|Y|yes|YES) ;;
+      *) die "已取消回滚" ;;
+    esac
+  fi
+
+  # 先把「回滚前」的版本记下来，回滚完还能再滚回去
+  [ -n "$cur" ] && remember_prev_ref "$cur"
+  if [ -d "$INSTALL_DIR/.git" ] && have git; then
+    git -C "$INSTALL_DIR" reset --hard "$prev" >/dev/null
+    remember_cur_ref "$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || true)"
+  else
+    download_source "$prev"
+  fi
+  BUILD_REVISION="$(resolve_revision)"
+  [ -n "$BUILD_REVISION" ] || BUILD_REVISION=unknown
+  export BUILD_REVISION
+  log "回滚到 ${BUILD_REVISION}，重建容器…"
+  compose up -d --build
+  wait_healthy
+  log "回滚完成（版本 $BUILD_REVISION）。再执行一次 rollback 可回到回滚前的版本。"
 }
 
 cmd_backup() {
@@ -1083,6 +1402,10 @@ case "$COMMAND" in
   logs) cmd_logs ;;
   status) cmd_status ;;
   info) cmd_info ;;
+  start) cmd_start ;;
+  stop) cmd_stop ;;
+  restart) cmd_restart ;;
+  rollback) cmd_rollback ;;
   uninstall) cmd_uninstall ;;
   *) usage; die "未知命令：$COMMAND" ;;
 esac

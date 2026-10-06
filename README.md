@@ -322,13 +322,19 @@ cd ~/qingyu-universal          # 你的源码目录
 
 ```bash
 ./deploy/install.sh upgrade          # 升级（升级前自动备份，数据保留）
+./deploy/install.sh rollback         # 回滚到上一个版本（回滚前自动备份，可再滚回来）
 ./deploy/install.sh backup           # 数据库快照 → data/backups
 ./deploy/install.sh restore <快照>    # 从快照恢复
+./deploy/install.sh start            # 启动服务
+./deploy/install.sh stop             # 停止服务（数据保留）
+./deploy/install.sh restart          # 重启应用（改完 .env 后用它生效）
 ./deploy/install.sh logs             # 查看日志
 ./deploy/install.sh status           # 容器与健康状态
 ./deploy/install.sh info             # 查看访问地址、初始化密钥、版本、文章数等部署信息
 ./deploy/install.sh uninstall        # 停止并删除容器（数据卷保留）
 ```
+
+> 回滚对两种安装方式都有效：git 检出走本地历史（不联网），压缩包安装按版本号重新下载历史代码包。脚本会按需自动安装 git，装不上也不影响回滚。
 
 ---
 

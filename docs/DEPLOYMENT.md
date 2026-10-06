@@ -122,7 +122,10 @@ Compose：
 ```bash
 ./deploy/install.sh backup
 ./deploy/install.sh restore <快照文件>
+./deploy/install.sh rollback        # 升级后发现问题：退回上一个代码版本（表结构不变，先备份）
 ```
+
+> rollback 说明：git 检出直接本地回退；压缩包安装会按历史版本重新下载。升级时脚本会尝试自动安装 git，并把压缩包安装升级成 git 检出。
 
 Kubernetes：
 
