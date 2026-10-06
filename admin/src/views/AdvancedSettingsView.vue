@@ -17,7 +17,7 @@ const navText = ref('[]');
 const footerNavText = ref('[]');
 const linksText = ref('[]');
 const adsText = ref('{}');
-const features = ref({ pageSize: 8, errorReport: true, commentGuard: true, richContent: true });
+const features = ref({ pageSize: 8, errorReport: true, commentGuard: true, richContent: true, navExtras: true });
 const moderate = ref(false);
 const blocklist = ref('');
 
@@ -36,6 +36,48 @@ function asObject(value: unknown): Record<string, unknown> {
 
 function arr(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+/** 顶部导航默认项版本：与上游旧后台保持一致 */
+const NAV_DEFAULTS_VERSION = 1;
+/** 与上游一致的内置导航默认项（text 留空，前台按 i18n key 自动翻译） */
+const DEFAULT_NAV_ITEMS = [
+  { i18n: 'nav.home', text: '', url: '/' },
+  { i18n: 'nav.tags', text: '', url: '/tags' },
+  { i18n: 'nav.categories', text: '', url: '/categories' },
+  { i18n: 'nav.history', text: '', url: '/history' },
+  { i18n: 'nav.series', text: '', url: '/series' },
+  { i18n: 'nav.popular', text: '', url: '/popular' },
+  { i18n: 'nav.archive', text: '', url: '/archive' },
+  { i18n: 'nav.guestbook', text: '', url: '/guestbook' },
+  { i18n: 'nav.about', text: '', url: '/about' }
+];
+
+function navUrlKey(item: { url?: string }): string {
+  const u = String(item?.url || '/').replace(/^#/, '');
+  if (u.charAt(0) !== '/') return u;
+  return u.replace(/\/+$/, '') || '/';
+}
+
+/** 旧配置首次加载时补齐新增的默认导航项（用户删除过的不会在保存后被加回） */
+function mergeDefaultNav(items: unknown): unknown[] {
+  if (!Array.isArray(items)) return [];
+  if (!items.length) return items;
+  const out = items.slice() as { url?: string }[];
+  const order: Record<string, number> = {};
+  DEFAULT_NAV_ITEMS.forEach((it, i) => { order[navUrlKey(it)] = i; });
+  for (const def of DEFAULT_NAV_ITEMS) {
+    const key = navUrlKey(def);
+    if (out.some((it) => navUrlKey(it) === key)) continue;
+    let insertAt = out.length;
+    for (let i = 0; i < out.length; i++) {
+      const curKey = navUrlKey(out[i]);
+      const curOrder = Object.prototype.hasOwnProperty.call(order, curKey) ? order[curKey] : Infinity;
+      if (curOrder > order[key]) { insertAt = i; break; }
+    }
+    out.splice(insertAt, 0, def);
+  }
+  return out;
 }
 
 onMounted(async () => {
@@ -70,7 +112,9 @@ onMounted(async () => {
       avatar: String(prof.avatar ?? ''),
       email: String(prof.email ?? '')
     };
-    navText.value = JSON.stringify(safeParse(settings.nav_menu, safeParse(settings.nav, [])), null, 2);
+    let navItems = safeParse(settings.nav_menu, safeParse(settings.nav, []));
+    if (Number(settings.nav_defaults_version || 0) < NAV_DEFAULTS_VERSION) navItems = mergeDefaultNav(navItems);
+    navText.value = JSON.stringify(navItems, null, 2);
     footerNavText.value = JSON.stringify(safeParse(settings.footer_nav, []), null, 2);
     linksText.value = JSON.stringify(safeParse(settings.friend_links, arr(footer.links)), null, 2);
     adsText.value = JSON.stringify(asObject(featureObj.ads), null, 2);
@@ -78,7 +122,8 @@ onMounted(async () => {
       pageSize: Number(featureObj.pageSize) || 8,
       errorReport: featureObj.errorReport !== false,
       commentGuard: featureObj.commentGuard !== false,
-      richContent: featureObj.richContent !== false
+      richContent: featureObj.richContent !== false,
+      navExtras: featureObj.navExtras !== false
     };
     moderate.value = settings.moderate_comments === '1';
     blocklist.value = String(settings.comment_blocklist ?? '');
@@ -127,6 +172,7 @@ async function save(): Promise<void> {
       profile: { ...profile.value },
       nav: navJson,
       nav_menu: navJson,
+      nav_defaults_version: String(NAV_DEFAULTS_VERSION),
       footer_nav: JSON.stringify(footerNav),
       friend_links: JSON.stringify(links),
       features: featurePayload,
@@ -194,6 +240,7 @@ async function save(): Promise<void> {
         <label class="flex items-center gap-2 text-[13px]"><input v-model="features.errorReport" type="checkbox" /> 允许前台上报错误日志</label>
         <label class="flex items-center gap-2 text-[13px]"><input v-model="features.commentGuard" type="checkbox" /> 启用评论反机器人保护</label>
         <label class="flex items-center gap-2 text-[13px]"><input v-model="features.richContent" type="checkbox" /> 启用增强正文渲染</label>
+        <label class="flex items-center gap-2 text-[13px]"><input v-model="features.navExtras" type="checkbox" /> 显示新增导航项（分类 / 历史 / 系列 / 热门）</label>
       </section>
 
       <section class="card p-5 space-y-4">

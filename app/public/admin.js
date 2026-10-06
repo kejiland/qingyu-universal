@@ -2409,7 +2409,7 @@
     if (isReplace) {
       extraPaste = '<button type="button" class="ab-btn sm ghost" data-abai-use="paste">' + icon('download', 12) + ' ' + esc(t('ai.assist.pasteEnd')) + '</button>';
     }
-    return '<div class="ab-ai-result"><pre>' + esc(result) + '</pre>'
+    return '<div class="ab-ai-result"><div class="ab-ai-text">' + esc(result) + '</div>'
       + '<div class="ab-row" style="gap:8px;margin-top:8px;flex-wrap:wrap">'
       + '<button type="button" class="ab-btn sm primary" data-abai-use="' + useAct + '">' + esc(useLabel) + '</button>'
       + extraPaste
@@ -4534,6 +4534,7 @@
     writeAdminProfile(settingsDraft.profile);
     fillSettings(content);
   }
+  var NAV_DEFAULTS_VERSION = 1;
   /** 从服务端数据初始化草稿（仅首次或重置时调用，避免覆盖用户未保存的输入） */
   function syncDraftFromServer() {
     var s = settingsCache;
@@ -4557,7 +4558,9 @@
     settingsDraft.profile = {
       name: prof.name || '', bio: prof.bio || '', avatar: prof.avatar || '', email: prof.email || ''
     };
-    settingsDraft.nav = parseArr(s.nav_menu, defaultNavItems());
+    var navItems = parseArr(s.nav_menu, defaultNavItems());
+    if (Number(s.nav_defaults_version || 0) < NAV_DEFAULTS_VERSION) navItems = mergeDefaultNavItems(navItems);
+    settingsDraft.nav = navItems;
     settingsDraft.blocklist = String(s.comment_blocklist || '');
 
     settingsDraft.footerNav = parseArr(s.footer_nav, defaultFooterNav());
@@ -4566,12 +4569,40 @@
   /** 默认顶部导航（与前台渲染兜底一致）：站点未自定义导航时作为基础项 */
   function defaultNavItems() {
     return [
-      { i18n: 'nav.home',      text: t('nav.home'),      url: '/' },
-      { i18n: 'nav.tags',      text: t('nav.tags'),      url: '/tags' },
-      { i18n: 'nav.archive',   text: t('nav.archive'),   url: '/archive' },
-      { i18n: 'nav.guestbook', text: t('nav.guestbook'), url: '/guestbook' },
-      { i18n: 'nav.about',     text: t('nav.about'),     url: '/about' }
+      { i18n: 'nav.home',       text: t('nav.home'),       url: '/' },
+      { i18n: 'nav.tags',       text: t('nav.tags'),       url: '/tags' },
+      { i18n: 'nav.categories', text: t('nav.categories'), url: '/categories' },
+      { i18n: 'nav.history',    text: t('nav.history'),    url: '/history' },
+      { i18n: 'nav.series',     text: t('nav.series'),     url: '/series' },
+      { i18n: 'nav.popular',    text: t('nav.popular'),    url: '/popular' },
+      { i18n: 'nav.archive',    text: t('nav.archive'),    url: '/archive' },
+      { i18n: 'nav.guestbook',  text: t('nav.guestbook'),  url: '/guestbook' },
+      { i18n: 'nav.about',      text: t('nav.about'),      url: '/about' }
     ];
+  }
+  function navUrlKey(it) {
+    var u = String((it && it.url) || '/').replace(/^#/, '');
+    if (u.charAt(0) !== '/') return u;
+    return u.replace(/\/+$/, '') || '/';
+  }
+  function mergeDefaultNavItems(items) {
+    var defs = defaultNavItems();
+    if (!Array.isArray(items) || !items.length) return defs;
+    var out = items.slice();
+    var order = {};
+    defs.forEach(function (it, i) { order[navUrlKey(it)] = i; });
+    defs.forEach(function (def) {
+      var key = navUrlKey(def);
+      if (out.some(function (it) { return navUrlKey(it) === key; })) return;
+      var insertAt = out.length;
+      for (var i = 0; i < out.length; i++) {
+        var curKey = navUrlKey(out[i]);
+        var curOrder = Object.prototype.hasOwnProperty.call(order, curKey) ? order[curKey] : Infinity;
+        if (curOrder > order[key]) { insertAt = i; break; }
+      }
+      out.splice(insertAt, 0, def);
+    });
+    return out;
   }
   /** 默认底部导航：优先沿用 config.js footer.contact，方便老配置无缝衔接 */
   function defaultFooterNav() {
@@ -4605,7 +4636,8 @@
       ads: Object.assign({}, baseAds, featAds),
       errorReport: !(feat && feat.errorReport === false),
       commentGuard: !(feat && feat.commentGuard === false),
-      richContent: !(feat && feat.richContent === false)
+      richContent: !(feat && feat.richContent === false),
+      navExtras: !(feat && feat.navExtras === false)
     };
   }
   function saveTabToDraft(content) {
@@ -4646,7 +4678,8 @@
         },
         errorReport: content.querySelector('#abFeatErrReport') ? content.querySelector('#abFeatErrReport').checked : true,
         commentGuard: content.querySelector('#abFeatCommentGuard') ? content.querySelector('#abFeatCommentGuard').checked : true,
-        richContent: content.querySelector('#abFeatRichContent') ? content.querySelector('#abFeatRichContent').checked : true
+        richContent: content.querySelector('#abFeatRichContent') ? content.querySelector('#abFeatRichContent').checked : true,
+        navExtras: content.querySelector('#abFeatNavExtras') ? content.querySelector('#abFeatNavExtras').checked : true
       };
     }
     if (content.querySelector('#abNavVisual')) collectNavFromDom(content);
@@ -4724,6 +4757,7 @@
     if (content.querySelector('#abFeatErrReport')) content.querySelector('#abFeatErrReport').checked = (feat.errorReport !== false);
     if (content.querySelector('#abFeatCommentGuard')) content.querySelector('#abFeatCommentGuard').checked = (feat.commentGuard !== false);
     if (content.querySelector('#abFeatRichContent')) content.querySelector('#abFeatRichContent').checked = (feat.richContent !== false);
+    if (content.querySelector('#abFeatNavExtras')) content.querySelector('#abFeatNavExtras').checked = (feat.navExtras !== false);
     if (content.querySelector('#abProfileName')) content.querySelector('#abProfileName').value = prof.name || '';
     if (content.querySelector('#abProfileBio')) content.querySelector('#abProfileBio').value = prof.bio || '';
     if (content.querySelector('#abProfileAvatar')) content.querySelector('#abProfileAvatar').value = prof.avatar || '';
@@ -4754,6 +4788,8 @@
       body.innerHTML = '<div class="ab-card" style="max-width:700px">' +
         '<div class="ab-section-title">' + icon('doc', 15) + ' ' + t('admin.settings.featPaging') + '</div>' +
         '<div class="ab-field"><label class="ab-label">' + t('admin.settings.featPageSize') + '</label><input class="ab-input" id="abFeatPageSize" type="number" min="0" step="1" style="max-width:180px"><label class="ab-hint">' + t('admin.settings.featPageSizeHint') + '</label></div>' +
+        '<div class="ab-section-title" style="margin-top:16px">' + icon('link', 15) + ' ' + t('admin.settings.featNavigation') + '</div>' +
+        '<div class="ab-field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input type="checkbox" id="abFeatNavExtras"> ' + t('admin.settings.featNavExtras') + '</label><label class="ab-hint">' + t('admin.settings.featNavExtrasHint') + '</label></div>' +
         '<div class="ab-section-title" style="margin-top:16px">' + icon('image', 15) + ' ' + t('admin.settings.featRich') + '</div>' +
         '<div class="ab-field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input type="checkbox" id="abFeatRichContent"> ' + t('admin.settings.featRichContent') + '</label><label class="ab-hint">' + t('admin.settings.featRichContentHint') + '</label></div>' +
         '<div class="ab-section-title" style="margin-top:16px">' + icon('bug', 15) + ' ' + t('admin.settings.featDiag') + '</div>' +
@@ -4855,6 +4891,7 @@
         name: prof.name || '', bio: prof.bio || '', avatar: prof.avatar || '', email: prof.email || ''
       },
       nav_menu: JSON.stringify(Array.isArray(settingsDraft.nav) ? settingsDraft.nav : []),
+      nav_defaults_version: String(NAV_DEFAULTS_VERSION),
       footer_nav: JSON.stringify(Array.isArray(settingsDraft.footerNav) ? settingsDraft.footerNav : []),
       friend_links: JSON.stringify(Array.isArray(settingsDraft.links) ? settingsDraft.links : []),
       moderate_comments: site.moderate ? '1' : '0',
@@ -4864,7 +4901,8 @@
         ads: (settingsDraft.features && settingsDraft.features.ads) || {},
         errorReport: !(settingsDraft.features && settingsDraft.features.errorReport === false),
         commentGuard: !(settingsDraft.features && settingsDraft.features.commentGuard === false),
-        richContent: !(settingsDraft.features && settingsDraft.features.richContent === false)
+        richContent: !(settingsDraft.features && settingsDraft.features.richContent === false),
+        navExtras: !(settingsDraft.features && settingsDraft.features.navExtras === false)
       })
     };
     try {
@@ -4873,6 +4911,7 @@
       settingsCache = Object.assign({}, settingsCache, {
         site_info: JSON.stringify(payload.site_info), profile: JSON.stringify(payload.profile),
         nav_menu: payload.nav_menu, footer_nav: payload.footer_nav, friend_links: payload.friend_links,
+        nav_defaults_version: payload.nav_defaults_version,
         moderate_comments: payload.moderate_comments, features: payload.features
       });
       // 同步到前台全局变量，使站点名称/导航/页脚/友链等设置立即生效（无需刷新整页）

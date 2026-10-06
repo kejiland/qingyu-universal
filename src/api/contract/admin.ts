@@ -234,6 +234,10 @@ export const BackupListResponseSchema = z
   })
   .meta({ id: 'BackupListResponse' });
 
+export const BackupContentResponseSchema = z
+  .record(z.string(), z.unknown())
+  .meta({ id: 'BackupContentResponse' });
+
 export const BackupCreateResponseSchema = z
   .object({ ok: z.literal(true), backup: BackupItemSchema })
   .meta({ id: 'BackupCreateResponse' });

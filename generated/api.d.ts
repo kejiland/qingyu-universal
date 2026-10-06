@@ -396,7 +396,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * 读取备份内容
+         * @description 下载单份备份的完整 JSON 内容（用于人工核对或离线恢复）。
+         */
+        get: operations["getApiAdminBackupsById"];
         put?: never;
         post?: never;
         /** 删除备份 */
@@ -1407,6 +1411,9 @@ export interface components {
             counts: {
                 [key: string]: number;
             };
+        };
+        BackupContentResponse: {
+            [key: string]: unknown;
         };
         BackupCreateResponse: {
             /** @constant */
@@ -2539,6 +2546,53 @@ export interface operations {
             };
             /** @description 未授权或凭证失效 */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未配置备份桶 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getApiAdminBackupsById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 备份内容 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupContentResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 备份不存在 */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

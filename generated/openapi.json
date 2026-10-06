@@ -1108,6 +1108,13 @@
         ],
         "additionalProperties": false
       },
+      "BackupContentResponse": {
+        "type": "object",
+        "propertyNames": {
+          "type": "string"
+        },
+        "additionalProperties": {}
+      },
       "BackupCreateResponse": {
         "type": "object",
         "properties": {
@@ -3329,6 +3336,61 @@
       }
     },
     "/api/admin/backups/{id}": {
+      "get": {
+        "tags": [
+          "备份"
+        ],
+        "summary": "读取备份内容",
+        "operationId": "getApiAdminBackupsById",
+        "responses": {
+          "200": {
+            "description": "备份内容",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupContentResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "备份不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "未配置备份桶",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "下载单份备份的完整 JSON 内容（用于人工核对或离线恢复）。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
       "delete": {
         "tags": [
           "备份"

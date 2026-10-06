@@ -5,6 +5,9 @@
 
 - 上游基线：`kejiland/qingyu-blog` @ `ad3bfb95bdb5bf5783c66db67bbd108c6f33d71c`
 - 同步日期：2026-10-04
+- 增量同步：2026-10-06 已把基线之后的 3 个提交（`c10eb07` / `daf85a8` / `c9559ef`）人工合入，
+  对应原版 2.10.61 → 2.10.63 的「导航默认项自动补齐」「新增导航项显示开关」「AI 结果不按代码块显示」
+- 差异清单：见 [docs/COMPARE.md](COMPARE.md)
 - 复用目录：`app/worker.js`、`app/functions/**`、`app/public/**`、`app/migrations/**`
 
 ---

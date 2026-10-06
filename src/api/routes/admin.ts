@@ -8,6 +8,7 @@ import { ErrorResponseSchema, OkResponseSchema } from '../contract/common.js';
 import {
   AuditLogResponseSchema,
   AuditQuerySchema,
+  BackupContentResponseSchema,
   BackupCreateResponseSchema,
   BackupListResponseSchema,
   BackupRestoreResponseSchema,
@@ -270,6 +271,21 @@ export const adminRoutes: ApiRoute[] = [
     description: '返回备份记录与保留策略内的条目（最多 30 份）。configured=false 表示未配置备份桶，只能查看历史。',
     responses: {
       200: { description: '备份列表', schema: BackupListResponseSchema },
+      ...AUTH_ERRORS
+    },
+    handler: proxyToUpstream
+  },
+  {
+    method: 'GET',
+    path: '/api/admin/backups/:id',
+    tags: ['备份'],
+    auth: 'admin',
+    summary: '读取备份内容',
+    description: '下载单份备份的完整 JSON 内容（用于人工核对或离线恢复）。',
+    responses: {
+      200: { description: '备份内容', schema: BackupContentResponseSchema },
+      404: { description: '备份不存在', schema: ErrorResponseSchema },
+      503: { description: '未配置备份桶', schema: ErrorResponseSchema },
       ...AUTH_ERRORS
     },
     handler: proxyToUpstream

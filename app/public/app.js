@@ -1016,6 +1016,7 @@ function getConfig() {
     adminPwd: cfg.adminPwd || '',
     pageSize: (featPageSize != null) ? featPageSize : ((typeof cfg.pageSize === 'number' && cfg.pageSize >= 0) ? cfg.pageSize : 8),
     nav: parseArrSafe(s && s.nav_menu),
+    navDefaultsVersion: Number((s && s.nav_defaults_version) || 0),
     footerNav: parseArrSafe(s && s.footer_nav),
     friendLinks: parseArrSafe(s && s.friend_links),
     footer: footer,
@@ -1986,12 +1987,52 @@ function app() { return document.querySelector('#app'); }
     { i18n: 'nav.about',    url: '/about',     path: '/about' }
   ];
 
-  // 前台导航项：优先使用后台「博客设置 → 顶部导航」保存的配置，
-  // 未配置时回退到内置 NAV 默认值，保证样式与原有行为一致。
+  // 导航默认项版本：老后台保存的 nav_menu 没有这个版本号时，说明它还是升级前
+  // 的旧导航；首次加载自动补齐当时没有的新默认项，但不会在用户删除后反复加回。
+  var NAV_DEFAULT_VERSION = 1;
+  var NAV_EXTRA_PATHS = { '/categories': 1, '/history': 1, '/series': 1, '/popular': 1 };
+  function hideExtraNav(items) {
+    return items.filter(function (it) { return !NAV_EXTRA_PATHS[navUrlKey(it)]; });
+  }
+
+  function navUrlKey(it) {
+    var u = String((it && it.url) || '/').replace(/^#/, '');
+    if (u.charAt(0) !== '/') return u;
+    return u.replace(/\/+$/, '') || '/';
+  }
+  function mergeNavDefaults(items) {
+    if (!Array.isArray(items) || !items.length) return NAV.slice();
+    var out = items.slice();
+    var order = {};
+    NAV.forEach(function (it, i) { order[navUrlKey(it)] = i; });
+    NAV.forEach(function (def) {
+      var key = navUrlKey(def);
+      var exists = out.some(function (it) { return navUrlKey(it) === key; });
+      if (exists) return;
+      var insertAt = out.length;
+      for (var i = 0; i < out.length; i++) {
+        var curKey = navUrlKey(out[i]);
+        var curOrder = Object.prototype.hasOwnProperty.call(order, curKey) ? order[curKey] : Infinity;
+        if (curOrder > order[key]) { insertAt = i; break; }
+      }
+      out.splice(insertAt, 0, def);
+    });
+    return out;
+  }
+
+  // 前台导航项：优先使用后台「博客设置 → 顶部导航」保存的配置。
+  // 旧数据首次加载会按 NAV_DEFAULT_VERSION 补齐新默认项；版本已同步后，
+  // 用户在后台删除的项目会保持删除，不再被自动加回。
   function navItems() {
     var c = getConfig();
-    if (Array.isArray(c.nav) && c.nav.length) return c.nav;
-    return NAV;
+    var items;
+    if (Array.isArray(c.nav) && c.nav.length) {
+      items = c.navDefaultsVersion < NAV_DEFAULT_VERSION ? mergeNavDefaults(c.nav) : c.nav;
+    } else {
+      items = NAV;
+    }
+    if (c.features && c.features.navExtras === false) items = hideExtraNav(items);
+    return items;
   }
 
   // 旧后台保存数据里的默认中文文案：路径命中内置项时，仅当文本为空或等于当初的

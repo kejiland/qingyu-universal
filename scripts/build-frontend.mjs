@@ -4,6 +4,8 @@ import { transform } from 'esbuild';
 
 const jobs = [
   { src: 'app/public/app.js', out: 'app/public/app.min.js' },
+  { src: 'app/public/admin.js', out: 'app/public/admin.min.js' },
+  { src: 'app/public/admin.css', out: 'app/public/admin.min.css', loader: 'css' },
   { src: 'app/public/admin-legacy.js', out: 'app/public/admin-legacy.min.js' },
   { src: 'app/public/boot.js', out: 'app/public/boot.min.js' },
   { src: 'app/public/i18n.js', out: 'app/public/i18n.min.js' },
