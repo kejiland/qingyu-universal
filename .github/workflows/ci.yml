@@ -127,11 +127,34 @@ jobs:
             -e LOG_PRETTY=0 \
             -e BLOG_ADMIN_SETUP_KEY=${{ env.SETUP_KEY }} \
             -p 8787:8787 qingyu-universal:ci
+
+          # 等待容器就绪（最多 40 秒），失败时把容器日志打出来方便定位
+          ready=0
           for i in $(seq 1 40); do
-            curl -fsS http://localhost:8787/healthz && break
+            if curl -fsS http://localhost:8787/healthz; then
+              echo
+              ready=1
+              break
+            fi
             sleep 1
           done
-          BASE_URL=http://localhost:8787 node dist/cli/smoke.js
+          if [ "$ready" != "1" ]; then
+            echo "::error::容器 40 秒内未通过健康检查，详见下方容器日志"
+            docker logs qingyu-ci --tail 80
+            exit 1
+          fi
+
+          # 冒烟脚本就在镜像里（宿主机只 checkout 源码、没有 dist/ 构建产物），
+          # 所以必须在容器内执行；这也是之前该步骤一直失败的原因。
+          if ! docker exec \
+            -e BASE_URL=http://localhost:8787 \
+            -e SETUP_KEY=${{ env.SETUP_KEY }} \
+            qingyu-ci node dist/cli/smoke.js; then
+            echo "::error::容器冒烟测试未通过，详见下方容器日志"
+            docker logs qingyu-ci --tail 80
+            exit 1
+          fi
+
           docker logs qingyu-ci --tail 40
 
   postgres:
