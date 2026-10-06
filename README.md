@@ -279,11 +279,26 @@ cd qingyu-universal
 ./deploy/install.sh --domain blog.example.com
 ```
 
-Windows（Docker Desktop）：
+Windows（Docker Desktop，需已启动 Docker Desktop）：
 
 ```powershell
+# 交互式安装：会问你「选 SQLite 还是 PostgreSQL」「没有域名用哪个端口」
+.\deploy\install.ps1
+
+# 无域名：IP + 端口（默认 8080，80/443 被占用也没关系）
+.\deploy\install.ps1 -Port 8080
+
+# 有域名：自动 HTTPS
 .\deploy\install.ps1 -Domain blog.example.com
+
+# 日常运维（和 Linux 版一样的子命令）
+.\deploy\install.ps1 info       # 访问地址、初始化密钥、版本、运行状态
+.\deploy\install.ps1 doctor     # 一键体检：Docker / 容器 / 端口 / 防火墙 / 数据库
+.\deploy\install.ps1 upgrade    # 拉新版本并重建（自动先备份）
+.\deploy\install.ps1 backup     # 生成数据库快照
 ```
+
+> Windows 小提示：端口参数写 `-Port`；数据库参数必须写 `-Database sqlite|postgres`（`-Db` 在 PowerShell 里会和公共参数 `-Debug` 冲突，属于语言限制）。用「管理员 PowerShell」运行时，脚本会自动新增防火墙放行规则；不是管理员时会打印一条命令给你照抄。
 
 部署完成后打开 `https://blog.example.com/admin`，填入脚本输出的 **初始化密钥** 设置管理员密码。以后随时可用 `./deploy/install.sh info` 找回访问地址、初始化密钥、版本和运行状态。
 
@@ -716,6 +731,7 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
 - [x] **v0.9-a** 国内网络加速 `--mirror`：GitHub 代码加速、Docker Hub `registry-mirrors`、npm npmmirror，失败自动回落官方源
 - [x] **v0.9-b** 二次运行弹数字菜单：升级 / 体检 / 信息 / 状态 / 备份 / 日志 / 重启 / 停止 / 启动 / 回滚 / 卸载，回车即退出；交互终端 + 已部署过才会出现，CI 与 `-y` 不受影响
 - [x] **v0.9-c** 防火墙询问后自动放行：检测 ufw / firewalld，确认后只「新增放行规则」（域名模式含 80/443+443udp），非交互时退回打印命令；升级时也会复查端口
+- [x] **v0.9-e** Windows 部署脚本与 Linux 版对齐：`info`/`doctor`/`upgrade`/`backup`/`restore`/`status` 子命令、`-Port`/`-Database` 选择、生成的 `.env` 字段与 `install.sh` 一致（非管理员时给出防火墙放行命令）
 - [x] **v0.9-d** CI 新增「干净 Debian 一键安装验收」：在什么都没有的容器里让脚本自己装 curl/git/Docker、装完做健康检查 + doctor + 幂等重跑（.env 必须原封不动）
 - [x] **v0.3** 路径级契约覆盖完成（60 条路径；兼容接口响应字段将逐步收紧）
 - [x] **v0.3.1-a** Redis / Valkey 可选限流（配置 `REDIS_URL` 即启用）
