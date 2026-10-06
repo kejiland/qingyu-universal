@@ -8,7 +8,7 @@
  * ============================================================ */
 'use strict';
 
-var CACHE_VERSION = '2.10.60';
+var CACHE_VERSION = '2.10.61';
 var SHELL_CACHE = 'qingyu-shell-' + CACHE_VERSION;
 var RUNTIME_CACHE = 'qingyu-runtime-' + CACHE_VERSION;
 var SHELL = [
@@ -18,7 +18,9 @@ var SHELL = [
   './config.min.js',
   './posts.min.js',
   './i18n.min.js',
+  './boot.min.js',
   './app.min.js',
+  './admin-legacy.min.js',
   './admin.min.css',
   './admin.min.js',
   './music-player.min.css',

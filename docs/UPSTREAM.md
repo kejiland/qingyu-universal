@@ -112,6 +112,10 @@ npm test
 BASE_URL=http://localhost:8787 SETUP_KEY=... npm run smoke
 ```
 
+公开站前端拆分（自有改动）：`app/public` 新增 `boot.js`（首屏启动器）与 `admin-legacy.js`（旧后台分包），
+并相应修改了 `index.html`、`sw.js`、`_headers`。`npm run sync:upstream` 已串联 `apply-frontend-split.mjs`，
+上游覆盖回单文件形态时会幂等重新拆分，并在必要时递增补丁版本。
+
 > 若上游删除了旧文件，`cp -a` 不会清理残留，请用 `git status` 核对后再提交。
 
 > **注意**：上游若新增平台绑定（例如 `env.QUEUE`、`env.BROWSER`），需要在 `src/`

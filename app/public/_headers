@@ -30,6 +30,12 @@
 /app.min.js*
   Cache-Control: public, max-age=31536000, immutable
 
+/boot.min.js*
+  Cache-Control: public, max-age=31536000, immutable
+
+/admin-legacy.min.js*
+  Cache-Control: public, max-age=31536000, immutable
+
 /music-player.js*
   Cache-Control: public, max-age=31536000, immutable
 

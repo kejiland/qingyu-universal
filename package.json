@@ -9,7 +9,8 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm run frontend:build",
+    "frontend:build": "node scripts/build-frontend.mjs",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "migrate": "node dist/cli/migrate.js",
@@ -21,7 +22,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "sync:upstream": "node scripts/apply-upstream-adapters.mjs",
+    "sync:upstream": "node scripts/apply-upstream-adapters.mjs && node scripts/apply-frontend-split.mjs",
     "db:migrate:postgres": "node scripts/sqlite-to-postgres.mjs",
     "openapi:emit": "node dist/cli/openapi.js",
     "api:types": "openapi-typescript generated/openapi.json -o generated/api.d.ts",
@@ -50,6 +51,7 @@
     "@types/node-cron": "^3.0.11",
     "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
+    "esbuild": "^0.28.2",
     "openapi-typescript": "^7.13.0",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",

@@ -31,6 +31,8 @@ RUN npm ci --no-audit --no-fund
 
 COPY tsconfig.json ./
 COPY src ./src
+# app/public 的启动器与压缩产物由 frontend:build 生成，避免镜像里出现陈旧的 app.min.js
+COPY app ./app
 RUN npm run build \
  && npm prune --omit=dev --no-audit --no-fund
 
@@ -52,7 +54,8 @@ COPY --from=server-build /app/node_modules ./node_modules
 COPY --from=server-build /app/dist ./dist
 COPY --from=admin-build /app/admin/dist ./admin/dist
 COPY package.json ./
-COPY app ./app
+# 使用 server-build 阶段生成的 app（含 boot / legacy 分包的最新压缩产物）
+COPY --from=server-build /app/app ./app
 # 运行时首次启动要用它建表（PostgreSQL 模式）；不打进镜像会在容器里找不到文件
 COPY deploy/postgres/schema.sql ./deploy/postgres/schema.sql
 

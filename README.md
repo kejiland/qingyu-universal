@@ -491,6 +491,26 @@ npm run admin:build       # 构建到 admin/dist
 
 ---
 
+## 公开站首屏：SSR + 轻量启动器
+
+公开站不再让首屏直接下载整份单文件 SPA。服务端返回的 HTML 自带正文，页面先加载一个约 0.9 KB 的启动器，
+再在浏览器空闲（或用户第一次交互）时才拉取主包，旧版后台则拆成独立分包按需加载：
+
+| 文件 | 大小 | 何时加载 |
+| --- | --- | --- |
+| `boot.min.js` | ~0.9 KB | 首屏立即 |
+| `app.min.js` | ~157 KB | 空闲或首次交互 |
+| `admin-legacy.min.js` | ~28 KB | 仅旧后台回退时 |
+
+```
+npm run frontend:build   # 只重新压缩三个前端分包
+npm run build            # 类型检查 + 前端分包
+```
+
+`npm run sync:upstream` 会自动重新应用这份拆分（`apply-frontend-split.mjs`，幂等，必要时递增补丁版本）。
+
+---
+
 ## SEO 与社交分享
 
 上游把 SEO 逻辑放在浏览器里（`app/public/app.js` 的 `updateSEO()`）——它会在页面加载后用
@@ -616,7 +636,7 @@ src/
   routes/               健康检查 / 本地上传 / 配置注入 / 公开对象
   cli/                  migrate / seed / health / backup / restore / smoke
 tests/                  vitest 单元测试
-scripts/                上游适配补丁（唯一保留的 .mjs 工具脚本）
+scripts/                 上游适配补丁 / 前端分包与压缩构建工具（.mjs）
 deploy/                 Dockerfile / Caddyfile / install.sh / install.ps1
 admin/                  新版后台（Vue + Vite + Tailwind）
 compose.yaml            app + Caddy 编排
@@ -652,7 +672,7 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
 - [x] **v0.5.1** 归档 / 标签 / 分类页服务端渲染
 - [x] **v0.6** comments.parent_id 自引用外键（删除父评论时级联清理回复）
 - [x] **v0.7-a** 撤下旧后台入口；高级设置完整迁移到新版（旧路径保留为紧急回退）
-- [ ] **v0.7-b** 公开站前端拆分（Astro/SSR 取代 296 KB 的 app.js）
+- [x] **v0.7-b** 公开站前端拆分（SSR 首屏 + 轻量启动器按需加载；旧后台独立分包，弃用 Astro 重写）
 - [x] **v0.3** 路径级契约覆盖完成（60 条路径；兼容接口响应字段将逐步收紧）
 - [x] **v0.3.1-a** Redis / Valkey 可选限流（配置 `REDIS_URL` 即启用）
 - [x] **v0.3.1-b** PostgreSQL 运行时适配（配置 `DATABASE_URL` 即切换）
