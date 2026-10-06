@@ -51,7 +51,7 @@ async function submit(): Promise<void> {
       toast.success('登录成功');
     }
 
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/posts';
+    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/';
     await router.replace(redirect);
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : '请求失败，请稍后重试';

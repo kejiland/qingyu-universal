@@ -2,7 +2,12 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { session } from './lib/api';
 
 const routes: RouteRecordRaw[] = [
-  { path: '/', redirect: '/posts' },
+  {
+    path: '/',
+    name: 'home',
+    component: () => import('./views/DashboardView.vue'),
+    meta: { title: '仪表盘' }
+  },
   {
     path: '/login',
     name: 'login',
@@ -131,6 +136,6 @@ router.beforeEach((to) => {
   if (!to.meta.public && !authed) {
     return { name: 'login', query: to.fullPath !== '/' ? { redirect: to.fullPath } : {} };
   }
-  if (to.name === 'login' && authed) return { name: 'posts' };
+  if (to.name === 'login' && authed) return { name: 'home' };
   return true;
 });
