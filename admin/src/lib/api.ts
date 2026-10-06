@@ -26,6 +26,31 @@ export type AuditLogItem = components['schemas']['AuditLogItem'];
 export type ErrorLogItem = components['schemas']['ErrorLogItem'];
 export type BackupItem = components['schemas']['BackupItem'];
 
+/* ---------- 尚未进入契约的本地类型（补齐契约后替换） ---------- */
+
+/** GET /api/music 返回的曲目（兼容接口，schema 尚未登记）。 */
+export interface MusicTrack {
+  id: string;
+  title: string;
+  artist: string;
+  url: string;
+  cover: string;
+  size: number;
+  duration: number;
+  sort: number;
+  date: string;
+}
+
+/** 音乐上传签名（兼容接口，schema 尚未登记）。 */
+export interface MusicUploadTicket {
+  ok: true;
+  uploadUrl: string;
+  publicUrl: string;
+  key: string;
+  contentType: string;
+  expiresIn: number;
+}
+
 /* ---------- 错误与请求 ---------- */
 
 export class ApiError extends Error {
@@ -143,6 +168,21 @@ export const api = {
   registerMedia: (item: { url: string; name?: string; type?: string; size?: number; thumbUrl?: string }) =>
     request<{ ok: true; media: MediaCreated }>('/api/media', { method: 'POST', ...json(item) }),
   deleteMedia: (id: string) => request<{ ok: true }>(`/api/media/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /* 音乐 */
+  listMusic: () => request<{ ok: true; music: MusicTrack[] }>('/api/music'),
+  musicUploadTicket: (filename: string, size: number) =>
+    request<MusicUploadTicket>('/api/music/upload-url', { method: 'POST', ...json({ filename, size }) }),
+  registerMusic: (track: {
+    title: string;
+    artist?: string;
+    url: string;
+    size?: number;
+    duration?: number;
+    cover?: string;
+  }) => request<{ ok: true; track: MusicTrack }>('/api/music', { method: 'POST', ...json(track) }),
+  updateMusic: (id: string, patch: { title: string; artist?: string; cover?: string; sort?: number; duration?: number }) =>
+    request<{ ok: true }>(`/api/music/${encodeURIComponent(id)}`, { method: 'PUT', ...json(patch) }),
+  deleteMusic: (id: string) => request<{ ok: true }>(`/api/music/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   /* 评论管理 */
   listComments: (status: 'all' | 'pending' | 'approved' = 'all') =>

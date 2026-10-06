@@ -34,6 +34,18 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '媒体库' }
   },
   {
+    path: '/music',
+    name: 'music',
+    component: () => import('./views/MusicView.vue'),
+    meta: { title: '音乐管理' }
+  },
+  {
+    path: '/import-export',
+    name: 'import-export',
+    component: () => import('./views/TransferView.vue'),
+    meta: { title: '导入导出' }
+  },
+  {
     path: '/comments',
     name: 'comments',
     component: () => import('./views/CommentsView.vue'),
