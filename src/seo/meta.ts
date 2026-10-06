@@ -12,7 +12,7 @@
  *
  * 对应上游：app/public/app.js → updateSEO() / _setMeta() / _setOG() / _setJsonLd()
  * ============================================================ */
-import type { D1Database } from '../bindings/d1.js';
+import type { AppDatabase } from '../types.js';
 
 /* ---------- 常量（与 app/public/locales/zh-CN.json 的默认值保持一致） ---------- */
 const DEFAULT_SITE_NAME = "Qingyu'Blog";
@@ -100,10 +100,10 @@ export interface SiteIdentity {
  *   name   : settings.site.name → settings.footer.copyrightName → i18n 默认
  *   author : settings.profile.name → footer.copyrightName → name
  */
-export function readSiteIdentity(db: D1Database): SiteIdentity {
+export async function readSiteIdentity(db: AppDatabase): Promise<SiteIdentity> {
   let rows: Array<{ k: string; v: string }> = [];
   try {
-    rows = db.native.prepare('SELECT k, v FROM site_settings').all() as Array<{ k: string; v: string }>;
+    rows = await db.all<{ k: string; v: string }>('SELECT k, v FROM site_settings');
   } catch {
     rows = [];
   }

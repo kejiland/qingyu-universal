@@ -215,29 +215,29 @@ describe('SEO · 站点身份', () => {
     db.close();
   });
 
-  it('无设置时回退到默认站点名', () => {
-    const site = readSiteIdentity(db);
+  it('无设置时回退到默认站点名', async () => {
+    const site = await readSiteIdentity(db);
     expect(site.name).toBe("Qingyu'Blog");
     expect(site.author).toBe("Qingyu'Blog");
   });
 
-  it('site.name 优先于 footer.copyrightName', () => {
+  it('site.name 优先于 footer.copyrightName', async () => {
     db.native.prepare('INSERT INTO site_settings (k,v) VALUES (?,?)').run('site', JSON.stringify({ name: '我的博客', desc: '我的简介' }));
     db.native.prepare('INSERT INTO site_settings (k,v) VALUES (?,?)').run('footer', JSON.stringify({ copyrightName: '页脚名' }));
-    const site = readSiteIdentity(db);
+    const site = await readSiteIdentity(db);
     expect(site.name).toBe('我的博客');
     expect(site.description).toBe('我的简介');
   });
 
-  it('profile.name 作为作者名', () => {
+  it('profile.name 作为作者名', async () => {
     db.native.prepare('INSERT INTO site_settings (k,v) VALUES (?,?)').run('profile', JSON.stringify({ name: '李四' }));
-    expect(readSiteIdentity(db).author).toBe('李四');
+    expect((await readSiteIdentity(db)).author).toBe('李四');
   });
 
-  it('损坏的 JSON 不会抛错', () => {
+  it('损坏的 JSON 不会抛错', async () => {
     db.native.prepare('INSERT INTO site_settings (k,v) VALUES (?,?)').run('site', '{坏掉的 json');
-    expect(() => readSiteIdentity(db)).not.toThrow();
-    expect(readSiteIdentity(db).name).toBe("Qingyu'Blog");
+    await expect(readSiteIdentity(db)).resolves.toBeDefined();
+    expect((await readSiteIdentity(db)).name).toBe("Qingyu'Blog");
   });
 });
 

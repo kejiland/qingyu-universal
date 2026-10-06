@@ -104,6 +104,27 @@ async function searchWithFts(db, query, page, pageSize) {
   return { total, rows };
 }
 
+async function searchWithPostgres(db, query, page, pageSize) {
+  const totalRows = await dbAll(
+    db,
+    'SELECT COUNT(*) AS total FROM posts p ' +
+      "WHERE p.search_vector @@ plainto_tsquery('simple', ?) AND " + PUBLIC_FILTER,
+    query
+  );
+  const total = Number(totalRows[0] && totalRows[0].total) || 0;
+  if (!total) return { total: 0, rows: [] };
+  const rows = await dbAll(
+    db,
+    'SELECT ' + SEARCH_COLUMNS + ', ' +
+      "ts_rank(p.search_vector, plainto_tsquery('simple', ?)) AS rank, " +
+      "ts_headline('simple', COALESCE(NULLIF(p.content, ''), NULLIF(p.excerpt, ''), p.title), plainto_tsquery('simple', ?), 'MaxWords=24, MinWords=8') AS snippet " +
+      'FROM posts p ' +
+      "WHERE p.search_vector @@ plainto_tsquery('simple', ?) AND " + PUBLIC_FILTER + ' ' +
+      'ORDER BY rank DESC, p.date DESC LIMIT ? OFFSET ?',
+    query, query, query, pageSize, (page - 1) * pageSize
+  );
+  return { total, rows };
+}
 async function searchWithLike(db, query, page, pageSize) {
   const rawLike = '%' + escapeLike(query) + '%';
   const where =
@@ -152,7 +173,14 @@ export async function handleSearch(request, env) {
 
   let engine = 'like';
   let result = null;
-  if (canUseFts(query)) {
+  if (env.DB_DIALECT === 'postgres') {
+    try {
+      result = await searchWithPostgres(env.DB, query, page, pageSize);
+      engine = 'postgres';
+    } catch (e) {
+      result = null;
+    }
+  } else if (canUseFts(query)) {
     try {
       result = await searchWithFts(env.DB, query, page, pageSize);
       engine = 'fts5';

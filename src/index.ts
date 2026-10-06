@@ -9,7 +9,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { loadConfig, describeConfig } from './config.js';
-import { createD1 } from './bindings/d1.js';
+import { createDatabase } from './bindings/database.js';
 import { createKV } from './bindings/kv.js';
 import { createAssets } from './bindings/assets.js';
 import { createLocalStorage, normalizeLocalObjectUrls } from './bindings/storage.js';
@@ -30,7 +30,7 @@ const startedAt = Date.now();
 const config = loadConfig();
 
 /* ---------- 绑定装配 ---------- */
-const db = createD1(config.dbPath);
+const db = createDatabase(config);
 const kv = createKV(db, config.redisUrl);
 const assets = createAssets(config.publicDir);
 
@@ -65,9 +65,9 @@ const bindings: Bindings = {
 const env: WorkerEnv = buildWorkerEnv(config, bindings);
 
 /* ---------- 数据库结构 ---------- */
-const migration = runMigrations(db, config.migrationsDir, (message) => logger.info(message));
+const migration = await runMigrations(db, config.migrationsDir, (message) => logger.info(message), path.join(config.root, 'deploy', 'postgres', 'schema.sql'));
 if (config.storageMode === 'local') {
-  const normalized = normalizeLocalObjectUrls(db, config.siteUrl);
+  const normalized = await normalizeLocalObjectUrls(db, config.siteUrl);
   if (normalized > 0) logger.info(`[storage] 已修正 ${normalized} 行本地对象地址`);
 }
 

@@ -12,7 +12,7 @@
  *   带不来收益——真正的约束是「必须兼容 D1 的语句对象契约」。
  * ============================================================ */
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
-import type { D1DatabaseLike, D1PreparedStatement, D1Result } from '../types.js';
+import type { AppDatabase, D1DatabaseLike, D1PreparedStatement, D1Result } from '../types.js';
 
 /** D1 只接受 null / number / string / bigint / ArrayBuffer / ArrayBufferView。 */
 function normalize(value: unknown): unknown {
@@ -100,14 +100,17 @@ export interface D1Options {
   cacheSizeKb?: number;
 }
 
-export class D1Database implements D1DatabaseLike {
+export class D1Database implements AppDatabase {
+  readonly dialect = 'sqlite' as const;
   readonly path: string;
+  readonly location: string;
   /** 暴露原生句柄：迁移、快照、健康检查等运维路径需要。 */
   readonly native: DatabaseSync;
   readonly #cache = new Map<string, StatementSync>();
 
   constructor(filePath: string, options: D1Options = {}) {
     this.path = filePath;
+    this.location = filePath;
     this.native = new DatabaseSync(filePath);
 
     // WAL + NORMAL：并发读不阻塞写、崩溃安全，单机博客的最优默认组合。
@@ -176,13 +179,23 @@ export class D1Database implements D1DatabaseLike {
   }
 
   /** 多语句脚本执行（迁移用）。 */
-  exec(sql: string): { count: number; duration: number } {
+  async exec(sql: string): Promise<void> {
     this.native.exec(sql);
-    return { count: 1, duration: 0 };
   }
 
-  /** 只读查询助手（运维脚本 / 健康检查用，不经过 D1 契约）。 */
-  scalar<T = number>(sql: string, ...params: unknown[]): T | null {
+  /** 查询多行，供 SSR / 迁移 / 运维脚本使用。 */
+  async all<T = Record<string, unknown>>(sql: string, ...params: unknown[]): Promise<T[]> {
+    const result = await this.prepare(sql).bind(...params).all<T>();
+    return result.results;
+  }
+
+  /** 查询单行首条。 */
+  async first<T = unknown>(sql: string, ...params: unknown[]): Promise<T | null> {
+    return this.prepare(sql).bind(...params).first<T>();
+  }
+
+  /** 只读单值查询。 */
+  async scalar<T = unknown>(sql: string, ...params: unknown[]): Promise<T | null> {
     const row = this.native.prepare(sql).get(...(params.map(normalize) as never[]));
     if (!row) return null;
     const values = Object.values(toPlainRow(row));

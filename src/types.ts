@@ -31,6 +31,17 @@ export interface D1DatabaseLike {
   batch(statements: D1PreparedStatement[]): Promise<D1Result[]>;
 }
 
+/** 自托管运行时数据库：SQLite / PostgreSQL 的统一异步接口。 */
+export interface AppDatabase extends D1DatabaseLike {
+  readonly dialect: 'sqlite' | 'postgres';
+  readonly location: string;
+  exec(sql: string): Promise<void>;
+  all<T = Record<string, unknown>>(sql: string, ...params: unknown[]): Promise<T[]>;
+  first<T = unknown>(sql: string, ...params: unknown[]): Promise<T | null>;
+  scalar<T = unknown>(sql: string, ...params: unknown[]): Promise<T | null>;
+  close(): void | Promise<void>;
+}
+
 export interface KVGetOptions {
   type?: 'text' | 'json' | 'arrayBuffer' | 'stream';
   cacheTtl?: number;
@@ -95,7 +106,7 @@ export interface WorkerModule {
 
 /** 绑定集合：由 bootstrap 装配后交给 buildWorkerEnv()。 */
 export interface Bindings {
-  db: D1DatabaseLike;
+  db: AppDatabase;
   kv: KVNamespaceLike;
   assets: AssetsBindingLike;
   ai?: AIBindingLike;

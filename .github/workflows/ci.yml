@@ -133,3 +133,39 @@ jobs:
           done
           BASE_URL=http://localhost:8787 node dist/cli/smoke.js
           docker logs qingyu-ci --tail 40
+
+  postgres:
+    name: PostgreSQL 真实库集成测试
+    runs-on: ubuntu-latest
+    needs: quality
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: test123
+          POSTGRES_DB: qingyu_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d qingyu_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:test123@127.0.0.1:5432/qingyu_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci --no-audit --no-fund
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 跑 PostgreSQL 集成测试
+        run: npx vitest run tests/postgres.test.ts

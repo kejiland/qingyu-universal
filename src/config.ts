@@ -53,6 +53,7 @@ const EnvSchema = z.object({
   SITE_URL: z.string().trim().optional(),
   SITE_DOMAIN: z.string().trim().default(''),
   DATA_DIR: z.string().trim().default('./data'),
+  DATABASE_URL: z.string().trim().default(''),
   ADMIN_DIST_DIR: z.string().trim().default(''),
   TRUST_PROXY: booleanish(true),
   GEOIP_HEADER: z.string().trim().default('CF-IPCountry'),
@@ -142,6 +143,8 @@ export interface AppConfig {
   /** 新版后台的构建产物目录（不存在时自动回落到旧版后台）。 */
   readonly adminDistDir: string;
   readonly dbPath: string;
+  readonly databaseUrl: string;
+  readonly databaseDialect: 'sqlite' | 'postgres';
   readonly uploadDir: string;
   readonly secret: string;
   readonly redisUrl: string;
@@ -239,6 +242,8 @@ export function loadConfig(): AppConfig {
     dataDir,
     adminDistDir: path.resolve(ROOT, env.ADMIN_DIST_DIR || path.join('admin', 'dist')),
     dbPath: path.join(dataDir, 'qingyu.db'),
+    databaseUrl: env.DATABASE_URL,
+    databaseDialect: env.DATABASE_URL ? 'postgres' : 'sqlite',
     uploadDir: path.join(dataDir, 'uploads'),
     secret,
     redisUrl: env.REDIS_URL,

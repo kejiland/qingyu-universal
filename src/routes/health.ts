@@ -6,22 +6,22 @@
  * ============================================================ */
 import type { Context } from 'hono';
 import type { AppConfig } from '../config.js';
-import type { D1Database } from '../bindings/d1.js';
+import type { AppDatabase } from '../types.js';
 import type { MigrationReport } from '../migrate.js';
 
 export interface HealthDeps {
   config: AppConfig;
-  db: D1Database;
+  db: AppDatabase;
   migration: MigrationReport;
   startedAt: number;
 }
 
 export function createHealthHandler(deps: HealthDeps) {
-  return (c: Context): Response => {
+  return async (c: Context): Promise<Response> => {
     let posts = 0;
     let database: 'ok' | 'error' = 'ok';
     try {
-      posts = Number(deps.db.scalar<number>('SELECT COUNT(*) AS n FROM posts') ?? 0);
+      posts = Number((await deps.db.scalar<number>('SELECT COUNT(*) AS n FROM posts')) ?? 0);
     } catch {
       database = 'error';
     }
@@ -31,7 +31,7 @@ export function createHealthHandler(deps: HealthDeps) {
       version: deps.config.version,
       revision: deps.config.revision || null,
       storage: deps.config.storageMode,
-      database: 'sqlite',
+      database: deps.db.dialect,
       databaseStatus: database,
       posts,
       migrations: { applied: deps.migration.applied.length, skipped: deps.migration.skipped.length },

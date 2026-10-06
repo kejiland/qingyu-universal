@@ -172,6 +172,20 @@ edit('app/functions/_lib/api-core.js', (l) => {
   }
 });
 
+/* ---------- PostgreSQL：ON CONFLICT 中限定目标表列名 ---------- */
+edit('app/functions/_lib/api-core.js', (l) => {
+  const replaceInLine = (from, to) => {
+    const i = l.findIndex((line) => line.includes(from));
+    if (i >= 0) { l[i] = l[i].replace(from, to); return; }
+    if (!l.some((line) => line.includes(to))) throw new Error('锚点缺失: ' + from);
+  };
+  replaceInLine('ON CONFLICT(post_id) DO UPDATE SET likes = MIN(likes + 1, 9999999)', 'ON CONFLICT(post_id) DO UPDATE SET likes = MIN(stats.likes + 1, 9999999)');
+  replaceInLine('ON CONFLICT(post_id,date) DO UPDATE SET likes = likes + 1', 'ON CONFLICT(post_id,date) DO UPDATE SET likes = stats_daily.likes + 1');
+  replaceInLine('ON CONFLICT(post_id) DO UPDATE SET views = MIN(views + 1, 9999999)', 'ON CONFLICT(post_id) DO UPDATE SET views = MIN(stats.views + 1, 9999999)');
+  replaceInLine('ON CONFLICT(post_id,date) DO UPDATE SET views = views + 1', 'ON CONFLICT(post_id,date) DO UPDATE SET views = stats_daily.views + 1');
+  replaceInLine('ON CONFLICT(post_id,date,kind,name) DO UPDATE SET views = views + 1', 'ON CONFLICT(post_id,date,kind,name) DO UPDATE SET views = stats_sources.views + 1');
+  replaceInLine('ON CONFLICT(fingerprint) DO UPDATE SET hits = hits + 1', 'ON CONFLICT(fingerprint) DO UPDATE SET hits = error_logs.hits + 1');
+});
 /* ---------- 媒体登记：允许本地存储的根相对地址 ---------- */
 edit('app/functions/_lib/api-core.js', (l) => {
   const marker = '    // [self-host] 本地存储上传返回根相对 /media/...，允许作为站内对象登记';

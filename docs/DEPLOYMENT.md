@@ -1,6 +1,27 @@
 # 多云与生产部署
 
-本文档覆盖 Docker Compose 之外的生产部署方式。
+本文档覆盖一键部署的数据库选择，以及 Docker Compose 之外的生产部署方式。
+
+## Compose 一键部署的数据库选择
+
+VPS、NAS、以及「母鸡开出来的小鸡」用的是同一条脚本，数据库在安装时选：
+
+| 选择 | 命令 | 适用场景 |
+| --- | --- | --- |
+| SQLite（默认） | `./deploy/install.sh install` | 单机博客，备份就是一个文件 |
+| 内置 PostgreSQL | `./deploy/install.sh install --db postgres` | 多进程 / 高并发，脚本自动装好数据库容器 |
+| 自己的云数据库 | `./deploy/install.sh install --database-url 'postgres://用户:密码@主机:5432/库名'` | 阿里云 RDS / 腾讯云 / Supabase 等托管服务 |
+
+交互式安装时脚本会直接提问（一路回车即 SQLite，选 `2` 即内置 PostgreSQL）。
+内置 PostgreSQL 不占用宿主机 5432，也不暴露到公网；`./deploy/install.sh info`
+会显示当前用的是哪种数据库。SQLite → PostgreSQL 的数据迁移见 [PostgreSQL 迁移](POSTGRES.md)。
+
+手动用 Compose 部署时，把 `postgres` 加进 `COMPOSE_PROFILES` 并填好
+`DATABASE_URL`、`POSTGRES_*` 即可（`.env.example` 里有现成模板）：
+
+```bash
+docker compose --profile postgres up -d
+```
 
 ## 多架构镜像
 
@@ -75,7 +96,8 @@ helm install qingyu deploy/helm/qingyu-universal \
   --set secrets.writeToken=你的写入令牌
 ```
 
-SQLite 版本默认 `replicaCount: 1`，PVC 使用 `ReadWriteOnce`。多实例部署需要 PostgreSQL 与 Redis，当前 Helm Chart 尚未启用 PostgreSQL 适配。
+SQLite 版本默认 `replicaCount: 1`，PVC 使用 `ReadWriteOnce`。多实例部署需要 PostgreSQL 与 Redis，
+Chart 不内置数据库实例，用 `env.DATABASE_URL` / `env.REDIS_URL` 指向外部托管服务即可。
 
 ## Redis / Valkey
 

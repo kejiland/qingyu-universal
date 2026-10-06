@@ -53,8 +53,11 @@ COPY --from=server-build /app/dist ./dist
 COPY --from=admin-build /app/admin/dist ./admin/dist
 COPY package.json ./
 COPY app ./app
+# 运行时首次启动要用它建表（PostgreSQL 模式）；不打进镜像会在容器里找不到文件
+COPY deploy/postgres/schema.sql ./deploy/postgres/schema.sql
 
-RUN mkdir -p /data \
+RUN apk add --no-cache postgresql-client \
+ && mkdir -p /data \
  && chown -R node:node /data
 
 USER node

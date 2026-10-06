@@ -13,7 +13,7 @@
  * 图标与交互仍由 app.js 接管后填充。
  * ============================================================ */
 import { escapeHtml } from '../seo/meta.js';
-import type { D1Database } from '../bindings/d1.js';
+import type { AppDatabase } from '../types.js';
 
 export interface NavItem {
   text: string;
@@ -80,10 +80,10 @@ function normalizeNav(raw: unknown): NavItem[] {
 }
 
 /** 站点框架的配置来源与 app.js 相同：site_settings 的 nav / footer / site。 */
-export function readChrome(db: D1Database, siteName: string): ChromeData {
+export async function readChrome(db: AppDatabase, siteName: string): Promise<ChromeData> {
   let map = new Map<string, string>();
   try {
-    const rows = db.native.prepare('SELECT k, v FROM site_settings').all() as Array<{ k: string; v: string }>;
+    const rows = await db.all<{ k: string; v: string }>('SELECT k, v FROM site_settings');
     map = new Map(rows.map((row) => [row.k, row.v]));
   } catch {
     /* 读取失败时用默认值 */

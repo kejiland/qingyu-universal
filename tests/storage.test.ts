@@ -86,7 +86,7 @@ describe('本地存储适配器', () => {
     expect(await storage.deleteObject(env, '../outside.txt')).toBe(false);
   });
 
-  it('normalizeLocalObjectUrls 修正历史绝对地址，保留相对地址和外链', () => {
+  it('normalizeLocalObjectUrls 修正历史绝对地址，保留相对地址和外链', async () => {
     const db = createD1(path.join(dir, 'urls.db'));
     try {
       db.native.exec(`
@@ -101,7 +101,7 @@ describe('本地存储适配器', () => {
       db.native.prepare('INSERT INTO posts (id,cover,og_image) VALUES (?,?,?)')
         .run('p1', 'http://192.168.1.2:8080/media/cover.png', 'https://cdn.example.com/og.png');
 
-      const changed = normalizeLocalObjectUrls(db, 'http://218.33.111.11:8080');
+      const changed = await normalizeLocalObjectUrls(db, 'http://218.33.111.11:8080');
       expect(changed).toBe(3);
       expect(db.native.prepare('SELECT url, thumb_url FROM media WHERE id = ?').get('m1')).toEqual({
         url: '/media/a.svg',

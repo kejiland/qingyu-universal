@@ -1052,12 +1052,12 @@ export async function handleStats(request, env, postId) {
       // 原子自增：并发点赞不会互相覆盖计数（此前“读-改-写”在并发下会丢数）
       await dbRun(env.DB,
         'INSERT INTO stats (post_id,likes,views) VALUES (?,1,0) '
-        + 'ON CONFLICT(post_id) DO UPDATE SET likes = MIN(likes + 1, 9999999)',
+        + 'ON CONFLICT(post_id) DO UPDATE SET likes = MIN(stats.likes + 1, 9999999)',
         postId);
       // 写入每日聚合（用于后台「近 N 天点赞趋势」）
       const todayLike = new Date().toISOString().slice(0, 10);
       await dbRun(env.DB,
-        'INSERT INTO stats_daily (post_id,date,views,likes) VALUES (?,?,0,1) ON CONFLICT(post_id,date) DO UPDATE SET likes = likes + 1',
+        'INSERT INTO stats_daily (post_id,date,views,likes) VALUES (?,?,0,1) ON CONFLICT(post_id,date) DO UPDATE SET likes = stats_daily.likes + 1',
         postId, todayLike).catch(() => {});
       if (env.BLOG) {
         try {
@@ -1101,12 +1101,12 @@ export async function handleStats(request, env, postId) {
     // 原子自增：并发访问不会互相覆盖（此前“读-改-写”在并发下会丢数）。
     await dbRun(env.DB,
       'INSERT INTO stats (post_id,likes,views) VALUES (?,0,1) '
-      + 'ON CONFLICT(post_id) DO UPDATE SET views = MIN(views + 1, 9999999)',
+      + 'ON CONFLICT(post_id) DO UPDATE SET views = MIN(stats.views + 1, 9999999)',
       postId);
     // 写入每日聚合（用于后台「近 N 天访问趋势」）
     const todayView = new Date().toISOString().slice(0, 10);
     await dbRun(env.DB,
-      'INSERT INTO stats_daily (post_id,date,views,likes) VALUES (?,?,1,0) ON CONFLICT(post_id,date) DO UPDATE SET views = views + 1',
+      'INSERT INTO stats_daily (post_id,date,views,likes) VALUES (?,?,1,0) ON CONFLICT(post_id,date) DO UPDATE SET views = stats_daily.views + 1',
       postId, todayView).catch(() => {});
     // 访问来源 / 设备（按天聚合，表可能尚未迁移 → 失败静默）：只在计入浏览时记录
     try {
@@ -1148,7 +1148,7 @@ export async function handleStats(request, env, postId) {
           ref = (h && h !== self) ? h : 'internal';
         } catch (e) { ref = 'direct'; }
       }
-      const SRC_SQL = 'INSERT INTO stats_sources (post_id,date,kind,name,views) VALUES (?,?,?,?,1) ON CONFLICT(post_id,date,kind,name) DO UPDATE SET views = views + 1';
+      const SRC_SQL = 'INSERT INTO stats_sources (post_id,date,kind,name,views) VALUES (?,?,?,?,1) ON CONFLICT(post_id,date,kind,name) DO UPDATE SET views = stats_sources.views + 1';
       await dbBatch(env.DB, [
         { sql: SRC_SQL, params: [postId, todayView, 'device', dev] },
         { sql: SRC_SQL, params: [postId, todayView, 'ref', ref] },
@@ -1907,7 +1907,7 @@ export async function handleErrorReport(request, env) {
   const now = Date.now();
   await dbRun(env.DB,
     'INSERT INTO error_logs (fingerprint,kind,message,source,stack,url,ua,hits,created_at,last_at) VALUES (?,?,?,?,?,?,?,1,?,?) ' +
-    'ON CONFLICT(fingerprint) DO UPDATE SET hits = hits + 1, last_at = excluded.last_at, url = excluded.url, ua = excluded.ua, stack = excluded.stack',
+    'ON CONFLICT(fingerprint) DO UPDATE SET hits = error_logs.hits + 1, last_at = excluded.last_at, url = excluded.url, ua = excluded.ua, stack = excluded.stack',
     fp, kind, message, source, stack, url, ua, now, now);
   await dbRun(env.DB, 'DELETE FROM error_logs WHERE id NOT IN (SELECT id FROM error_logs ORDER BY last_at DESC LIMIT ' + ERROR_LOG_KEEP + ')').catch(() => {});
   return json({ ok: true }, 200, request, env, { 'Cache-Control': NO_CACHE });

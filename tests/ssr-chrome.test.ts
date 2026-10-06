@@ -17,7 +17,7 @@ const CHROME = {
 };
 
 describe('公开站 SSR · 站点框架', () => {
-  it('顶栏结构与 app.js 对齐', () => {
+  it('顶栏结构与 app.js 对齐', async () => {
     const html = renderTopbar(CHROME, '/');
     expect(html).toContain('<header class="topbar">');
     expect(html).toContain('<div class="container topbar-inner">');
@@ -29,7 +29,7 @@ describe('公开站 SSR · 站点框架', () => {
     expect((html.match(/class="icon-btn"/g) ?? []).length).toBe(4);
   });
 
-  it('当前路径的导航项高亮', () => {
+  it('当前路径的导航项高亮', async () => {
     expect(renderTopbar(CHROME, '/archive')).toContain('href="/archive" class="active"');
     // 根路径只精确匹配 '/'，不会把 /archive 也点亮
     const home = renderTopbar(CHROME, '/');
@@ -37,7 +37,7 @@ describe('公开站 SSR · 站点框架', () => {
     expect(home).not.toContain('href="/archive" class="active"');
   });
 
-  it('页脚含导航、版权与备案号', () => {
+  it('页脚含导航、版权与备案号', async () => {
     const html = renderFooter(CHROME);
     expect(html).toContain('<footer><div class="container footer-inner">');
     expect(html).toContain('class="footer-nav"');
@@ -47,7 +47,7 @@ describe('公开站 SSR · 站点框架', () => {
     expect(html).toContain('京ICP备123号');
   });
 
-  it('wrapWithChrome 按 顶栏 → 正文 → 页脚 组装', () => {
+  it('wrapWithChrome 按 顶栏 → 正文 → 页脚 组装', async () => {
     const html = wrapWithChrome(CHROME, '<main>正文</main>', '/');
     const iHeader = html.indexOf('<header');
     const iMain = html.indexOf('<main>正文</main>');
@@ -57,7 +57,7 @@ describe('公开站 SSR · 站点框架', () => {
     expect(iMain).toBeLessThan(iFooter);
   });
 
-  it('站点名与导航文案经过 HTML 转义', () => {
+  it('站点名与导航文案经过 HTML 转义', async () => {
     const evil = {
       ...CHROME,
       siteName: '<script>alert(1)</script>',
@@ -68,12 +68,12 @@ describe('公开站 SSR · 站点框架', () => {
     expect(html).not.toContain('<img src=x>');
   });
 
-  it('未配置导航时回退到默认菜单', () => {
+  it('未配置导航时回退到默认菜单', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qingyu-chrome-'));
     const db = createD1(path.join(dir, 'c.db'));
     try {
-      runMigrations(db, MIGRATIONS_DIR);
-      const chrome = readChrome(db, '站点名');
+      await runMigrations(db, MIGRATIONS_DIR);
+      const chrome = await readChrome(db, '站点名');
       expect(chrome.nav.length).toBeGreaterThan(0);
       expect(chrome.nav.map((n) => n.url)).toEqual([
         '/', '/tags', '/categories', '/history', '/series', '/popular', '/archive', '/guestbook', '/about'
@@ -85,17 +85,17 @@ describe('公开站 SSR · 站点框架', () => {
     }
   });
 
-  it('读取 site_settings 中的 nav / footer 配置', () => {
+  it('读取 site_settings 中的 nav / footer 配置', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qingyu-chrome2-'));
     const db = createD1(path.join(dir, 'c2.db'));
     try {
-      runMigrations(db, MIGRATIONS_DIR);
+      await runMigrations(db, MIGRATIONS_DIR);
       const put = db.native.prepare('INSERT INTO site_settings (k,v) VALUES (?,?)');
       put.run('site', JSON.stringify({ name: '自定义站名' }));
       put.run('nav', JSON.stringify([{ text: '博客', url: '/blog' }]));
       put.run('footer', JSON.stringify({ copyrightName: '版权方', startYear: '2018', icp: 'X-ICP' }));
 
-      const chrome = readChrome(db, '兜底名');
+      const chrome = await readChrome(db, '兜底名');
       expect(chrome.siteName).toBe('自定义站名');
       expect(chrome.nav).toEqual([{ text: '博客', url: '/blog' }]);
       expect(chrome.footer.copyrightName).toBe('版权方');

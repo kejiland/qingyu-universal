@@ -35,6 +35,7 @@ CREATE INDEX IF NOT EXISTS idx_posts_scheduled ON posts(publish_at) WHERE status
 CREATE INDEX IF NOT EXISTS idx_posts_search ON posts USING GIN(search_vector);
 
 CREATE TABLE IF NOT EXISTS comments (
+  seq       BIGSERIAL UNIQUE,
   id        TEXT PRIMARY KEY,
   post_id   TEXT NOT NULL,
   author    TEXT DEFAULT '',

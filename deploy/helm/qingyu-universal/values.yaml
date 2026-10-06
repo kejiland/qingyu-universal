@@ -42,6 +42,7 @@ env:
   CRON_TIMEZONE: UTC
   INSTANCE_ID: "1"
   REDIS_URL: ""
+  DATABASE_URL: ""
 
 secrets:
   adminSetupKey: ""

@@ -66,6 +66,22 @@ curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/depl
 关键点是**它不会因为端口或 DNS 问题中止**。你不需要先搞清楚端口占用、
 DNS 解析这些事——脚本自己选好能跑通的配置，最后告诉你访问地址。
 
+### 数据库也一样：回车即默认，想要 PostgreSQL 说一声
+
+默认是 SQLite（备份就是一个文件）。想要 PostgreSQL，直接在命令里指定就行，
+不用先研究配置：
+
+```bash
+./deploy/install.sh install --db postgres          # 脚本自动装好内置 PostgreSQL
+./deploy/install.sh install \
+  --database-url 'postgres://用户名:密码@主机:5432/库名'   # 用你自己的云数据库
+```
+
+- **内置 PostgreSQL**：自动拉镜像、建库、写随机密码；端口只在容器网络内，不占用宿主机 5432。
+- **自己的云数据库**：填连接串即可，应用首次启动自动建表（阿里云 RDS / 腾讯云 / Supabase 都行）。
+- 已有 SQLite 站点想切过去，见 [PostgreSQL 迁移](docs/POSTGRES.md)。
+- 随时用 `./deploy/install.sh info` 查看当前用的是哪种数据库。
+
 ### 有终端时会先检测、再让你选
 
 在真实终端里（不是 CI），脚本会先报告检测结果，然后用回车即默认的方式提问：
@@ -82,6 +98,16 @@ DNS 解析这些事——脚本自己选好能跑通的配置，最后告诉你�
 ==> 请选择部署方式
     1) 域名 + 自动 HTTPS   （推荐；需要域名解析到 203.0.113.5）
     2) IP + 端口           （无需域名，纯 HTTP）
+  选择 [1]: 
+```
+
+紧接着问数据库（同样回车即默认，想要 PostgreSQL 选 `2` 或 `3`）：
+
+```text
+==> 请选择数据库
+    1) SQLite                  （推荐；零依赖，备份就是一个文件）
+    2) PostgreSQL · 内置容器    （脚本自动装好，多进程/高并发更稳）
+    3) PostgreSQL · 我自己的库 （阿里云 RDS / 腾讯云 / Supabase…）
   选择 [1]: 
 ```
 
@@ -351,6 +377,8 @@ BASE_URL=http://localhost:8787 SETUP_KEY=<安装密钥> npm run smoke
 | `SITE_DOMAIN` | Caddy 使用的域名（留空 = localhost 自签证书） | 空 |
 | `BLOG_ADMIN_SETUP_KEY` | 首次初始化管理员的安装密钥 | 空（**建议必填**） |
 | `DATA_DIR` | 数据目录（SQLite / 上传 / 备份） | `./data` |
+| `DATABASE_URL` | PostgreSQL 连接串，留空用 SQLite | 空 |
+| `COMPOSE_PROFILES` | 启用的可选容器（`postgres` / `redis` / `domain`） | 空 |
 | `TRUST_PROXY` | 是否信任反代注入的客户端 IP 头 | `1` |
 | `LOG_LEVEL` / `LOG_PRETTY` | 日志级别 / 是否彩色输出 | `info` / `0` |
 | `CRON_TIMEZONE` / `BACKUP_CRON` | 定时任务时区与自动备份时间 | `UTC` / `0 19 * * *` |
@@ -621,10 +649,11 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
 - [ ] **v0.7-b** 公开站前端拆分（Astro/SSR 取代 296 KB 的 app.js）
 - [x] **v0.3** 路径级契约覆盖完成（60 条路径；兼容接口响应字段将逐步收紧）
 - [x] **v0.3.1-a** Redis / Valkey 可选限流（配置 `REDIS_URL` 即启用）
-- [ ] **v0.3.1-b** PostgreSQL 适配
+- [x] **v0.3.1-b** PostgreSQL 运行时适配（配置 `DATABASE_URL` 即切换）
 - [x] **v0.4** Fly.io / Render / Railway 模板、多架构 GHCR 镜像、SBOM 与 cosign 签名
 - [x] **v0.5-a** Helm Chart、镜像签名与 SBOM
 - [x] **v0.5-b** PostgreSQL schema 与 SQLite → PostgreSQL 数据迁移工具
+- [x] **v0.5-c** PostgreSQL 一键部署（交互式三选一 / `--db postgres` / `--database-url`）
 
 ## 许可证
 

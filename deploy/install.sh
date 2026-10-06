@@ -82,6 +82,9 @@ docker_ready() {
 # ---------- 参数解析 ----------
 COMMAND="install"
 ARGS=()
+# 数据库选择（脚本开了 set -u，未设置的变量必须先给默认值）
+DB_KIND="${DB_KIND:-}"
+DATABASE_URL_OPT="${DATABASE_URL_OPT:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
     install|upgrade|backup|restore|logs|status|info|uninstall|help) COMMAND="$1" ;;
@@ -91,6 +94,8 @@ while [ $# -gt 0 ]; do
     --ref)      REF="${2:-}"; shift ;;
     --repo)     REPO="${2:-}"; shift ;;
     --port)     APP_PORT="${2:-}"; shift ;;
+    --db)       DB_KIND="${2:-}"; shift ;;
+    --database-url) DATABASE_URL_OPT="${2:-}"; shift ;;
     -y|--yes)   ASSUME_YES=1 ;;
     --ip)       IP_ADDR="${2:-}"; shift ;;
     --image)    IMAGE="${2:-}"; shift ;;
@@ -117,9 +122,12 @@ usage() {
   --domain <域名>         对外域名，启用 Caddy + Let's Encrypt 自动 HTTPS
                           （不填则用 http://<服务器IP>:<端口> 直接访问，无证书）
   --port   <端口>         直接对外暴露该端口，走纯 HTTP、不启动 Caddy。
-  --                     配合 --domain 时是 80/443 被占用时的退路
-  --                     （代价是拿不到自动 HTTPS 证书）；不配合 --domain
-  --                     时为 IP+端口模式（默认 8080）
+                          80/443 被占用（母鸡开出来的小鸡）时用它，
+                          也等于「无域名 / 自定义端口」模式（默认 8080）
+  --db     <数据库>       sqlite（默认，单文件备份最省心）
+                          | postgres（脚本自动装好内置容器，数据放独立卷）
+  --database-url <连接串> 用你自己的云数据库（阿里云 RDS / 腾讯云 / Supabase…），
+                          等价于 --db postgres 的「外部数据库」模式
   --ip     <地址>         无域名模式下写入 SITE_URL 的地址（默认自动探测公网 IP）
   -y, --yes               不提问，全部使用默认值（自动化 / CI 用）
   --email  <邮箱>         ACME 证书通知邮箱（可选）
@@ -287,6 +295,33 @@ update_source() {
   download_source
 }
 
+# ---------- 数据库选择 ----------
+# 归一化成三种形态：
+#   sqlite   内置 SQLite 文件（默认，零依赖）
+#   postgres 启动 compose 里的 PostgreSQL 容器
+#   external 用户自己的云数据库，只填 DATABASE_URL
+resolve_database() {
+  # --database-url 直接给出连接串 → 外部托管库
+  if [ -n "$DATABASE_URL_OPT" ]; then
+    DB_KIND="external"
+    return 0
+  fi
+  # --db postgres://… 这种写法也算给出连接串
+  case "$DB_KIND" in
+    postgres://*|postgresql://*)
+      DATABASE_URL_OPT="$DB_KIND"
+      DB_KIND="external"
+      return 0
+      ;;
+  esac
+  # 没给任何参数 → 默认 SQLite（重复执行 / 升级时也保持原样）
+  [ -n "$DB_KIND" ] || { DB_KIND="sqlite"; return 0; }
+  case "$DB_KIND" in
+    sqlite|postgres) ;;
+    *) die "不支持的数据库类型：$DB_KIND（可选 sqlite / postgres，或直接给 --database-url）" ;;
+  esac
+}
+
 # ---------- 配置生成 ----------
 rand() { head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 
@@ -305,11 +340,28 @@ ensure_env() {
   local env_file="$INSTALL_DIR/.env"
   if [ -f "$env_file" ]; then
     log "已存在 .env，保持不覆盖（如需重配请手动编辑）"
+    if [ -n "${DATABASE_URL_OPT:-}" ] || { [ -n "${DB_KIND:-}" ] && [ "$DB_KIND" != "sqlite" ]; }; then
+      warn "本次指定了数据库参数，但 .env 已存在 —— 数据库配置以现有 .env 为准，本次不改动"
+    fi
     return
   fi
   local setup_key write_token site_url app_bind compose_profiles trust_proxy
+  local database_url postgres_db postgres_user postgres_password
   setup_key="qy-$(rand_short)"
   write_token="$(rand)"
+  database_url=""
+  postgres_db="qingyu"
+  postgres_user="qingyu"
+  postgres_password=""
+
+  # 数据库形态由 resolve_database() 决定；交互选择在 interact_mode() 里完成
+  if [ "$DB_KIND" = "postgres" ]; then
+    # 连接串里的密码是 64 位十六进制，天然 URL 安全，不需要转义
+    postgres_password="$(rand)"
+    database_url="postgres://${postgres_user}:${postgres_password}@postgres:5432/${postgres_db}"
+  elif [ "$DB_KIND" = "external" ]; then
+    database_url="$DATABASE_URL_OPT"
+  fi
 
   if [ -n "$DOMAIN" ] && [ -z "$APP_PORT" ]; then
     # 模式一：域名 + 自动 HTTPS
@@ -336,6 +388,9 @@ ensure_env() {
     trust_proxy="0"
   fi
 
+  # 内置 PostgreSQL 时追加 postgres profile，compose 才会把数据库容器一起拉起
+  [ "$DB_KIND" = "postgres" ] && add_profile postgres
+
   log "生成 .env 与随机密钥"
   cat > "$env_file" <<EOF
 # 由 deploy/install.sh 于 $(date -u +"%Y-%m-%dT%H:%M:%SZ") 生成
@@ -344,6 +399,15 @@ HOST=0.0.0.0
 SITE_URL=$site_url
 SITE_DOMAIN=$DOMAIN
 DATA_DIR=./data
+# 数据库：留空使用 SQLite 文件；填写连接串则切换到 PostgreSQL
+# 数据库类型由 deploy/install.sh 决定（--db sqlite|postgres 或交互选择）
+DATABASE_URL=$database_url
+# 仅内置 PostgreSQL 容器需要；使用外部数据库时留空
+POSTGRES_DB=$postgres_db
+POSTGRES_USER=$postgres_user
+POSTGRES_PASSWORD=$postgres_password
+# 可选：Redis / Valkey 限流与去重；留空使用数据库 KV
+REDIS_URL=
 APP_BIND=$app_bind
 COMPOSE_PROFILES=$compose_profiles
 TRUST_PROXY=$trust_proxy
@@ -389,13 +453,31 @@ env_value() {
   grep -E "^${key}=" "$INSTALL_DIR/.env" 2>/dev/null | head -n1 | cut -d= -f2-
 }
 
+# COMPOSE_PROFILES 是逗号分隔的列表（如 "domain,postgres"）。
+# 判断某个 profile 是否启用时按整词匹配，不能用字符串相等，
+# 否则「域名 + PostgreSQL」会被误判成没有 Caddy。
+has_profile() {
+  local needle="$1" profiles="$2"
+  case ",${profiles}," in
+    *",${needle},"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# 往逗号列表里追加一个 profile（已存在则不重复）
+add_profile() {
+  local needle="$1"
+  if has_profile "$needle" "$compose_profiles"; then return 0; fi
+  compose_profiles="${compose_profiles:+$compose_profiles,}${needle}"
+}
+
 # 是否启用 Caddy（即 HTTPS 模式）。
 # .env 已存在时必须以里面的 COMPOSE_PROFILES 为准：
 # 那时 APP_BIND=127.0.0.1:8787 会被误判成「自定义端口」。
 uses_caddy() {
   local profiles; profiles="$(env_value COMPOSE_PROFILES)"
   if [ -n "$profiles" ]; then
-    [ "$profiles" = "domain" ]
+    has_profile domain "$profiles"
     return
   fi
   [ -n "$DOMAIN" ] && [ -z "$APP_PORT" ]
@@ -539,6 +621,49 @@ interact_mode() {
   log "将部署为 http://${ip}:${APP_PORT}（纯 HTTP，登录后台时密码为明文传输）"
 }
 
+# 数据库选择：默认 SQLite，但把选择权显式交出来。
+# 和部署模式一样，curl|bash 时 stdin 是脚本本身，必须从 /dev/tty 读。
+interact_database() {
+  # 已用参数指定 → 尊重参数；已部署过 → 不打扰现有配置
+  [ -n "$DB_KIND" ] && return 0
+  [ -n "$DATABASE_URL_OPT" ] && return 0
+  [ -f "$INSTALL_DIR/.env" ] && return 0
+
+  if ! can_ask; then
+    log "数据库：默认 SQLite（可用 --db postgres 改用 PostgreSQL，或 --database-url 接自己的云数据库）"
+    DB_KIND="sqlite"
+    return 0
+  fi
+
+  echo
+  log "请选择数据库"
+  echo "    1) SQLite                  （推荐；零依赖，备份就是一个文件）"
+  echo "    2) PostgreSQL · 内置容器    （脚本自动装好，多进程/高并发更稳）"
+  echo "    3) PostgreSQL · 我有自己的库 （阿里云 RDS / 腾讯云 / Supabase…）"
+  ask "选择" "1"
+  case "$REPLY" in
+    2)
+      DB_KIND="postgres"
+      log "将内置 PostgreSQL 容器（端口只在容器网络内开放，不占用宿主机 5432）"
+      ;;
+    3)
+      ask "PostgreSQL 连接串（postgres://用户:密码@主机:5432/库名）" ""
+      if [ -z "$REPLY" ]; then
+        warn "未填连接串，回退到 SQLite"
+        DB_KIND="sqlite"
+      else
+        DATABASE_URL_OPT="$REPLY"
+        DB_KIND="external"
+        log "将连接你自己的 PostgreSQL"
+      fi
+      ;;
+    *)
+      DB_KIND="sqlite"
+      log "将使用 SQLite（数据文件在数据目录里，单文件备份最省心）"
+      ;;
+  esac
+}
+
 # ------------------------------------------------------------
 # 傻瓜式：自动决定部署模式
 # ------------------------------------------------------------
@@ -667,13 +792,17 @@ compose() {
 
 wait_healthy() {
   log "等待服务就绪…"
-  local i=0
+  local i=0 port
+  port="$(local_health_port)"
   while [ $i -lt 60 ]; do
-    if ${DOCKER:-docker} compose ps --format json 2>/dev/null | grep -q '"Health":"healthy"'; then
+    # 只认 app 这一个容器：`compose ps` 不带服务名会把 postgres/redis/caddy
+    # 的 healthy 也算进来，数据库刚起来时会误判成「应用已就绪」。
+    if ${DOCKER:-docker} compose ps app --format json 2>/dev/null | grep -q '"Health":"healthy"'; then
       log "服务已健康"
       return 0
     fi
-    if curl -fsS "http://127.0.0.1:$(local_health_port)/healthz" >/dev/null 2>&1; then
+    # 最终以应用自己应答为准：/healthz 通了才代表迁移跑完、数据库连上了
+    if [ -n "$port" ] && curl -fsS "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1; then
       log "服务已响应"
       return 0
     fi
@@ -695,7 +824,19 @@ summary() {
   echo "    访问地址    ${site_url}"
   echo "    管理后台    ${site_url}/admin"
   echo "    安装目录    ${INSTALL_DIR}"
-  echo "    数据目录    ${INSTALL_DIR}/data（SQLite + 上传 + 备份）"
+  local db_url; db_url="$(env_value DATABASE_URL)"
+  if [ -n "$db_url" ]; then
+    local db_host; db_host="$(printf '%s' "$db_url" | sed -E 's#^[^:]+://[^@]*@([^/:]+).*#\1#')"
+    if [ -n "$DATABASE_URL_OPT" ] || [ "$DB_KIND" = "external" ]; then
+      echo "    数据库      PostgreSQL（外部）${db_host}"
+    else
+      echo "    数据库      PostgreSQL（内置容器）${db_host}"
+    fi
+    echo "    数据目录    ${INSTALL_DIR}/data（上传 + 备份；数据库在 PostgreSQL 卷里）"
+  else
+    echo "    数据库      SQLite（${INSTALL_DIR}/data/qingyu.db）"
+    echo "    数据目录    ${INSTALL_DIR}/data（SQLite + 上传 + 备份）"
+  fi
   echo
   if [ -n "${SETUP_KEY_SHOWN:-}" ]; then
     echo "    初始化密钥  ${SETUP_KEY_SHOWN}"
@@ -710,7 +851,7 @@ summary() {
   echo "      ${INSTALL_DIR}/deploy/install.sh backup"
   echo "      ${INSTALL_DIR}/deploy/install.sh info      # 随时查看访问地址、初始化密钥和版本"
   echo
-  if [ "$(env_value COMPOSE_PROFILES)" = "domain" ]; then
+  if has_profile domain "$(env_value COMPOSE_PROFILES)"; then
     echo "    已启用自动 HTTPS。证书首次签发通常需要十几秒，可通过 deploy/install.sh logs 查看。"
   else
     echo "    当前为纯 HTTP 模式（未启用 Caddy / 无证书）。"
@@ -739,7 +880,9 @@ cmd_install() {
   install_docker
   fetch_source
   interact_mode
+  interact_database
   resolve_mode
+  resolve_database
   ensure_env
   preflight
   BUILD_REVISION="$(resolve_revision)"
@@ -845,7 +988,7 @@ cmd_info() {
   echo
   echo "  部署方式"
   echo "  ────────────────────────────────────────────────────"
-  if [ "$profiles" = "domain" ]; then
+  if has_profile domain "$profiles"; then
     echo "    模式          域名 + 自动 HTTPS"
     echo "    域名          ${domain:-（未设置）}"
     echo "    对外端口      80 / 443（由 Caddy 占用）"
@@ -856,9 +999,23 @@ cmd_info() {
       echo "    域名          ${domain}"
     fi
   fi
-  echo "    安装目录      ${INSTALL_DIR}"
+  # 数据库：以 .env 的 DATABASE_URL 为准（有值 = PostgreSQL，空 = SQLite）
+  local db_url db_kind_label db_host
+  db_url="$(env_value DATABASE_URL)"
+  if [ -n "$db_url" ]; then
+    db_host="$(printf '%s' "$db_url" | sed -E 's#^[^:]+://[^@]*@([^/:]+).*#\1#')"
+    if has_profile postgres "$profiles"; then
+      db_kind_label="PostgreSQL（内置容器）"
+    else
+      db_kind_label="PostgreSQL（外部）"
+    fi
+    echo "    数据库        ${db_kind_label} ${db_host}"
+    echo "    数据目录      ${INSTALL_DIR}/data（上传 + 备份；数据存 PostgreSQL 卷）"
+  else
+    echo "    数据库        SQLite"
+    echo "    数据目录      ${INSTALL_DIR}/data（SQLite + 上传 + 备份；容器内 /data 卷）"
+  fi
   [ -n "$deploy_time" ] && echo "    部署时间      ${deploy_time}"
-  echo "    数据目录      ${INSTALL_DIR}/data（容器内 /data 卷）"
 
   # 运行状态：容器在跑就问 /healthz，否则跳过
   local hp health

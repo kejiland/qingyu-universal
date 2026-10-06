@@ -15,7 +15,7 @@
  * ============================================================ */
 import { Hono } from 'hono';
 import type { AppConfig } from './config.js';
-import type { D1Database } from './bindings/d1.js';
+import type { AppDatabase } from './types.js';
 import type { LocalStorage } from './bindings/storage.js';
 import type { MigrationReport } from './migrate.js';
 import type { WorkerEnv, WorkerModule } from './types.js';
@@ -37,7 +37,7 @@ import { withEdgeHeaders } from './edge.js';
 
 export interface AppDeps {
   config: AppConfig;
-  db: D1Database;
+  db: AppDatabase;
   env: WorkerEnv;
   worker: WorkerModule;
   migration: MigrationReport;

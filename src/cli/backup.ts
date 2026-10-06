@@ -11,6 +11,7 @@
  * ============================================================ */
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { loadConfig } from '../config.js';
 import { createD1 } from '../bindings/d1.js';
 
@@ -19,14 +20,22 @@ const outDir = path.resolve(process.argv[2] || path.join(config.dataDir, 'backup
 fs.mkdirSync(outDir, { recursive: true });
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-const target = path.join(outDir, `qingyu-${stamp}.db`);
+let target = '';
 
-const db = createD1(config.dbPath);
-try {
-  // VACUUM INTO 要求目标文件不存在
-  db.native.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
-} finally {
-  db.close();
+if (config.databaseDialect === 'postgres') {
+  target = path.join(outDir, `qingyu-${stamp}.dump`);
+  const result = spawnSync('pg_dump', [`--dbname=${config.databaseUrl}`, '--format=custom', `--file=${target}`], { stdio: 'inherit' });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`pg_dump 失败，退出码 ${result.status}`);
+} else {
+  target = path.join(outDir, `qingyu-${stamp}.db`);
+  const db = createD1(config.dbPath);
+  try {
+    // VACUUM INTO 要求目标文件不存在
+    db.native.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
+  } finally {
+    db.close();
+  }
 }
 
 const stat = fs.statSync(target);
@@ -36,7 +45,7 @@ console.log(`[backup] 已生成快照 ${target}（${size}）`);
 const keep = Number(process.env.BACKUP_KEEP || 30);
 const files = fs
   .readdirSync(outDir)
-  .filter((file) => file.startsWith('qingyu-') && file.endsWith('.db'))
+  .filter((file) => file.startsWith('qingyu-') && (file.endsWith('.db') || file.endsWith('.dump')))
   .sort();
 for (const stale of files.slice(0, Math.max(0, files.length - keep))) {
   fs.rmSync(path.join(outDir, stale), { force: true });

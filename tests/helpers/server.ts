@@ -78,7 +78,7 @@ export async function startTestServer(): Promise<TestServer> {
   });
 
   const env = buildWorkerEnv(config, { db, kv, assets, storage });
-  const migration = runMigrations(db, config.migrationsDir);
+  const migration = await runMigrations(db, config.migrationsDir);
 
   const workerEntry = pathToFileURL(path.join(config.appDir, 'worker.js')).href;
   const worker = ((await import(workerEntry)) as { default: WorkerModule }).default;

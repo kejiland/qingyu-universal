@@ -7,11 +7,11 @@ import os from 'node:os';
 import path from 'node:path';
 
 describe('迁移执行器', () => {
-  it('在全新数据库上应用全部迁移', () => {
+  it('在全新数据库上应用全部迁移', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qingyu-migrate-'));
     const db = createD1(path.join(dir, 'fresh.db'));
     try {
-      const report = runMigrations(db, MIGRATIONS_DIR);
+      const report = await runMigrations(db, MIGRATIONS_DIR);
       const files = fs.readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql'));
 
       expect(report.applied.length).toBe(files.length);
@@ -19,7 +19,7 @@ describe('迁移执行器', () => {
 
       // 关键表建好
       for (const table of ['posts', 'comments', 'site_settings', 'media', 'music', 'backups', 'subscribers']) {
-        const name = db.scalar<string>("SELECT name FROM sqlite_master WHERE type='table' AND name = ?", table);
+        const name = await db.scalar<string>("SELECT name FROM sqlite_master WHERE type='table' AND name = ?", table);
         expect(name, `表 ${table} 应存在`).toBe(table);
       }
       // FTS5 索引建好且可用
@@ -32,12 +32,12 @@ describe('迁移执行器', () => {
     }
   });
 
-  it('重复执行安全：第二次全部跳过', () => {
+  it('重复执行安全：第二次全部跳过', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qingyu-migrate2-'));
     const db = createD1(path.join(dir, 'again.db'));
     try {
-      const first = runMigrations(db, MIGRATIONS_DIR);
-      const second = runMigrations(db, MIGRATIONS_DIR);
+      const first = await runMigrations(db, MIGRATIONS_DIR);
+      const second = await runMigrations(db, MIGRATIONS_DIR);
       expect(second.applied).toEqual([]);
       expect(second.skipped.length).toBe(first.applied.length);
     } finally {
@@ -54,15 +54,15 @@ describe('迁移执行器', () => {
  * post_revisions 会残留（迁移前实测 18 条）。这里锁死行为，防止回退。
  * ============================================================ */
 describe('外键约束与级联', () => {
-  function freshDb() {
+  async function freshDb() {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qingyu-fk-'));
     const db = createD1(path.join(dir, 'fk.db'));
-    runMigrations(db, MIGRATIONS_DIR);
+    await runMigrations(db, MIGRATIONS_DIR);
     return { db, dir };
   }
 
-  it('6 张关联表建立了指向 posts 的 CASCADE 外键（评论由触发器清理）', () => {
-    const { db, dir } = freshDb();
+  it('6 张关联表建立了指向 posts 的 CASCADE 外键（评论由触发器清理）', async () => {
+    const { db, dir } = await freshDb();
     try {
       const expected = ['stats', 'stats_daily', 'stats_sources', 'post_revisions', 'webmentions', 'mail_outbox'];
       for (const table of expected) {
@@ -81,8 +81,8 @@ describe('外键约束与级联', () => {
     }
   });
 
-  it('删除文章时关联数据与评论全部清理', () => {
-    const { db, dir } = freshDb();
+  it('删除文章时关联数据与评论全部清理', async () => {
+    const { db, dir } = await freshDb();
     try {
       const id = 'p1';
       db.native.prepare("INSERT INTO posts (id,title,date,content,status) VALUES (?,?,?,?,?)").run(id, 't', '2026-01-01', 'x', 'published');
@@ -98,7 +98,7 @@ describe('外键约束与级联', () => {
       db.native.prepare('DELETE FROM posts WHERE id = ?').run(id);
 
       for (const table of ['comments', 'stats', 'stats_daily', 'stats_sources', 'post_revisions', 'webmentions', 'mail_outbox']) {
-        const count = db.scalar<number>(`SELECT COUNT(*) FROM ${table} WHERE post_id = ?`, id);
+        const count = await db.scalar<number>(`SELECT COUNT(*) FROM ${table} WHERE post_id = ?`, id);
         expect(count, `${table} 应无残留`).toBe(0);
       }
     } finally {
@@ -107,14 +107,14 @@ describe('外键约束与级联', () => {
     }
   });
 
-  it('评论允许内置留言板目标，统计仍拒绝孤儿数据', () => {
-    const { db, dir } = freshDb();
+  it('评论允许内置留言板目标，统计仍拒绝孤儿数据', async () => {
+    const { db, dir } = await freshDb();
     try {
       // 留言板没有对应帖子，但评论表允许这个内置目标。
       db.native
         .prepare('INSERT INTO comments (id,post_id,author,content,date) VALUES (?,?,?,?,?)')
         .run('c-gb', 'gb-note', 'a', '留言', '2026-01-01');
-      expect(db.scalar<number>("SELECT COUNT(*) FROM comments WHERE post_id = 'gb-note'")).toBe(1);
+      expect(await db.scalar<number>("SELECT COUNT(*) FROM comments WHERE post_id = 'gb-note'")).toBe(1);
 
       // 其它关联表仍然保持指向 posts 的外键保护。
       expect(() =>
@@ -126,16 +126,16 @@ describe('外键约束与级联', () => {
     }
   });
 
-  it('迁移会把存量孤儿清理掉', () => {
-    const { db, dir } = freshDb();
+  it('迁移会把存量孤儿清理掉', async () => {
+    const { db, dir } = await freshDb();
     try {
       // 先关外键制造孤儿，再手动跑一次清理语句（模拟迁移的清理段）
       db.native.exec('PRAGMA foreign_keys = OFF');
       db.native.prepare('INSERT INTO post_revisions (post_id,title,created_at) VALUES (?,?,?)').run('ghost', 'r', Date.now());
-      expect(db.scalar<number>("SELECT COUNT(*) FROM post_revisions WHERE post_id = 'ghost'")).toBe(1);
+      expect(await db.scalar<number>("SELECT COUNT(*) FROM post_revisions WHERE post_id = 'ghost'")).toBe(1);
 
       db.native.exec("DELETE FROM post_revisions WHERE post_id NOT IN (SELECT id FROM posts)");
-      expect(db.scalar<number>("SELECT COUNT(*) FROM post_revisions WHERE post_id = 'ghost'")).toBe(0);
+      expect(await db.scalar<number>("SELECT COUNT(*) FROM post_revisions WHERE post_id = 'ghost'")).toBe(0);
     } finally {
       db.close();
       fs.rmSync(dir, { recursive: true, force: true });
@@ -152,15 +152,15 @@ describe('外键约束与级联', () => {
  * 这里把两点都锁死。
  * ============================================================ */
 describe('评论自引用外键', () => {
-  function freshDb() {
+  async function freshDb() {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qingyu-cfk-'));
     const db = createD1(path.join(dir, 'cfk.db'));
-    runMigrations(db, MIGRATIONS_DIR);
+    await runMigrations(db, MIGRATIONS_DIR);
     return { db, dir };
   }
 
-  it('parent_id 外键指向 comments 自己（而非残留的中间表名）', () => {
-    const { db, dir } = freshDb();
+  it('parent_id 外键指向 comments 自己（而非残留的中间表名）', async () => {
+    const { db, dir } = await freshDb();
     try {
       const fks = db.native.prepare('PRAGMA foreign_key_list(comments)').all() as Array<{
         table: string;
@@ -175,7 +175,7 @@ describe('评论自引用外键', () => {
       expect(selfRef?.on_delete).toBe('CASCADE');
 
       // 中间表名不应残留
-      const leftover = db.scalar<string>(
+      const leftover = await db.scalar<string>(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='comments_new'"
       );
       expect(leftover).toBeNull();
@@ -185,8 +185,8 @@ describe('评论自引用外键', () => {
     }
   });
 
-  it('删除父评论时级联删除子回复与孙回复', () => {
-    const { db, dir } = freshDb();
+  it('删除父评论时级联删除子回复与孙回复', async () => {
+    const { db, dir } = await freshDb();
     try {
       db.native.prepare("INSERT INTO posts (id,title,date,content,status) VALUES (?,?,?,?,?)")
         .run('p1', 't', '2026-01-01', 'x', 'published');
@@ -198,7 +198,7 @@ describe('评论自引用外键', () => {
       ins.run('grand', 'p1', 'c', '孙回复', '2026-01-01', 'child');
       ins.run('other', 'p1', 'd', '无关评论', '2026-01-01', null);
 
-      expect(db.scalar<number>('SELECT COUNT(*) FROM comments')).toBe(4);
+      expect(await db.scalar<number>('SELECT COUNT(*) FROM comments')).toBe(4);
 
       // 只删父评论，不手工清理任何子级
       db.native.prepare('DELETE FROM comments WHERE id = ?').run('root');
@@ -211,8 +211,8 @@ describe('评论自引用外键', () => {
     }
   });
 
-  it('删除文章仍然级联清理整棵评论树', () => {
-    const { db, dir } = freshDb();
+  it('删除文章仍然级联清理整棵评论树', async () => {
+    const { db, dir } = await freshDb();
     try {
       db.native.prepare("INSERT INTO posts (id,title,date,content,status) VALUES (?,?,?,?,?)")
         .run('p1', 't', '2026-01-01', 'x', 'published');
@@ -225,15 +225,15 @@ describe('评论自引用外键', () => {
       // 删文章会把 comments 的 post_id 外键触发为 CASCADE；
       // 删除过程中「父评论 → 子回复」的级联也必须跟上
       db.native.prepare('DELETE FROM posts WHERE id = ?').run('p1');
-      expect(db.scalar<number>('SELECT COUNT(*) FROM comments')).toBe(0);
+      expect(await db.scalar<number>('SELECT COUNT(*) FROM comments')).toBe(0);
     } finally {
       db.close();
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('父评论不存在时插入子回复会被拒绝', () => {
-    const { db, dir } = freshDb();
+  it('父评论不存在时插入子回复会被拒绝', async () => {
+    const { db, dir } = await freshDb();
     try {
       db.native.prepare("INSERT INTO posts (id,title,date,content,status) VALUES (?,?,?,?,?)")
         .run('p1', 't', '2026-01-01', 'x', 'published');

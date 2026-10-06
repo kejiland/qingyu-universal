@@ -63,7 +63,7 @@ console.log(`目标：${BASE}\n`);
 /* ---------- 1. 健康检查 ---------- */
 const health = await api<{ ok?: boolean; database?: string; storage?: string }>('/healthz');
 ok('健康检查返回 200', health.status === 200, `status=${health.status}`);
-ok('数据库为 SQLite', health.data.database === 'sqlite');
+ok('数据库已连接', health.data.database === 'sqlite' || health.data.database === 'postgres', 'database=' + health.data.database);
 ok('存储模式已上报', health.data.storage === 'local' || health.data.storage === 's3', String(health.data.storage));
 
 /* ---------- 2. 管理员初始化 ---------- */
@@ -125,7 +125,7 @@ ok('head 内 canonical / JSON-LD 各一份', (articleHtml.match(/rel="canonical"
 
 /* ---------- 8. 全文搜索（FTS5 trigram） ---------- */
 const search = await api<{ results?: Array<{ id: string }> }>(`/api/search?q=${encodeURIComponent(KEYWORD)}`);
-ok('FTS5 全文搜索命中新文章', search.status === 200 && Boolean(search.data.results?.some((r) => r.id === POST_ID)), `status=${search.status}`);
+ok('全文搜索命中新文章', search.status === 200 && Boolean(search.data.results?.some((r) => r.id === POST_ID)), `status=${search.status}`);
 
 /* ---------- 9. 评论 ---------- */
 const comment = await api(`/api/posts/${encodeURIComponent(POST_ID)}/comments`, {

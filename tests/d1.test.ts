@@ -65,7 +65,7 @@ describe('D1 兼容层', () => {
       db.prepare('INSERT INTO items (id, name) VALUES (?, ?)').bind('f1', '己一'),
       db.prepare('INSERT INTO items (id, name) VALUES (?, ?)').bind('f2', '己二')
     ]);
-    const count = db.scalar<number>('SELECT COUNT(*) FROM items');
+    const count = await db.scalar<number>('SELECT COUNT(*) FROM items');
     expect(count).toBe(2);
   });
 
@@ -77,7 +77,7 @@ describe('D1 兼容层', () => {
         db.prepare('INSERT INTO items (id, name) VALUES (?, ?)').bind('g1', '主键冲突') // 违反 PRIMARY KEY
       ])
     ).rejects.toThrow();
-    const count = db.scalar<number>('SELECT COUNT(*) FROM items');
+    const count = await db.scalar<number>('SELECT COUNT(*) FROM items');
     expect(count).toBe(1);
   });
 

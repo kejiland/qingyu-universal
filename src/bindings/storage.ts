@@ -13,7 +13,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type { LocalStorageLike, WorkerEnv } from '../types.js';
-import type { D1Database } from './d1.js';
+import type { AppDatabase } from '../types.js';
 
 /** 允许写入/读取的对象前缀——白名单之外一律拒绝，避免任意路径写入。 */
 const ALLOWED_PREFIXES = ['media/', 'music/', 'backups/', 'og/'] as const;
@@ -137,7 +137,7 @@ function isLocalOrSiteHost(hostname: string, siteUrl: string): boolean {
 }
 
 /** 把历史遗留的绝对本地上传地址改回根相对地址，避免绑定 WSL 网关或临时 IP。 */
-export function normalizeLocalObjectUrls(db: D1Database, siteUrl: string): number {
+export async function normalizeLocalObjectUrls(db: AppDatabase, siteUrl: string): Promise<number> {
   const tables = [
     { table: 'media', columns: ['url', 'thumb_url'] },
     { table: 'music', columns: ['url', 'cover'] },
@@ -148,7 +148,7 @@ export function normalizeLocalObjectUrls(db: D1Database, siteUrl: string): numbe
   for (const { table, columns } of tables) {
     let rows: Array<Record<string, unknown>>;
     try {
-      rows = db.native.prepare(`SELECT id, ${columns.join(',')} FROM ${table}`).all() as unknown as Array<Record<string, unknown>>;
+      rows = await db.all<Record<string, unknown>>(`SELECT id, ${columns.join(',')} FROM ${table}`);
     } catch {
       continue;
     }
@@ -170,10 +170,10 @@ export function normalizeLocalObjectUrls(db: D1Database, siteUrl: string): numbe
       }
       if (!updates.length) continue;
       const assignments = updates.map(([column]) => `${column} = ?`).join(', ');
-      db.native.prepare(`UPDATE ${table} SET ${assignments} WHERE id = ?`).run(
+      await db.prepare(`UPDATE ${table} SET ${assignments} WHERE id = ?`).bind(
         ...updates.map(([, value]) => value),
         String(row.id)
-      );
+      ).run();
       changedRows += 1;
     }
   }

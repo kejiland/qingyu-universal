@@ -8,7 +8,7 @@
  * 注意：标签与分类的链接指向 /?tag=xxx 与 /?category=xxx（首页带查询），
  * 不是独立路径——筛选后的列表由首页 SSR 负责。
  * ============================================================ */
-import type { D1Database } from '../bindings/d1.js';
+import type { AppDatabase } from '../types.js';
 import { escapeHtml, type PostRow, type SiteIdentity } from '../seo/meta.js';
 import { renderMarkdown } from './post.js';
 
@@ -135,11 +135,9 @@ export function filterPosts(
 /* ---------- 关于 / 友链 / 热门 ---------- */
 
 /** 读取 site_settings 里的 JSON 配置（关于页取 site，友链取 footer）。 */
-export function readSettingJson<T>(db: D1Database, key: string, fallback: T): T {
+export async function readSettingJson<T>(db: AppDatabase, key: string, fallback: T): Promise<T> {
   try {
-    const row = db.native.prepare('SELECT v FROM site_settings WHERE k = ?').get(key) as
-      | { v?: string }
-      | undefined;
+    const row = await db.first<{ v?: string }>('SELECT v FROM site_settings WHERE k = ?', key);
     if (!row || !row.v) return fallback;
     const value = JSON.parse(String(row.v));
     return value && typeof value === 'object' ? (value as T) : fallback;

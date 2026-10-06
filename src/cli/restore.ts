@@ -7,6 +7,7 @@
  * ============================================================ */
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { loadConfig } from '../config.js';
 
@@ -19,6 +20,22 @@ if (!source) {
 if (!fs.existsSync(source)) {
   console.error(`[restore] 找不到快照：${source}`);
   process.exit(1);
+}
+
+if (config.databaseDialect === 'postgres') {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const preRestore = path.join(path.dirname(config.dbPath), `qingyu-pre-restore-${stamp}.dump`);
+  const backup = spawnSync('pg_dump', [`--dbname=${config.databaseUrl}`, '--format=custom', `--file=${preRestore}`], { stdio: 'inherit' });
+  if (backup.error) throw backup.error;
+  if (backup.status !== 0) throw new Error(`恢复前 pg_dump 失败，退出码 ${backup.status}`);
+  console.log(`[restore] 已备份当前 PostgreSQL → ${preRestore}`);
+
+  const restore = spawnSync('pg_restore', ['--clean', '--if-exists', '--no-owner', `--dbname=${config.databaseUrl}`, source], { stdio: 'inherit' });
+  if (restore.error) throw restore.error;
+  if (restore.status !== 0) throw new Error(`pg_restore 失败，退出码 ${restore.status}`);
+  console.log(`[restore] 已恢复 ${source} → PostgreSQL`);
+  console.log('[restore] 现在可以重新启动服务：npm start');
+  process.exit(0);
 }
 
 // 先验证快照本身是可用的 SQLite 文件

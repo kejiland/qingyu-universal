@@ -15,6 +15,7 @@ export function buildWorkerEnv(config: AppConfig, bindings: Bindings): WorkerEnv
     ASSETS: bindings.assets,
 
     SITE_URL: config.siteUrl,
+    DB_DIALECT: config.databaseDialect,
     BLOG_ADMIN_SETUP_KEY: config.admin.setupKey,
     BLOG_WRITE_TOKEN: config.admin.writeToken,
     BLOG_PREVIEW_SECRET: config.secret,
