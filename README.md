@@ -356,7 +356,7 @@ cd ~/qingyu-universal          # 你的源码目录
 ### 常用运维命令
 
 > **懒得记命令？** 装好之后直接运行 `./deploy/install.sh`（不带任何参数），会弹出数字菜单：
-> 按 `1`-`11` 选升级 / 体检 / 备份 / 日志等，直接回车退出。
+> 按 `1`-`13` 选升级 / 体检 / 备份 / 定时备份 / 打包迁移等，直接回车退出。
 > 加了 `-y` 或明确写了子命令（如 `doctor`）则不会弹，自动化脚本不受影响。
 
 ```bash
@@ -373,6 +373,36 @@ cd ~/qingyu-universal          # 你的源码目录
 ./deploy/install.sh doctor           # 一键体检：网站打不开/传不了图先跑它，每项给 ✅⚠️❌ 和修复命令
 ./deploy/install.sh uninstall        # 停止并删除容器（数据卷保留）
 ```
+
+### 备份与迁移（服务器坏了也不怕）
+
+**开定时备份（一条命令）**
+
+```bash
+./deploy/install.sh autobackup                    # 每天 03:30 自动快照，保留最近 7 份
+systemctl list-timers | grep qingyu               # 看下次执行时间
+systemctl start qingyu-backup.service             # 立刻手动跑一次（等同 backup）
+```
+
+脚本会写一个 systemd 定时器（没有 systemd 的机器自动改用 crontab），失败不影响网站运行；
+`doctor` 体检里也会显示「定时备份是否已启用 + 下次执行时间 + 现有快照份数」。
+
+**换服务器 / 搬家（一条命令打包）**
+
+```bash
+./deploy/install.sh migrate          # 生成 ~/qingyu-migrate-<时间>.tar.gz
+```
+
+包里包含：站点配置 `.env`（域名、端口、密钥原样保留）+ 整个数据卷（文章、评论、上传的图片、历史快照），
+以及一份给新服务器用的恢复脚本。到新服务器后按包内 `README.txt` 三步走：
+
+```bash
+tar xzf qingyu-migrate-20261006-120000.tar.gz
+bash qingyu-migrate-20261006-120000/deploy/install.sh install -y   # 复用包里的 .env 装程序
+bash qingyu-migrate-20261006-120000/restore-here.sh --data-only   # 把数据装回去
+```
+
+> 打包文件里有管理员密钥和数据库密码，请当作敏感文件保管（脚本已自动设为仅 root 可读）。
 
 > 回滚对两种安装方式都有效：git 检出走本地历史（不联网），压缩包安装按版本号重新下载历史代码包。脚本会按需自动安装 git，装不上也不影响回滚。
 
@@ -731,6 +761,7 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
 - [x] **v0.9-a** 国内网络加速 `--mirror`：GitHub 代码加速、Docker Hub `registry-mirrors`、npm npmmirror，失败自动回落官方源
 - [x] **v0.9-b** 二次运行弹数字菜单：升级 / 体检 / 信息 / 状态 / 备份 / 日志 / 重启 / 停止 / 启动 / 回滚 / 卸载，回车即退出；交互终端 + 已部署过才会出现，CI 与 `-y` 不受影响
 - [x] **v0.9-c** 防火墙询问后自动放行：检测 ufw / firewalld，确认后只「新增放行规则」（域名模式含 80/443+443udp），非交互时退回打印命令；升级时也会复查端口
+- [x] **v0.9-g** 备份与迁移：`autobackup` 装 systemd/crontab 定时备份（每天自动快照、只保留最近 N 份，`--at`/`--keep`/`--off` 可调）；`backup --keep N` 自动清理旧快照；`migrate` 一键打包整站（`.env` + 数据卷 + 恢复脚本）用于换服务器；`uninstall --purge` 彻底删数据（二次确认，多卷时拒绝乱删）；`doctor` 增加「定时备份是否已启用 + 下次执行时间」检查
 - [x] **v0.9-e** Windows 部署脚本与 Linux 版对齐：`info`/`doctor`/`upgrade`/`backup`/`restore`/`status` 子命令、`-Port`/`-Database` 选择、生成的 `.env` 字段与 `install.sh` 一致（非管理员时给出防火墙放行命令）
 - [x] **v0.9-d** CI 新增「干净 Debian 一键安装验收」：在什么都没有的容器里让脚本自己装 curl/git/Docker、装完做健康检查 + doctor + 幂等重跑（.env 必须原封不动）
 - [x] **v0.3** 路径级契约覆盖完成（60 条路径；兼容接口响应字段将逐步收紧）
