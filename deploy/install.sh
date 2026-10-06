@@ -2452,6 +2452,20 @@ cmd_doctor() {
     printf '%s\n' "$errs" | sed 's/^/        │ /'
   fi
 
+  # ---- 8.5 界面配色 ----
+  doc_head "界面配色可读性"
+  local contrast_script="${INSTALL_DIR}/scripts/check-contrast.mjs"
+  if [ -f "$contrast_script" ] && have node; then
+    if node "$contrast_script" >/tmp/qingyu-contrast.log 2>&1; then
+      doc_ok "界面文字与背景的对比度全部达标（WCAG AA）"
+    else
+      doc_warn "有文字颜色偏淡，看不清" "cd ${INSTALL_DIR} && npm run check:contrast"
+      grep -E '^   - ' /tmp/qingyu-contrast.log 2>/dev/null | head -n 5 | sed 's/^/        │ /'
+    fi
+  else
+    doc_info "跳过配色自检（需要源码目录 + Node.js，服务器上通常用不到）"
+  fi
+
   # ---- 汇总 ----
   echo
   printf '  \033[1m体检结果\033[0m\n'
