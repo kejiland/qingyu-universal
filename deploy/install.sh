@@ -1,3 +1,16 @@
+
+# 安装过程分步显示：让第一次用脚本的人知道「现在到哪一步了、还剩几步」。
+STEP_NO=0
+STEP_TOTAL=0
+step_begin() {
+  [ -n "$STEP_TOTAL" ] || return 0
+  STEP_NO=$((STEP_NO + 1))
+  printf '\n\033[1;35m┌─ 第 %d/%d 步\033[0m  \033[1m%s\033[0m\n' "$STEP_NO" "$STEP_TOTAL" "$*"
+}
+step_end() {
+  [ -n "$STEP_TOTAL" ] || return 0
+  printf '\033[1;35m└─ 第 %d/%d 步完成\033[0m\n' "$STEP_NO" "$STEP_TOTAL"
+}
 #!/usr/bin/env bash
 # ============================================================
 # 轻语博客 · 自托管通用版 —— 一键部署脚本
@@ -1494,42 +1507,71 @@ summary() {
 
 # ---------- 各子命令 ----------
 cmd_install() {
+  STEP_TOTAL=7
   need_root
+  step_begin "检查并准备系统环境（curl / git / Docker）"
   resolve_docker
   resolve_mirror
   ensure_curl
   ensure_git
   install_docker
   configure_registry_mirror
+  step_end
+
+  step_begin "获取博客代码"
   fetch_source
+  step_end
+
+  step_begin "选择访问方式与数据库"
   interact_mode
   interact_database
   resolve_mode
   resolve_database
+  step_end
+
+  step_begin "生成配置文件（.env）"
   ensure_env
   persist_mirror_env
+  step_end
+
+  step_begin "起飞前检查（资源 / 端口 / 域名 / 防火墙）"
   preflight
+  step_end
+
+  step_begin "构建镜像并启动服务"
   BUILD_REVISION="$(resolve_revision)"
   [ -n "$BUILD_REVISION" ] || BUILD_REVISION=unknown
   export BUILD_REVISION
   log "构建并启动容器…（版本 $BUILD_REVISION）"
   compose up -d --build
   wait_healthy
+  step_end
+
+  STEP_TOTAL=0
   summary
 }
 
 cmd_upgrade() {
+  STEP_TOTAL=4
   need_root
+
+  step_begin "检查系统环境与网络加速"
   resolve_docker
   resolve_mirror
   configure_registry_mirror
   [ -d "$INSTALL_DIR" ] || die "未找到安装目录：$INSTALL_DIR"
   ensure_git
+  step_end
+
+  step_begin "拉取最新代码并备份当前数据"
   update_source
   resolve_mode
   persist_mirror_env
   # 先备份，再升级
   backup_now || warn "升级前备份失败，继续升级"
+  step_end
+
+  step_begin "重建容器并等待服务就绪"
   # 注入构建版本（git 短 SHA），让 /healthz 能回答「升级到底生效没有」
   BUILD_REVISION="$(resolve_revision)"
   [ -n "$BUILD_REVISION" ] || BUILD_REVISION=unknown
@@ -1538,7 +1580,13 @@ cmd_upgrade() {
   compose pull --ignore-pull-failures 2>/dev/null || true
   compose up -d --build
   wait_healthy
+  step_end
+
+  step_begin "复查防火墙放行"
   ensure_firewall_open
+  step_end
+
+  STEP_TOTAL=0
   log "升级完成（版本 $BUILD_REVISION）"
 }
 

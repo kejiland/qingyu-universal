@@ -765,6 +765,7 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
 - [x] **v0.9-e** Windows 部署脚本与 Linux 版对齐：`info`/`doctor`/`upgrade`/`backup`/`restore`/`status` 子命令、`-Port`/`-Database` 选择、生成的 `.env` 字段与 `install.sh` 一致（非管理员时给出防火墙放行命令）
 - [x] **v0.9-d** CI 新增「干净 Debian 一键安装验收」：在什么都没有的容器里让脚本自己装 curl/git/Docker、装完做健康检查 + doctor + 幂等重跑（.env 必须原封不动）
 - [x] **v0.9-h** 起飞前资源体检：安装开头先报「CPU 核数 · 内存 · 可用内存」，内存低于 1GB / 无 swap / 磁盘偏小时提前给可执行建议（加 swap 或改用预构建镜像），避免构建到一半 OOM
+- [x] **v0.9-i** 安装与升级分步显示：每一步显示「第 N/M 步 + 这步在干什么」并在结束时打勾，小白用户能清楚看到进度走到哪
 - [x] **v0.3** 路径级契约覆盖完成（60 条路径；兼容接口响应字段将逐步收紧）
 - [x] **v0.3.1-a** Redis / Valkey 可选限流（配置 `REDIS_URL` 即启用）
 - [x] **v0.3.1-b** PostgreSQL 运行时适配（配置 `DATABASE_URL` 即切换）
