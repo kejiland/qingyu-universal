@@ -76,6 +76,20 @@ export interface PostAnalyticsResponse {
   items: PostAnalyticsItem[];
 }
 
+/** 健康检查单项（兼容接口，schema 尚未登记）。 */
+export interface HealthItem {
+  key: string;
+  ok: boolean;
+  bound?: boolean;
+  counts?: Record<string, number | null>;
+}
+
+export interface HealthResponse {
+  ok: true;
+  items: HealthItem[];
+  checkedAt: number;
+}
+
 /* ---------- 错误与请求 ---------- */
 
 export class ApiError extends Error {
@@ -252,6 +266,7 @@ export const api = {
   deleteWebmention: (id: number) => request<{ ok: true }>(`/api/admin/webmentions/${id}`, { method: 'DELETE' }),
 
   /* 统计 */
+  adminHealth: () => request<HealthResponse>('/api/admin/health'),
   statsTrend: () => request<components['schemas']['StatsTrendResponse']>('/api/stats/trend'),
   statsSources: () => request<components['schemas']['StatsSourcesResponse']>('/api/admin/stats/sources'),
   postAnalytics: (range: 'all' | '30' | '7' = 'all') =>

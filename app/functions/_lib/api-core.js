@@ -2201,7 +2201,9 @@ export async function handleHealth(request, env) {
   items.push({ key: 'r2media', ok: r2Creds && !!env.R2_MEDIA_BUCKET, bound: !!env.R2_MEDIA_BUCKET });
   items.push({ key: 'r2backup', ok: r2Creds && !!env.R2_BACKUP_BUCKET, bound: !!env.R2_BACKUP_BUCKET });
   items.push({ key: 'ai', ok: !!env.AI, bound: !!env.AI });
-  items.push({ key: 'mail', ok: !!(env.RESEND_API_KEY && env.BLOG_MAIL_FROM && env.SITE_URL), bound: !!env.RESEND_API_KEY });
+  // [self-host] 通用版默认走 SMTP（env.MAIL_SEND），与 Resend 二选一，任一可用都算正常
+  var mailOk = !!(env.MAIL_SEND || (env.RESEND_API_KEY && env.BLOG_MAIL_FROM && env.SITE_URL));
+  items.push({ key: 'mail', ok: mailOk, bound: !!(env.MAIL_SEND || env.RESEND_API_KEY) });
   return json({ ok: true, items: items, checkedAt: Date.now() }, 200, request, env, { 'Cache-Control': NO_CACHE });
 }
 
