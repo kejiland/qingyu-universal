@@ -30,6 +30,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
 COPY tsconfig.json ./
+COPY scripts ./scripts
 COPY src ./src
 # app/public 的启动器与压缩产物由 frontend:build 生成，避免镜像里出现陈旧的 app.min.js
 COPY app ./app
