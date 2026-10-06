@@ -2281,6 +2281,7 @@ function renderHomeStats(posts) {
   var tags = {};
   var words = 0;
   var latest = '';
+  var latestId = '';
   posts.forEach(function (p) {
     var cat = String(p.category || '').trim();
     if (cat) cats[cat] = 1;
@@ -2291,7 +2292,7 @@ function renderHomeStats(posts) {
     var other = text.replace(/[\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af]/g, ' ').match(/[A-Za-z0-9'\u00c0-\u024f]+/g);
     words += cjk + (other ? other.length : 0);
     var d = fmtDate(p.date || p.createdAt || p.updatedAt || '');
-    if (d && d > latest) latest = d;
+    if (d && d > latest) { latest = d; latestId = p.id || ''; }
   });
   var items = [
     { k: 'home.stats.posts', v: String(posts.length) },
@@ -2299,10 +2300,13 @@ function renderHomeStats(posts) {
     { k: 'home.stats.tags', v: String(Object.keys(tags).length) },
     { k: 'home.stats.words', v: words >= 10000 ? (words / 10000).toFixed(1) + 'w' : (words >= 1000 ? (words / 1000).toFixed(1) + 'k' : String(words)) }
   ];
-  if (latest) items.push({ k: 'home.stats.updated', v: latest });
+  if (latest) items.push({ k: 'home.stats.updated', v: latest, href: latestId ? href(postUrl(latestId)) : '' });
   var cells = items.map(function (it) {
-    return '<div class="home-stat"><span class="home-stat-v">' + esc(it.v) + '</span>'
-      + '<span class="home-stat-k">' + esc(t(it.k)) + '</span></div>';
+    var inner = '<span class="home-stat-v">' + esc(it.v) + '</span>'
+      + '<span class="home-stat-k">' + esc(t(it.k)) + '</span>';
+    return it.href
+      ? '<a class="home-stat home-stat-link" href="' + esc(it.href) + '">' + inner + '</a>'
+      : '<div class="home-stat">' + inner + '</div>';
   }).join('');
   return '<section class="home-stats" aria-label="' + esc(t('home.stats.title')) + '">'
     + '<div class="home-stats-title">' + svgIcon('star', 14) + '<span>' + esc(t('home.stats.title')) + '</span></div>'
