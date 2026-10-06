@@ -1284,9 +1284,72 @@ ensure_firewall_open() {
   return 0
 }
 
+
+# 起飞前的资源体检：CPU / 内存 / 磁盘 / swap
+# 目的不是刁难用户，而是「装之前就告诉他这机器跑不跑得动」，
+# 免得镜像构建到一半 OOM，或者装完打开页面一片空白。
+check_resources() {
+  local cores mem_total_kb mem_avail_mb swap_mb warned=0
+
+  cores="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo '')"
+  mem_total_kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || true)"
+  [ -n "$mem_total_kb" ] || mem_total_kb="$(free -k 2>/dev/null | awk '/^Mem:/ {print $2}')"
+  mem_avail_mb="$(free -m 2>/dev/null | awk '/^Mem:/ {print $7}')"
+  swap_mb="$(free -m 2>/dev/null | awk '/^Swap:/ {print $2}')"
+
+  # 一行小结，让人一眼看到这台机器的底子
+  local mem_desc="未知"
+  [ -n "$mem_total_kb" ] && mem_desc="$((mem_total_kb / 1024)) MB"
+  printf '    CPU %s 核 · 内存 %s · 可用内存 %s\n' "${cores:-?}" "$mem_desc" "${mem_avail_mb:-?} MB"
+
+  if [ -n "$cores" ] && [ "$cores" -lt 1 ]; then
+    warn "检测不到 CPU 核心数，Docker 构建可能异常"
+    warned=1
+  fi
+
+  if [ -n "$mem_total_kb" ]; then
+    if [ "$mem_total_kb" -lt 524288 ]; then
+      warn "内存只有 $((mem_total_kb / 1024)) MB，跑不动 Docker 构建（至少需要 512 MB，建议 1 GB）"
+      warned=1
+    elif [ "$mem_total_kb" -lt 1048576 ]; then
+      warn "内存 $((mem_total_kb / 1024)) MB 偏小，构建镜像时可能被杀进程（OOM）"
+      warn "  两个省内存的办法：① 用现成镜像 --image ghcr.io/kejiland/qingyu-universal:v0.8.0（不本地构建）"
+      warn "                   ② 先在本地构建好镜像再传上来"
+      warned=1
+    fi
+    # 内存小又没有 swap：构建时更容易被 OOM Killer 直接干掉
+    if [ "$mem_total_kb" -lt 1048576 ] && [ "${swap_mb:-0}" -eq 0 ]; then
+      warn "并且没有 swap 缓冲区，构建更容易被系统 OOM 杀掉"
+      warn "  加 1G swap（不需要重启）："
+      warn "    fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile"
+      warn "    echo '/swapfile swap swap defaults 0 0' >> /etc/fstab"
+    fi
+  fi
+
+  # 磁盘：/var/lib 是 Docker 的地盘，装 Docker 之前先看它
+  local avail_kb
+  avail_kb="$(df -Pk /var/lib 2>/dev/null | awk 'NR==2 {print $4}' || true)"
+  [ -n "$avail_kb" ] || avail_kb="$(df -Pk "$INSTALL_DIR" 2>/dev/null | awk 'NR==2 {print $4}' || true)"
+  if [ -n "$avail_kb" ]; then
+    if [ "$avail_kb" -lt 2097152 ]; then
+      warn "磁盘可用空间不足 2GB（当前 $((avail_kb / 1024)) MB），装 Docker 和镜像都会失败"
+      warned=1
+    elif [ "$avail_kb" -lt 5242880 ]; then
+      warn "磁盘可用 $((avail_kb / 1024)) MB，够用但不宽裕（以后备份、镜像会占地方）"
+      warned=1
+    fi
+  fi
+
+  if [ "$warned" -eq 1 ]; then
+    log "  资源偏紧仍然可以继续；如果构建失败，试试上面提到的 --image 方式"
+  fi
+}
+
 preflight() {
   local ok=1
   log "起飞前检查…"
+
+  check_resources || true
 
   # 磁盘：镜像 + 依赖大约需要 1GB，留 2GB 余量避免构建到一半失败
   local avail
