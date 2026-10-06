@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { Save, Loader2, Info } from '@lucide/vue';
+import { Braces, Save, Loader2, Info } from '@lucide/vue';
+import ListEditorCard from '../components/ListEditorCard.vue';
 import { api, ApiError } from '../lib/api';
 import { toast } from '../lib/toast';
 
@@ -13,10 +14,16 @@ const site = ref({
   announceEnabled: false, announceText: '', announceLink: '', announceLinkText: '', announceClosable: true
 });
 const profile = ref({ name: '', bio: '', avatar: '', email: '' });
-const navText = ref('[]');
-const footerNavText = ref('[]');
-const linksText = ref('[]');
-const adsText = ref('{}');
+const navItems = ref<Record<string, unknown>[]>([]);
+const footerNavItems = ref<Record<string, unknown>[]>([]);
+const friendLinks = ref<Record<string, unknown>[]>([]);
+const ads = ref({
+  enabled: false, client: '', belowSearch: '', between: '', betweenEvery: 3, content: ''
+});
+const adsExtra = ref<Record<string, unknown>>({});
+const adsJsonMode = ref(false);
+const adsJsonDraft = ref('');
+const adsJsonError = ref('');
 const features = ref({ pageSize: 8, errorReport: true, commentGuard: true, richContent: true, navExtras: true });
 const moderate = ref(false);
 const blocklist = ref('');
@@ -36,6 +43,13 @@ function asObject(value: unknown): Record<string, unknown> {
 
 function arr(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+/** 把任意 JSON 解析成「对象数组」，不是对象的脏数据会被过滤掉 */
+function itemList(value: unknown): Record<string, unknown>[] {
+  return arr(value)
+    .filter((v): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v))
+    .map((v) => ({ ...v }));
 }
 
 /** 顶部导航默认项版本：与上游旧后台保持一致 */
@@ -112,12 +126,21 @@ onMounted(async () => {
       avatar: String(prof.avatar ?? ''),
       email: String(prof.email ?? '')
     };
-    let navItems = safeParse(settings.nav_menu, safeParse(settings.nav, []));
-    if (Number(settings.nav_defaults_version || 0) < NAV_DEFAULTS_VERSION) navItems = mergeDefaultNav(navItems);
-    navText.value = JSON.stringify(navItems, null, 2);
-    footerNavText.value = JSON.stringify(safeParse(settings.footer_nav, []), null, 2);
-    linksText.value = JSON.stringify(safeParse(settings.friend_links, arr(footer.links)), null, 2);
-    adsText.value = JSON.stringify(asObject(featureObj.ads), null, 2);
+    let navParsed = safeParse(settings.nav_menu, safeParse(settings.nav, []));
+    if (Number(settings.nav_defaults_version || 0) < NAV_DEFAULTS_VERSION) navParsed = mergeDefaultNav(navParsed);
+    navItems.value = itemList(navParsed);
+    footerNavItems.value = itemList(safeParse(settings.footer_nav, []));
+    friendLinks.value = itemList(safeParse(settings.friend_links, arr(footer.links)));
+    const rawAds = asObject(featureObj.ads);
+    adsExtra.value = { ...rawAds };
+    ads.value = {
+      enabled: rawAds.enabled === true,
+      client: String(rawAds.client ?? ''),
+      belowSearch: String(rawAds.belowSearch ?? ''),
+      between: String(rawAds.between ?? ''),
+      betweenEvery: Number(rawAds.betweenEvery) || 3,
+      content: String(rawAds.content ?? '')
+    };
     features.value = {
       pageSize: Number(featureObj.pageSize) || 8,
       errorReport: featureObj.errorReport !== false,
@@ -134,25 +157,67 @@ onMounted(async () => {
   }
 });
 
-function parseEditor(text: string, label: string, array: boolean): unknown {
-  let value: unknown;
+/** 恢复内置顶部导航（含新增的默认项） */
+function resetNav(): void {
+  navItems.value = DEFAULT_NAV_ITEMS.map((item) => ({ ...item }));
+}
+
+/** 广告位：把表单字段与历史遗留字段合并成前台可读的完整对象 */
+function adsToObject(): Record<string, unknown> {
+  return {
+    ...adsExtra.value,
+    enabled: ads.value.enabled,
+    client: ads.value.client,
+    belowSearch: ads.value.belowSearch,
+    between: ads.value.between,
+    betweenEvery: Number(ads.value.betweenEvery) || 3,
+    content: ads.value.content
+  };
+}
+
+function openAdsJson(): void {
+  adsJsonDraft.value = JSON.stringify(adsToObject(), null, 2);
+  adsJsonError.value = '';
+  adsJsonMode.value = true;
+}
+
+function closeAdsJson(): void {
+  adsJsonMode.value = false;
+  adsJsonError.value = '';
+}
+
+function applyAdsJson(): void {
+  let parsed: unknown;
   try {
-    value = JSON.parse(text || (array ? '[]' : '{}'));
+    parsed = JSON.parse(adsJsonDraft.value || '{}');
   } catch {
-    throw new Error(`${label} 不是合法 JSON`);
+    adsJsonError.value = '不是合法 JSON，请检查逗号、引号和括号。';
+    return;
   }
-  if (array && !Array.isArray(value)) throw new Error(`${label} 必须是 JSON 数组`);
-  if (!array && (!value || typeof value !== 'object' || Array.isArray(value))) throw new Error(`${label} 必须是 JSON 对象`);
-  return value;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    adsJsonError.value = '必须是 JSON 对象（最外层用 {} 包裹）。';
+    return;
+  }
+  const obj = parsed as Record<string, unknown>;
+  adsExtra.value = { ...obj };
+  ads.value = {
+    enabled: obj.enabled === true,
+    client: String(obj.client ?? ''),
+    belowSearch: String(obj.belowSearch ?? ''),
+    between: String(obj.between ?? ''),
+    betweenEvery: Number(obj.betweenEvery) || 3,
+    content: String(obj.content ?? '')
+  };
+  closeAdsJson();
 }
 
 async function save(): Promise<void> {
   saving.value = true;
   try {
-    const nav = parseEditor(navText.value, '导航菜单', true);
-    const footerNav = parseEditor(footerNavText.value, '页脚导航', true);
-    const links = parseEditor(linksText.value, '友链', true);
-    const ads = parseEditor(adsText.value, '广告位', false);
+    const nav = navItems.value;
+    const footerNav = footerNavItems.value;
+    const links = friendLinks.value;
+    const adsPayload = adsToObject();
 
     const sitePayload = { ...site.value };
     const footerPayload = {
@@ -163,7 +228,7 @@ async function save(): Promise<void> {
       links
     };
     const navJson = JSON.stringify(nav);
-    const featurePayload = { ...features.value, pageSize: Number(features.value.pageSize) || 8, ads };
+    const featurePayload = { ...features.value, pageSize: Number(features.value.pageSize) || 8, ads: adsPayload };
 
     await api.saveSettings({
       site: sitePayload,
@@ -253,31 +318,94 @@ async function save(): Promise<void> {
         </div>
       </section>
 
-      <section class="card p-5 space-y-4">
-        <h2 class="text-[15px] font-semibold">导航菜单 JSON</h2>
-        <p class="hint">每项包含 text、url，可选 children 子菜单数组。</p>
-        <textarea v-model="navText" class="textarea font-mono text-[12px]" rows="10" spellcheck="false" />
-      </section>
+      <ListEditorCard
+        v-model="navItems"
+        title="顶部导航"
+        hint="拖动左侧手柄或点 ↑↓ 调整顺序；文字留空则按语言自动翻译。"
+        :fields="[{ key: 'text', placeholder: '显示文字（留空自动翻译）' }, { key: 'url', placeholder: '/path', mono: true }]"
+        :allow-children="true"
+        add-label="添加菜单项"
+        empty-text="暂无导航项，点击下方按钮添加。"
+        resettable
+        @reset="resetNav"
+      />
+
+      <ListEditorCard
+        v-model="footerNavItems"
+        title="页脚导航"
+        hint="页脚上方的一排链接，拖动排序。"
+        :fields="[{ key: 'text', placeholder: '链接文字' }, { key: 'url', placeholder: '/path', mono: true }]"
+        add-label="添加链接"
+        empty-text="暂无页脚链接。"
+      />
+
+      <ListEditorCard
+        v-model="friendLinks"
+        title="友情链接"
+        hint="显示在页脚与「朋友圈」页面。"
+        :fields="[{ key: 'text', placeholder: '站点名称' }, { key: 'url', placeholder: 'https://…', mono: true }]"
+        add-label="添加友链"
+        empty-text="暂无友情链接。"
+      />
 
       <section class="card p-5 space-y-4">
-        <h2 class="text-[15px] font-semibold">页脚导航 JSON</h2>
-        <textarea v-model="footerNavText" class="textarea font-mono text-[12px]" rows="8" spellcheck="false" />
-      </section>
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <h2 class="text-[15px] font-semibold">广告位</h2>
+            <p class="hint mt-1">AdSense 与列表 / 正文广告代码，留空则不展示。</p>
+          </div>
+          <button
+            class="btn btn-sm btn-ghost shrink-0"
+            type="button"
+            :title="adsJsonMode ? '返回表单编辑' : '查看 JSON'"
+            @click="adsJsonMode ? closeAdsJson() : openAdsJson()"
+          >
+            <Braces :size="14" />
+            <span>{{ adsJsonMode ? '表单' : 'JSON' }}</span>
+          </button>
+        </div>
 
-      <section class="card p-5 space-y-4">
-        <h2 class="text-[15px] font-semibold">友情链接 JSON</h2>
-        <textarea v-model="linksText" class="textarea font-mono text-[12px]" rows="8" spellcheck="false" />
-      </section>
+        <template v-if="!adsJsonMode">
+          <label class="flex items-center gap-2 text-[13px]"><input v-model="ads.enabled" type="checkbox" /> 启用广告</label>
+          <div>
+            <label class="label" for="adsClient">AdSense 客户端 ID</label>
+            <input id="adsClient" v-model="ads.client" class="input font-mono text-[12px]" placeholder="ca-pub-xxxxxxxxxxxxxxxx" />
+          </div>
+          <div>
+            <label class="label" for="adsBelow">搜索栏下方广告代码</label>
+            <textarea id="adsBelow" v-model="ads.belowSearch" class="textarea font-mono text-[12px]" rows="3" placeholder="<ins …></ins>" />
+            <p class="hint">只在首页搜索栏下方展示。</p>
+          </div>
+          <div>
+            <label class="label" for="adsBetween">文章列表间隔广告代码</label>
+            <textarea id="adsBetween" v-model="ads.between" class="textarea font-mono text-[12px]" rows="3" />
+          </div>
+          <div>
+            <label class="label" for="adsEvery">每隔几篇文章插入一次</label>
+            <input id="adsEvery" v-model.number="ads.betweenEvery" class="input" type="number" min="1" step="1" style="max-width: 220px" />
+          </div>
+          <div>
+            <label class="label" for="adsContent">文章底部广告代码</label>
+            <textarea id="adsContent" v-model="ads.content" class="textarea font-mono text-[12px]" rows="3" />
+            <p class="hint">只在文章正文底部展示。</p>
+          </div>
+        </template>
 
-      <section class="card p-5 space-y-4">
-        <h2 class="text-[15px] font-semibold">广告位 JSON</h2>
-        <textarea v-model="adsText" class="textarea font-mono text-[12px]" rows="8" spellcheck="false" />
+        <template v-else>
+          <p class="hint">高级模式：直接编辑 JSON，点“应用 JSON”前会校验格式。</p>
+          <textarea v-model="adsJsonDraft" class="textarea font-mono text-[12px]" rows="10" spellcheck="false" @input="adsJsonError = ''" />
+          <p v-if="adsJsonError" class="hint text-danger">{{ adsJsonError }}</p>
+          <div class="flex flex-wrap gap-2">
+            <button class="btn btn-sm btn-primary" type="button" @click="applyAdsJson">应用 JSON</button>
+            <button class="btn btn-sm btn-ghost" type="button" @click="closeAdsJson">取消</button>
+          </div>
+        </template>
       </section>
     </div>
 
     <div class="flex items-start gap-2 rounded-xl border border-line bg-surface-2 px-4 py-3 text-[12.5px] text-ink-muted">
       <Info :size="15" class="text-accent shrink-0 mt-0.5" />
-      JSON 编辑器适合高级配置；显示“不是合法 JSON”时请先修正格式再保存，已有设置不会受影响。
+      导航、页脚导航、友链与广告位均为可视化编辑：拖动 ⠿ 手柄或点 ↑↓ 调整顺序，点右上角「JSON」可切换到高级 JSON 模式，保存格式与前台完全兼容。
     </div>
   </div>
 </template>
