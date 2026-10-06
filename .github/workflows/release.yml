@@ -67,6 +67,8 @@ jobs:
           format: spdx-json
           output-file: qingyu-universal.spdx.json
           artifact-name: qingyu-universal-spdx
+          # sbom-action 默认自己也上传一份，与后面 actions/upload-artifact 同名，v4 冲突会让流水线收尾失败
+          upload-artifact: false
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
