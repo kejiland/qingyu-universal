@@ -104,6 +104,8 @@ docker_ready() {
 # 记录原始参数，后续如果需要提权重启（如 doctor）可以照原样重跑
 ORIG_ARGS=("$@")
 COMMAND="install"
+# 用户是否显式写了子命令（没写 + 已部署过 + 交互终端 → 弹数字菜单）
+COMMAND_SET=0
 ARGS=()
 # 用户是否显式传了 --ref（REF 本身有默认值，不记一笔区分不出来）
 REF_SET="${REF_SET:-0}"
@@ -112,8 +114,8 @@ DB_KIND="${DB_KIND:-}"
 DATABASE_URL_OPT="${DATABASE_URL_OPT:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
-    install|upgrade|backup|restore|logs|status|info|start|stop|restart|rollback|uninstall|help) COMMAND="$1" ;;
-    doctor)                 COMMAND="$1" ;;
+    install|upgrade|backup|restore|logs|status|info|start|stop|restart|rollback|uninstall|help) COMMAND="$1"; COMMAND_SET=1 ;;
+    doctor)                 COMMAND="$1"; COMMAND_SET=1 ;;
     --domain)   DOMAIN="${2:-}"; shift ;;
     --email)    EMAIL="${2:-}"; shift ;;
     --dir)      INSTALL_DIR="${2:-}"; shift ;;
@@ -139,6 +141,7 @@ usage() {
 轻语博客 · 自托管通用版 一键部署
 
   install                 安装并启动（默认）
+                          （已部署过且不带子命令运行时，改为弹出数字菜单）
   upgrade                 拉取新版本并重建（保留数据）
   rollback                回滚到上一个版本（回滚前自动备份）
   backup                  生成数据库快照到 data/backups
@@ -1882,6 +1885,57 @@ cmd_uninstall() {
   compose down
   log "如需彻底删除数据：docker volume rm qingyu-universal_qingyu-data"
 }
+
+# ----------------------------------------------------------
+# 傻瓜式：已经部署过、又没写具体子命令时，弹一个数字菜单
+# 只在「交互终端 + 没加 -y + 目录里已有 .env」时出现，
+# 所以 CI、管道（curl|bash）、脚本互调都不会被它卡住。
+# ----------------------------------------------------------
+maybe_show_menu() {
+  [ "${COMMAND_SET:-0}" = "0" ] || return 0
+  [ -f "$INSTALL_DIR/.env" ] || return 0
+  can_ask || return 0
+  local site
+  site="$(env_value SITE_URL 2>/dev/null || true)"
+  {
+    echo
+    printf '\033[1;36m==> \033[0m%s\n' "检测到 ${INSTALL_DIR} 已经部署过，你想做什么？"
+    [ -n "$site" ] && printf '    当前站点：\033[1m%s\033[0m\n' "$site"
+    echo
+    echo "  1) 升级到最新版    拉新代码并重建，数据保留"
+    echo "  2) 一键体检        Docker / 容器 / 端口 / 防火墙 / 公网逐项检查"
+    echo "  3) 查看部署信息    访问地址、初始化密钥、版本、文章数"
+    echo "  4) 查看运行状态    容器与健康检查"
+    echo "  5) 备份数据        数据库快照到 data/backups"
+    echo "  6) 查看日志        实时输出应用日志（Ctrl+C 退出）"
+    echo "  7) 重启服务        改完 .env 之后用它生效"
+    echo "  8) 停止服务        配置和数据都保留"
+    echo "  9) 启动服务        把停过的服务再拉起来"
+    echo " 10) 回滚到上一版    升级出问题时退回"
+    echo " 11) 卸载            删除容器（数据卷保留）"
+    echo "  0) 退出"
+    echo
+    echo "  提示：改端口 / 站点地址 → 编辑 ${INSTALL_DIR}/.env 后选 7 生效"
+  } > /dev/tty 2>/dev/null || return 0
+  ask "请输入数字" "0"
+  case "$REPLY" in
+    1)  COMMAND="upgrade" ;;
+    2)  COMMAND="doctor" ;;
+    3)  COMMAND="info" ;;
+    4)  COMMAND="status" ;;
+    5)  COMMAND="backup" ;;
+    6)  COMMAND="logs" ;;
+    7)  COMMAND="restart" ;;
+    8)  COMMAND="stop" ;;
+    9)  COMMAND="start" ;;
+    10) COMMAND="rollback" ;;
+    11) COMMAND="uninstall" ;;
+    0)  log "已退出（再次运行本脚本可重新打开菜单）"; exit 0 ;;
+    *)  warn "没看懂这个选择（请输入 0-11），先退出"; exit 1 ;;
+  esac
+}
+
+maybe_show_menu
 
 case "$COMMAND" in
   help) usage ;;

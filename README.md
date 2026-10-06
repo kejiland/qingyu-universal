@@ -339,6 +339,10 @@ cd ~/qingyu-universal          # 你的源码目录
 
 ### 常用运维命令
 
+> **懒得记命令？** 装好之后直接运行 `./deploy/install.sh`（不带任何参数），会弹出数字菜单：
+> 按 `1`-`11` 选升级 / 体检 / 备份 / 日志等，直接回车退出。
+> 加了 `-y` 或明确写了子命令（如 `doctor`）则不会弹，自动化脚本不受影响。
+
 ```bash
 ./deploy/install.sh upgrade          # 升级（升级前自动备份，数据保留）
 ./deploy/install.sh rollback         # 回滚到上一个版本（回滚前自动备份，可再滚回来）
@@ -709,6 +713,7 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
 - [x] **v0.8** 公开站视觉打磨：日期规范成 YYYY-MM-DD、卡片摘要回退到 search 全文、独立叠加样式 `polish.min.css`
 - [x] **v0.9** 部署脚本一键体检 `doctor`：Docker / 容器 / 端口 / 防火墙 / 公网地址 / 磁盘 / 错误日志，每项给 ✅⚠️❌ 加一句修复命令
 - [x] **v0.9-a** 国内网络加速 `--mirror`：GitHub 代码加速、Docker Hub `registry-mirrors`、npm npmmirror，失败自动回落官方源
+- [x] **v0.9-b** 二次运行弹数字菜单：升级 / 体检 / 信息 / 状态 / 备份 / 日志 / 重启 / 停止 / 启动 / 回滚 / 卸载，回车即退出；交互终端 + 已部署过才会出现，CI 与 `-y` 不受影响
 - [x] **v0.3** 路径级契约覆盖完成（60 条路径；兼容接口响应字段将逐步收紧）
 - [x] **v0.3.1-a** Redis / Valkey 可选限流（配置 `REDIS_URL` 即启用）
 - [x] **v0.3.1-b** PostgreSQL 运行时适配（配置 `DATABASE_URL` 即切换）
