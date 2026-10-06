@@ -40,6 +40,24 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '评论' }
   },
   {
+    path: '/tags',
+    name: 'tags',
+    component: () => import('./views/TagsView.vue'),
+    meta: { title: '标签管理' }
+  },
+  {
+    path: '/series',
+    name: 'series',
+    component: () => import('./views/SeriesView.vue'),
+    meta: { title: '系列管理' }
+  },
+  {
+    path: '/comments/pending',
+    name: 'comments-pending',
+    component: () => import('./views/CommentsView.vue'),
+    meta: { title: '待审核评论' }
+  },
+  {
     path: '/settings',
     name: 'settings',
     component: () => import('./views/SettingsView.vue'),

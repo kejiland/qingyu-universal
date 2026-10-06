@@ -154,6 +154,13 @@ export const api = {
   bulkComments: (op: 'approve' | 'pending' | 'delete', ids: string[]) =>
     request<{ ok: true; updated: number; op: string }>('/api/admin/comments/bulk', { method: 'POST', ...json({ op, ids }) }),
 
+  /* 标签批量维护 */
+  changeTag: (from: string, to: string | null) =>
+    request<{ ok: true; updated: number }>(
+      '/api/admin/tags',
+      { method: 'POST', ...json({ op: to ? 'rename' : 'delete', from, to: to ?? '' }) }
+    ),
+
   /* 日志 */
   listAudit: (limit = 200) => request<{ ok: true; logs: AuditLogItem[]; counts: Record<string, number> }>(`/api/admin/audit?limit=${limit}`),
   listErrors: () => request<{ ok: true; total: number; sumHits: number; errors: ErrorLogItem[] }>('/api/admin/errors'),

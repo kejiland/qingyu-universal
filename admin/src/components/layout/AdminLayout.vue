@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref, type Component } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   FileText, Image as ImageIcon, MessageSquare, Settings, Users, DatabaseBackup,
-  ScrollText, LogOut, Moon, Sun, Menu, X, PenLine, AtSign, BarChart3, Sparkles
+  ScrollText, LogOut, Moon, Sun, Menu, X, PenLine, AtSign, BarChart3, Sparkles,
+  Tag, Layers, Clock
 } from '@lucide/vue';
 import { api, session } from '../../lib/api';
 import { toast } from '../../lib/toast';
@@ -11,13 +12,28 @@ import { toast } from '../../lib/toast';
 const route = useRoute();
 const router = useRouter();
 
-const navGroups = [
+interface NavItem {
+  to: string;
+  label: string;
+  icon: Component;
+  match: RegExp;
+  badge?: 'pending';
+}
+
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+const navGroups: NavGroup[] = [
   {
     label: '内容',
     items: [
       { to: '/posts', label: '文章', icon: FileText, match: /^\/posts/ },
       { to: '/media', label: '媒体库', icon: ImageIcon, match: /^\/media/ },
-      { to: '/comments', label: '评论', icon: MessageSquare, match: /^\/comments/ },
+      { to: '/comments', label: '评论', icon: MessageSquare, match: /^\/comments\/?$/ },
+      { to: '/comments/pending', label: '待审评论', icon: Clock, match: /^\/comments\/pending/, badge: 'pending' },
+      { to: '/tags', label: '标签管理', icon: Tag, match: /^\/tags/ },
+      { to: '/series', label: '系列管理', icon: Layers, match: /^\/series/ },
       { to: '/webmentions', label: 'Webmention', icon: AtSign, match: /^\/webmentions/ }
     ]
   },
@@ -37,6 +53,17 @@ const navGroups = [
     ]
   }
 ];
+
+/** 待审评论角标 */
+const pendingCount = ref(0);
+onMounted(async () => {
+  try {
+    const data = await api.listComments('pending');
+    pendingCount.value = data.comments?.length ?? 0;
+  } catch {
+    /* 角标拿不到就不显示 */
+  }
+});
 
 const pageTitle = computed(() => (route.meta.title as string | undefined) ?? '管理后台');
 
@@ -132,6 +159,13 @@ async function logout(): Promise<void> {
           >
             <component :is="item.icon" :size="17" :stroke-width="item.match.test(route.path) ? 2.4 : 2" />
             <span class="truncate">{{ item.label }}</span>
+            <span
+              v-if="item.badge === 'pending' && pendingCount > 0"
+              class="ml-auto min-w-[20px] h-[18px] px-1.5 grid place-items-center rounded-full
+                     bg-danger-soft text-danger text-[11px] font-semibold tabular-nums"
+            >
+              {{ pendingCount > 99 ? '99+' : pendingCount }}
+            </span>
           </button>
         </div>
       </nav>

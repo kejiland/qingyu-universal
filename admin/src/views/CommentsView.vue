@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { Check, Clock, Trash2, MessageSquare, Loader2, Inbox } from '@lucide/vue';
 import { api, ApiError, type CommentAdminItem } from '../lib/api';
 import { formatDateTime } from '../lib/format';
 import { toast } from '../lib/toast';
+
+const route = useRoute();
 
 const items = ref<CommentAdminItem[]>([]);
 const loading = ref(true);
@@ -85,7 +88,16 @@ async function bulk(op: 'approve' | 'pending' | 'delete'): Promise<void> {
   }
 }
 
-onMounted(load);
+/* 直达 /comments/pending 时默认落在待审筛选 */
+watch(
+  () => route.name,
+  (name) => { if (name === 'comments-pending') status.value = 'pending'; }
+);
+
+onMounted(() => {
+  if (route.name === 'comments-pending') status.value = 'pending';
+  void load();
+});
 </script>
 
 <template>
