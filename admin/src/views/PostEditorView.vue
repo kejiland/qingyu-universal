@@ -4,10 +4,14 @@ import { useRoute, useRouter } from 'vue-router';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import {
-  Save, Loader2, ArrowLeft, Eye, Pencil, Columns2, ImagePlus, ExternalLink, Trash2, CalendarClock
+  Save, Loader2, ArrowLeft, Eye, Pencil, Columns2, ImagePlus, ExternalLink, Trash2, CalendarClock,
+  History, Link2, Sparkles, Copy, X, Undo2, Check
 } from '@lucide/vue';
-import { api, uploadTo, ApiError, type Seo } from '../lib/api';
-import { debounce, slugify } from '../lib/format';
+import {
+  api, uploadTo, ApiError,
+  type Seo, type PostDetail, type PostRevisionMeta, type PostRevisionDetail
+} from '../lib/api';
+import { debounce, slugify, formatDateTime } from '../lib/format';
 import { toast } from '../lib/toast';
 
 const route = useRoute();
@@ -48,28 +52,40 @@ const renderPreview = debounce((markdown: string) => {
 watch(() => form.value.content, (value) => renderPreview(value), { immediate: true });
 
 /* ---------- 载入 ---------- */
+function fillForm(post: PostDetail): void {
+  form.value = {
+    id: post.id,
+    title: post.title,
+    excerpt: post.excerpt,
+    content: post.content,
+    cover: post.cover || post.ogImage || '',
+    tags: (post.tags ?? []).join(', '),
+    category: post.category ?? '',
+    series: post.series ?? '',
+    author: post.author ?? '',
+    status: (post.status ?? 'draft') as typeof form.value.status,
+    publishAt: post.publishAt ? new Date(post.publishAt).toISOString().slice(0, 16) : '',
+    pinned: post.pinned,
+    seo: { title: '', desc: '', canonical: '', noindex: false, ...(post.seo ?? {}) }
+  };
+}
+
 onMounted(async () => {
+  // AI 是否可用：服务端没配置 AI 时接口返回 404，AI 功能整块自动隐藏
+  void api
+    .aiPing()
+    .then(() => {
+      aiAvailable.value = true;
+    })
+    .catch(() => undefined);
+
   if (isNew.value) {
     form.value.status = 'draft';
     return;
   }
   try {
     const { post } = await api.getPost(id.value);
-    form.value = {
-      id: post.id,
-      title: post.title,
-      excerpt: post.excerpt,
-      content: post.content,
-      cover: post.cover || post.ogImage || '',
-      tags: (post.tags ?? []).join(', '),
-      category: post.category ?? '',
-      series: post.series ?? '',
-      author: post.author ?? '',
-      status: (post.status ?? 'draft') as typeof form.value.status,
-      publishAt: post.publishAt ? new Date(post.publishAt).toISOString().slice(0, 16) : '',
-      pinned: post.pinned,
-      seo: { title: '', desc: '', canonical: '', noindex: false, ...(post.seo ?? {}) }
-    };
+    fillForm(post);
   } catch (e) {
     toast.error(e instanceof ApiError ? e.message : '加载文章失败');
     void router.replace({ name: 'posts' });
@@ -170,6 +186,229 @@ async function remove(): Promise<void> {
     toast.error(e instanceof ApiError ? e.message : '删除失败');
   }
 }
+/* ---------- AI 写作助手（服务端未配置时整块隐藏） ---------- */
+const aiAvailable = ref(false);
+const aiLang = ref('zh-CN');
+const aiBusy = ref(false);
+const aiAction = ref<'' | 'title' | 'tags' | 'polish' | 'translate'>('');
+const aiResult = ref('');
+const aiError = ref('');
+
+const aiActions = [
+  { key: 'title', label: '标题建议' },
+  { key: 'tags', label: '标签建议' },
+  { key: 'polish', label: '润色' },
+  { key: 'translate', label: '翻译' }
+] as const;
+
+type AiActionKey = (typeof aiActions)[number]['key'];
+
+async function aiRun(action: AiActionKey): Promise<void> {
+  if (aiBusy.value) return;
+  const isBody = action === 'polish' || action === 'translate';
+  const source = isBody
+    ? form.value.content
+    : action === 'title'
+      ? form.value.title
+      : form.value.title + '\n' + form.value.tags;
+  if (!source.trim()) {
+    toast.error(isBody ? '请先写正文' : '请先填写标题');
+    return;
+  }
+  aiBusy.value = true;
+  aiAction.value = action;
+  aiError.value = '';
+  aiResult.value = '';
+  try {
+    const { result } = await api.aiAssist(action, source, aiLang.value);
+    aiResult.value = String(result ?? '').trim();
+    if (!aiResult.value) aiError.value = 'AI 没有返回内容，请重试';
+  } catch (e) {
+    aiError.value = e instanceof ApiError ? e.message : 'AI 请求失败';
+  } finally {
+    aiBusy.value = false;
+  }
+}
+
+/** 把 AI 结果写回编辑器：标题 / 标签覆盖对应字段，润色与翻译替换或追加正文。 */
+function aiApply(mode: 'replace' | 'append'): void {
+  const result = aiResult.value.trim();
+  if (!result) return;
+  if (aiAction.value === 'title') {
+    form.value.title = result.split('\n')[0].replace(/^["“”']+|["“”']+$/g, '').trim();
+  } else if (aiAction.value === 'tags') {
+    const merged = Array.from(new Set(splitTags(form.value.tags).concat(splitTags(result))));
+    form.value.tags = merged.join(', ');
+  } else if (mode === 'append') {
+    form.value.content = form.value.content.trimEnd() + '\n\n' + result;
+  } else {
+    form.value.content = result;
+  }
+  toast.success('已应用到编辑器');
+}
+
+function splitTags(text: string): string[] {
+  return text
+    .split(/[,，、;；\n]/)
+    .map((t) => t.replace(/^#/, '').trim())
+    .filter(Boolean);
+}
+
+/* ---------- 修订历史（查看差异 + 一键回滚） ---------- */
+type DiffLine = { type: 'same' | 'add' | 'del'; text: string };
+
+const revOpen = ref(false);
+const revisions = ref<PostRevisionMeta[]>([]);
+const revSelected = ref<number | null>(null);
+const revDetail = ref<PostRevisionDetail | null>(null);
+const revLoading = ref(false);
+const revRestoring = ref(false);
+
+function revisionReasonLabel(reason: string): string {
+  if (reason === 'create') return '创建';
+  if (reason === 'restore') return '恢复';
+  if (reason === 'update') return '更新';
+  return '保存';
+}
+
+async function openRevisions(): Promise<void> {
+  if (isNew.value) return;
+  revOpen.value = true;
+  revLoading.value = true;
+  revDetail.value = null;
+  revSelected.value = null;
+  revisions.value = [];
+  try {
+    const { revisions: list } = await api.listRevisions(id.value);
+    revisions.value = list;
+    if (list.length) await selectRevision(list[0].id);
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : '加载修订历史失败');
+    revOpen.value = false;
+  } finally {
+    revLoading.value = false;
+  }
+}
+
+async function selectRevision(rid: number): Promise<void> {
+  revSelected.value = rid;
+  revLoading.value = true;
+  try {
+    const { revision } = await api.getRevision(id.value, rid);
+    revDetail.value = revision;
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : '加载修订详情失败');
+  } finally {
+    revLoading.value = false;
+  }
+}
+
+async function restoreRevision(): Promise<void> {
+  const current = revDetail.value;
+  if (!current || revRestoring.value) return;
+  const ok = window.confirm(
+    '确定恢复到 ' + formatDateTime(current.createdAt) + ' 的版本？当前内容会先存为一条修订，随时可以再切回来。'
+  );
+  if (!ok) return;
+  revRestoring.value = true;
+  try {
+    const { post } = await api.restoreRevision(id.value, current.id);
+    fillForm(post);
+    toast.success('已恢复该版本，确认无误后记得保存');
+    const { revisions: list } = await api.listRevisions(id.value);
+    revisions.value = list;
+    if (list.length) await selectRevision(list[0].id);
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : '恢复失败');
+  } finally {
+    revRestoring.value = false;
+  }
+}
+
+/* 行级差异（LCS）：旧 = 修订版本，新 = 当前编辑器内容；规模过大时降级为整体替换 */
+function lineDiff(oldText: string, newText: string): DiffLine[] {
+  const a = oldText.split('\n');
+  const b = newText.split('\n');
+  if (!oldText) return b.map((text) => ({ type: 'add' as const, text }));
+  if (!newText) return a.map((text) => ({ type: 'del' as const, text }));
+  if (a.length * b.length > 300000) {
+    const removed: DiffLine[] = a.map((text) => ({ type: 'del', text }));
+    const added: DiffLine[] = b.map((text) => ({ type: 'add', text }));
+    return removed.concat(added);
+  }
+  const cols = b.length + 1;
+  const dp = new Uint32Array((a.length + 1) * cols);
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      dp[i * cols + j] =
+        a[i] === b[j] ? dp[(i + 1) * cols + j + 1] + 1 : Math.max(dp[(i + 1) * cols + j], dp[i * cols + j + 1]);
+    }
+  }
+  const out: DiffLine[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      out.push({ type: 'same', text: a[i] });
+      i++;
+      j++;
+    } else if (dp[(i + 1) * cols + j] >= dp[i * cols + j + 1]) {
+      out.push({ type: 'del', text: a[i] });
+      i++;
+    } else {
+      out.push({ type: 'add', text: b[j] });
+      j++;
+    }
+  }
+  while (i < a.length) {
+    out.push({ type: 'del', text: a[i] });
+    i++;
+  }
+  while (j < b.length) {
+    out.push({ type: 'add', text: b[j] });
+    j++;
+  }
+  return out;
+}
+
+const diffLines = computed<DiffLine[]>(() =>
+  revDetail.value ? lineDiff(revDetail.value.content || '', form.value.content || '') : []
+);
+
+/* ---------- 预览链接（签名 token，默认 7 天有效） ---------- */
+const pvOpen = ref(false);
+const pvLoading = ref(false);
+const pvUrl = ref('');
+const pvExpires = ref(0);
+
+async function openPreviewLink(): Promise<void> {
+  if (isNew.value) return;
+  pvOpen.value = true;
+  pvUrl.value = '';
+  pvExpires.value = 0;
+  pvLoading.value = true;
+  try {
+    const link = await api.previewLink(id.value, 7);
+    pvUrl.value = link.url;
+    pvExpires.value = link.expiresAt;
+  } catch (e) {
+    pvOpen.value = false;
+    toast.error(e instanceof ApiError ? e.message : '生成预览链接失败');
+  } finally {
+    pvLoading.value = false;
+  }
+}
+
+async function copyText(text: string): Promise<void> {
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.success('已复制');
+  } catch {
+    toast.error('复制失败，请手动选中复制');
+  }
+}
+
 </script>
 
 <template>
@@ -191,6 +430,16 @@ async function remove(): Promise<void> {
       </span>
 
       <div class="ml-auto flex items-center gap-2">
+        <button v-if="!isNew" class="btn btn-ghost btn-sm" title="修订历史" @click="openRevisions">
+          <History :size="15" />
+          <span class="hidden sm:inline">修订历史</span>
+        </button>
+
+        <button v-if="!isNew" class="btn btn-ghost btn-sm" title="生成预览链接" @click="openPreviewLink">
+          <Link2 :size="15" />
+          <span class="hidden sm:inline">预览链接</span>
+        </button>
+
         <a
           v-if="!isNew && form.status === 'published'"
           class="btn btn-ghost btn-sm"
@@ -228,6 +477,64 @@ async function remove(): Promise<void> {
         />
 
         <div class="card overflow-hidden">
+        <!-- AI 写作助手：服务端未配置 AI 时整块隐藏 -->
+        <div v-if="aiAvailable" class="card p-3.5 space-y-3">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-[13px] font-semibold text-ink-soft flex items-center gap-1.5">
+              <Sparkles :size="15" class="text-[var(--accent)]" />
+              AI 写作助手
+            </span>
+
+            <select v-model="aiLang" class="select !w-auto !py-1 !text-[12.5px]">
+              <option value="zh-CN">中文</option>
+              <option value="en">English</option>
+              <option value="ja">日本語</option>
+              <option value="ko">한국어</option>
+              <option value="hi">हिन्दी</option>
+            </select>
+
+            <div class="ml-auto flex items-center gap-1.5 flex-wrap">
+              <button
+                v-for="item in aiActions"
+                :key="item.key"
+                class="btn btn-sm"
+                :class="aiAction === item.key && aiResult ? 'btn-secondary' : 'btn-ghost'"
+                :disabled="aiBusy"
+                @click="aiRun(item.key)"
+              >
+                <Loader2 v-if="aiBusy && aiAction === item.key" :size="13" class="animate-spin" />
+                {{ item.label }}
+              </button>
+            </div>
+          </div>
+
+          <p class="hint -mt-1">标题与标签基于当前填写内容，润色、翻译作用于正文。</p>
+
+          <p v-if="aiError" class="text-[12.5px] text-danger">{{ aiError }}</p>
+
+          <div v-if="aiResult" class="rounded-xl border border-line bg-surface-2 p-3 space-y-2">
+            <pre class="whitespace-pre-wrap break-words max-h-44 overflow-auto text-[13px] leading-[1.7]">{{ aiResult }}</pre>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <button class="btn btn-sm btn-primary" @click="aiApply('replace')">
+                <Check :size="14" />
+                应用
+              </button>
+              <button
+                v-if="aiAction === 'polish' || aiAction === 'translate'"
+                class="btn btn-sm btn-secondary"
+                @click="aiApply('append')"
+              >
+                追加到末尾
+              </button>
+              <button class="btn btn-sm btn-ghost" @click="copyText(aiResult)">
+                <Copy :size="14" />
+                复制
+              </button>
+              <button class="btn btn-sm btn-ghost" @click="aiResult = ''; aiError = ''">收起</button>
+            </div>
+          </div>
+        </div>
+
           <!-- 编辑器工具条 -->
           <div class="flex items-center gap-1 px-2 py-1.5 border-b border-line bg-surface-2">
             <button
@@ -397,5 +704,139 @@ async function remove(): Promise<void> {
         </section>
       </aside>
     </div>
+
+      <!-- 修订历史 -->
+      <div
+        v-if="revOpen"
+        class="fixed inset-0 z-50 bg-black/45 backdrop-blur-sm p-4 grid place-items-center"
+        @click.self="revOpen = false"
+      >
+        <div class="card w-full max-w-4xl max-h-[86vh] flex flex-col overflow-hidden">
+          <header class="flex items-center gap-2 px-4 py-3 border-b border-line">
+            <History :size="16" class="text-ink-muted" />
+            <h2 class="text-[14px] font-semibold">修订历史</h2>
+            <span class="badge">{{ revisions.length }} 条</span>
+            <button class="btn btn-sm btn-ghost ml-auto" title="关闭" @click="revOpen = false">
+              <X :size="16" />
+            </button>
+          </header>
+
+          <div class="grid md:grid-cols-[260px_1fr] min-h-0 flex-1">
+            <!-- 左：版本列表 -->
+            <div class="border-b md:border-b-0 md:border-r border-line overflow-y-auto max-h-[60vh]">
+              <button
+                v-for="r in revisions"
+                :key="r.id"
+                class="w-full text-left px-3 py-2.5 border-b border-line last:border-b-0 transition-colors"
+                :class="revSelected === r.id ? 'bg-surface-2' : 'hover:bg-surface-2'"
+                @click="selectRevision(r.id)"
+              >
+                <div class="flex items-center gap-2">
+                  <span class="badge" :class="r.reason === 'create' ? 'badge-info' : ''">
+                    {{ revisionReasonLabel(r.reason) }}
+                  </span>
+                  <span class="ml-auto text-[11.5px] text-ink-muted tabular-nums">
+                    {{ formatDateTime(r.createdAt) }}
+                  </span>
+                </div>
+                <div class="text-[12.5px] text-ink-soft truncate mt-1">{{ r.title || '（无标题）' }}</div>
+              </button>
+              <div v-if="!revLoading && !revisions.length" class="p-4 text-[13px] text-ink-muted">
+                暂无修订记录，保存一次文章后会自动生成。
+              </div>
+            </div>
+
+            <!-- 右：版本详情与差异 -->
+            <div class="overflow-y-auto p-4 space-y-3 max-h-[60vh]">
+              <div v-if="revLoading" class="grid place-items-center py-10 text-ink-muted">
+                <Loader2 :size="20" class="animate-spin" />
+              </div>
+
+              <template v-else-if="revDetail">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-[13.5px] font-semibold truncate">{{ revDetail.title || '（无标题）' }}</span>
+                  <span class="badge">{{ formatDateTime(revDetail.createdAt) }}</span>
+                  <span class="badge badge-info">{{ revisionReasonLabel(revDetail.reason) }}</span>
+                  <span class="badge" :class="revDetail.status === 'published' ? 'badge-success' : 'badge-warning'">
+                    {{ revDetail.status === 'published' ? '已发布' : revDetail.status === 'scheduled' ? '定时发布' : '草稿' }}
+                  </span>
+                </div>
+
+                <div class="flex items-center gap-2 flex-wrap">
+                  <button class="btn btn-sm btn-primary" :disabled="revRestoring" @click="restoreRevision">
+                    <Loader2 v-if="revRestoring" :size="14" class="animate-spin" />
+                    <Undo2 v-else :size="14" />
+                    <span>{{ revRestoring ? '恢复中…' : '恢复此版本' }}</span>
+                  </button>
+                  <span class="hint">恢复前会先把当前内容存为一条修订，随时可以再切回来。</span>
+                </div>
+
+                <div>
+                  <h3 class="text-[12.5px] font-semibold text-ink-soft mb-1.5">与当前编辑内容的差异</h3>
+                  <div class="rounded-xl border border-line bg-surface-2 overflow-hidden max-h-72 overflow-auto">
+                    <div
+                      v-for="(line, i) in diffLines"
+                      :key="i"
+                      class="px-3 font-mono text-[12px] leading-[1.7] whitespace-pre-wrap break-words"
+                      :class="
+                        line.type === 'add'
+                          ? 'bg-success-soft text-success'
+                          : line.type === 'del'
+                            ? 'bg-danger-soft text-danger'
+                            : 'text-ink-muted'
+                      "
+                    >
+                      <span class="inline-block w-3 select-none opacity-50">{{
+                        line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' '
+                      }}</span>{{ line.text }}
+                    </div>
+                    <div v-if="!diffLines.length" class="px-3 py-3 text-[12.5px] text-ink-muted">两边内容一致。</div>
+                  </div>
+                </div>
+              </template>
+
+              <div v-else class="py-8 text-center text-[13px] text-ink-muted">选择左侧的版本查看详情。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 预览链接 -->
+      <div
+        v-if="pvOpen"
+        class="fixed inset-0 z-50 bg-black/45 backdrop-blur-sm p-4 grid place-items-center"
+        @click.self="pvOpen = false"
+      >
+        <div class="card w-full max-w-lg p-4 space-y-3">
+          <div class="flex items-center gap-2">
+            <Link2 :size="16" class="text-ink-muted" />
+            <h2 class="text-[14px] font-semibold">预览链接</h2>
+            <button class="btn btn-sm btn-ghost ml-auto" title="关闭" @click="pvOpen = false">
+              <X :size="16" />
+            </button>
+          </div>
+
+          <p class="hint -mt-1">凭链接可在发布前查看文章，7 天后自动失效，可随时重新生成。</p>
+
+          <div v-if="pvLoading" class="grid place-items-center py-6 text-ink-muted">
+            <Loader2 :size="20" class="animate-spin" />
+          </div>
+
+          <template v-else>
+            <input :value="pvUrl" readonly class="input font-mono text-[12.5px]" />
+            <div class="flex items-center gap-2 flex-wrap">
+              <button class="btn btn-sm btn-primary" @click="copyText(pvUrl)">
+                <Copy :size="14" />
+                复制链接
+              </button>
+              <a class="btn btn-sm btn-secondary" :href="pvUrl" target="_blank" rel="noopener">
+                <ExternalLink :size="14" />
+                打开预览
+              </a>
+              <span class="hint ml-auto">有效期至 {{ formatDateTime(pvExpires) }}</span>
+            </div>
+          </template>
+        </div>
+      </div>
   </div>
 </template>

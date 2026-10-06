@@ -90,6 +90,49 @@ export interface HealthResponse {
   checkedAt: number;
 }
 
+
+/** 文章修订历史条目（列表不含正文；兼容接口，schema 尚未登记）。 */
+export interface PostRevisionMeta {
+  id: number;
+  postId: string;
+  title: string;
+  date: string;
+  excerpt: string;
+  cover: string;
+  ogImage: string;
+  pinned: boolean;
+  protected: boolean;
+  tags: string[];
+  category: string;
+  series: string;
+  seriesOrder: number;
+  status: string;
+  publishAt: number | null;
+  reason: string;
+  createdAt: number;
+}
+
+/** 修订详情：在列表字段的基础上多出正文与加密标记。 */
+export interface PostRevisionDetail extends PostRevisionMeta {
+  content: string;
+  enc: unknown;
+}
+
+/** AI 写作助手返回结果。 */
+export interface AiAssistResponse {
+  ok: true;
+  result: string;
+}
+
+/** 预览链接（签名 token，默认 7 天有效）。 */
+export interface PreviewLinkResponse {
+  ok: true;
+  token: string;
+  url: string;
+  expiresAt: number;
+  ttlDays: number;
+}
+
 /* ---------- 错误与请求 ---------- */
 
 export class ApiError extends Error {
@@ -264,6 +307,28 @@ export const api = {
   /* Webmention */
   listWebmentions: () => request<components['schemas']['WebmentionListResponse']>('/api/admin/webmentions'),
   deleteWebmention: (id: number) => request<{ ok: true }>(`/api/admin/webmentions/${id}`, { method: 'DELETE' }),
+
+  /* AI 写作助手（服务端未配置 AI 时接口返回 404，前端据此整块隐藏） */
+  aiPing: () => request<{ ok: true }>('/api/ai/ping'),
+  aiAssist: (action: 'title' | 'tags' | 'polish' | 'translate', text: string, lang: string) =>
+    request<AiAssistResponse>('/api/ai/assist', { method: 'POST', ...json({ action, text, lang }) }),
+
+  /* 修订历史 */
+  listRevisions: (id: string) =>
+    request<{ ok: true; revisions: PostRevisionMeta[] }>('/api/posts/' + encodeURIComponent(id) + '/revisions'),
+  getRevision: (id: string, rid: string | number) =>
+    request<{ ok: true; revision: PostRevisionDetail }>(
+      '/api/posts/' + encodeURIComponent(id) + '/revisions/' + encodeURIComponent(String(rid))
+    ),
+  restoreRevision: (id: string, rid: string | number) =>
+    request<{ ok: true; post: PostDetail }>(
+      '/api/posts/' + encodeURIComponent(id) + '/revisions/' + encodeURIComponent(String(rid)) + '/restore',
+      { method: 'POST' }
+    ),
+
+  /* 预览链接 */
+  previewLink: (postId: string, ttlDays = 7) =>
+    request<PreviewLinkResponse>('/api/admin/preview-link', { method: 'POST', ...json({ postId, ttlDays }) }),
 
   /* 统计 */
   adminHealth: () => request<HealthResponse>('/api/admin/health'),
