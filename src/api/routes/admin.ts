@@ -27,6 +27,8 @@ import {
   MediaUploadBodySchema,
   MediaUploadTicketSchema,
   MessageResponseSchema,
+  OgUploadBodySchema,
+  OgUploadResponseSchema,
   PasswordBodySchema,
   SetupBodySchema,
   StatsSourcesResponseSchema,
@@ -330,6 +332,25 @@ export const adminRoutes: ApiRoute[] = [
     responses: {
       200: { description: '恢复完成', schema: BackupRestoreResponseSchema },
       503: { description: '未配置备份桶', schema: ErrorResponseSchema },
+      ...AUTH_ERRORS
+    },
+    handler: proxyToUpstream
+  },
+
+  /* ---------- 分享图（OG） ---------- */
+  {
+    method: 'POST',
+    path: '/api/admin/og-upload-url',
+    tags: ['媒体'],
+    auth: 'admin',
+    summary: '生成分享图上传签名',
+    description:
+      '为指定文章签发 15 分钟有效的直传地址。前端用 Canvas 画 1200×630 的 PNG 后 PUT 到 uploadUrl，' +
+      '再把返回的 publicUrl 写进文章 og_image 字段。local 模式写入本地磁盘，对象存储模式写入 R2/S3。',
+    request: { body: OgUploadBodySchema },
+    responses: {
+      200: { description: '直传签名', schema: OgUploadResponseSchema },
+      503: { description: '未配置对象存储或本地存储', schema: ErrorResponseSchema },
       ...AUTH_ERRORS
     },
     handler: proxyToUpstream

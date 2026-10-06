@@ -15,6 +15,9 @@
       "name": "文章"
     },
     {
+      "name": "统计"
+    },
+    {
       "name": "评论"
     },
     {
@@ -40,9 +43,6 @@
     },
     {
       "name": "Webmention"
-    },
-    {
-      "name": "统计"
     },
     {
       "name": "站点"
@@ -305,6 +305,144 @@
           "tags",
           "content",
           "enc"
+        ],
+        "additionalProperties": false
+      },
+      "PostRelationsResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "postId": {
+            "type": "string"
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PostRelationItem"
+            }
+          },
+          "backlinks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PostRelationItem"
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "postId",
+          "related",
+          "backlinks"
+        ],
+        "additionalProperties": false
+      },
+      "PostRelationItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "excerpt": {
+            "type": "string"
+          },
+          "cover": {
+            "type": "string"
+          },
+          "ogImage": {
+            "type": "string"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "series": {
+            "type": "string"
+          },
+          "seriesOrder": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "date",
+          "excerpt",
+          "cover",
+          "ogImage",
+          "pinned",
+          "tags",
+          "series",
+          "seriesOrder"
+        ],
+        "additionalProperties": false
+      },
+      "PostStatsResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "postId": {
+            "type": "string"
+          },
+          "stats": {
+            "type": "object",
+            "properties": {
+              "likes": {
+                "type": "number"
+              },
+              "views": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "likes",
+              "views"
+            ],
+            "additionalProperties": false
+          },
+          "duplicated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "postId",
+          "stats"
+        ],
+        "additionalProperties": false
+      },
+      "PostStatsBody": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "views",
+              "like"
+            ]
+          },
+          "ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
         ],
         "additionalProperties": false
       },
@@ -1150,6 +1288,49 @@
         "required": [
           "ok",
           "result"
+        ],
+        "additionalProperties": false
+      },
+      "OgUploadResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "uploadUrl": {
+            "type": "string"
+          },
+          "publicUrl": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "expiresIn": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "ok",
+          "uploadUrl",
+          "publicUrl",
+          "key",
+          "expiresIn"
+        ],
+        "additionalProperties": false
+      },
+      "OgUploadBody": {
+        "type": "object",
+        "properties": {
+          "postId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        },
+        "required": [
+          "postId"
         ],
         "additionalProperties": false
       },
@@ -2220,6 +2401,143 @@
             }
           }
         ]
+      }
+    },
+    "/api/posts/{id}/relations": {
+      "get": {
+        "tags": [
+          "文章"
+        ],
+        "summary": "相关阅读与反向链接",
+        "operationId": "getApiPostsByIdRelations",
+        "responses": {
+          "200": {
+            "description": "关联文章列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostRelationsResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "文章不存在，或对匿名访问者不可见",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "related 为同系列 / 同标签的推荐文章（最多 4 篇），backlinks 为引用本文的文章（最多 8 篇）。两组都按发布时间倒序，文章不存在或未发布时返回 404。",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/api/posts/{id}/stats": {
+      "get": {
+        "tags": [
+          "统计"
+        ],
+        "summary": "单篇文章统计",
+        "operationId": "getApiPostsByIdStats",
+        "responses": {
+          "200": {
+            "description": "阅读 / 点赞计数",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostStatsResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "返回该文章的阅读数与点赞数。统计行不存在时返回 0，响应带 public 缓存与 stats 标签。",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "统计"
+        ],
+        "summary": "上报阅读或点赞",
+        "operationId": "postApiPostsByIdStats",
+        "responses": {
+          "200": {
+            "description": "上报结果（可能为去重后的幂等返回）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostStatsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "action 非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "上报过于频繁",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "action 只能是 views 或 like。服务端按 IP + 文章去重，重复上报返回 200 且 duplicated=true；短时间大量点赞会返回 429。",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostStatsBody"
+              }
+            }
+          }
+        }
       }
     },
     "/api/posts/{id}/comments": {
@@ -3547,6 +3865,63 @@
         ]
       }
     },
+    "/api/admin/og-upload-url": {
+      "post": {
+        "tags": [
+          "媒体"
+        ],
+        "summary": "生成分享图上传签名",
+        "operationId": "postApiAdminOg-upload-url",
+        "responses": {
+          "200": {
+            "description": "直传签名",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OgUploadResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "未配置对象存储或本地存储",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "为指定文章签发 15 分钟有效的直传地址。前端用 Canvas 画 1200×630 的 PNG 后 PUT 到 uploadUrl，再把返回的 publicUrl 写进文章 og_image 字段。local 模式写入本地磁盘，对象存储模式写入 R2/S3。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OgUploadBody"
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/subscribers": {
       "get": {
         "tags": [
@@ -4158,44 +4533,6 @@
         ]
       }
     },
-    "/api/posts/{id}/relations": {
-      "get": {
-        "tags": [
-          "文章"
-        ],
-        "summary": "文章关联",
-        "operationId": "getApiPostsByIdRelations",
-        "responses": {
-          "200": {
-            "description": "兼容响应（字段将在后续版本逐步收紧）",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/posts/{id}/stats": {
-      "post": {
-        "tags": [
-          "统计"
-        ],
-        "summary": "文章统计上报",
-        "operationId": "postApiPostsByIdStats",
-        "responses": {
-          "200": {
-            "description": "兼容响应（字段将在后续版本逐步收紧）",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/posts/{id}/revisions": {
       "get": {
         "tags": [
@@ -4782,48 +5119,6 @@
         "operationId": "deleteApiMusicById",
         "responses": {
           "200": {
-            "description": "兼容响应（字段将在后续版本逐步收紧）",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "401": {
-            "description": "未授权或凭证失效",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ]
-      }
-    },
-    "/api/admin/og-upload-url": {
-      "post": {
-        "tags": [
-          "媒体"
-        ],
-        "summary": "分享图上传签名",
-        "operationId": "postApiAdminOg-upload-url",
-        "responses": {
-          "200": {
-            "description": "兼容响应（字段将在后续版本逐步收紧）",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "201": {
             "description": "兼容响应（字段将在后续版本逐步收紧）",
             "content": {
               "application/json": {

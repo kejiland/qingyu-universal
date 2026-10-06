@@ -56,6 +56,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/posts/{id}/relations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 相关阅读与反向链接
+         * @description related 为同系列 / 同标签的推荐文章（最多 4 篇），backlinks 为引用本文的文章（最多 8 篇）。两组都按发布时间倒序，文章不存在或未发布时返回 404。
+         */
+        get: operations["getApiPostsByIdRelations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/posts/{id}/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 单篇文章统计
+         * @description 返回该文章的阅读数与点赞数。统计行不存在时返回 0，响应带 public 缓存与 stats 标签。
+         */
+        get: operations["getApiPostsByIdStats"];
+        put?: never;
+        /**
+         * 上报阅读或点赞
+         * @description action 只能是 views 或 like。服务端按 IP + 文章去重，重复上报返回 200 且 duplicated=true；短时间大量点赞会返回 429。
+         */
+        post: operations["postApiPostsByIdStats"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/posts/{id}/comments": {
         parameters: {
             query?: never;
@@ -430,6 +474,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/og-upload-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 生成分享图上传签名
+         * @description 为指定文章签发 15 分钟有效的直传地址。前端用 Canvas 画 1200×630 的 PNG 后 PUT 到 uploadUrl，再把返回的 publicUrl 写进文章 og_image 字段。local 模式写入本地磁盘，对象存储模式写入 R2/S3。
+         */
+        post: operations["postApiAdminOg-upload-url"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/subscribers": {
         parameters: {
             query?: never;
@@ -723,40 +787,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/posts/{id}/relations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 文章关联 */
-        get: operations["getApiPostsByIdRelations"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/posts/{id}/stats": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 文章统计上报 */
-        post: operations["postApiPostsByIdStats"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/posts/{id}/revisions": {
         parameters: {
             query?: never;
@@ -1035,23 +1065,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/admin/og-upload-url": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 分享图上传签名 */
-        post: operations["postApiAdminOg-upload-url"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/admin/post-analytics": {
         parameters: {
             query?: never;
@@ -1204,6 +1217,40 @@ export interface components {
             tags: string[];
             content: string;
             enc: unknown;
+        };
+        PostRelationsResponse: {
+            /** @constant */
+            ok: true;
+            postId: string;
+            related: components["schemas"]["PostRelationItem"][];
+            backlinks: components["schemas"]["PostRelationItem"][];
+        };
+        PostRelationItem: {
+            id: string;
+            title: string;
+            date: string;
+            excerpt: string;
+            cover: string;
+            ogImage: string;
+            pinned: boolean;
+            tags: string[];
+            series: string;
+            seriesOrder: number;
+        };
+        PostStatsResponse: {
+            /** @constant */
+            ok: true;
+            postId: string;
+            stats: {
+                likes: number;
+                views: number;
+            };
+            duplicated?: boolean;
+        };
+        PostStatsBody: {
+            /** @enum {string} */
+            action: "views" | "like";
+            ref?: string;
         };
         /** @description 仅表示操作成功 */
         OkResponse: {
@@ -1430,6 +1477,17 @@ export interface components {
             result: {
                 [key: string]: unknown;
             };
+        };
+        OgUploadResponse: {
+            /** @constant */
+            ok: true;
+            uploadUrl: string;
+            publicUrl: string;
+            key: string;
+            expiresIn: number;
+        };
+        OgUploadBody: {
+            postId: string;
         };
         SubscriberListResponse: {
             /** @constant */
@@ -1809,6 +1867,103 @@ export interface operations {
             };
             /** @description 文章不存在 */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getApiPostsByIdRelations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 关联文章列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostRelationsResponse"];
+                };
+            };
+            /** @description 文章不存在，或对匿名访问者不可见 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getApiPostsByIdStats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 阅读 / 点赞计数 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostStatsResponse"];
+                };
+            };
+        };
+    };
+    postApiPostsByIdStats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PostStatsBody"];
+            };
+        };
+        responses: {
+            /** @description 上报结果（可能为去重后的幂等返回） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostStatsResponse"];
+                };
+            };
+            /** @description action 非法 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 上报过于频繁 */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2707,6 +2862,48 @@ export interface operations {
             };
         };
     };
+    "postApiAdminOg-upload-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OgUploadBody"];
+            };
+        };
+        responses: {
+            /** @description 直传签名 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OgUploadResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未配置对象存储或本地存储 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     getApiAdminSubscribers: {
         parameters: {
             query?: never;
@@ -3230,46 +3427,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    getApiPostsByIdRelations: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 兼容响应（字段将在后续版本逐步收紧） */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    postApiPostsByIdStats: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 兼容响应（字段将在后续版本逐步收紧） */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
         };
@@ -3840,44 +3997,6 @@ export interface operations {
         responses: {
             /** @description 兼容响应（字段将在后续版本逐步收紧） */
             200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description 未授权或凭证失效 */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    "postApiAdminOg-upload-url": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 兼容响应（字段将在后续版本逐步收紧） */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description 兼容响应（字段将在后续版本逐步收紧） */
-            201: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -331,6 +331,20 @@ export const WebmentionListResponseSchema = z
 
 /* ---------- 统计 ---------- */
 
+/* ---------- 分享图（OG）上传签名 ---------- */
+
+export const OgUploadBodySchema = z.object({
+  postId: z.string().min(1).max(160)
+}).meta({ id: 'OgUploadBody' });
+
+export const OgUploadResponseSchema = z.object({
+  ok: z.literal(true),
+  uploadUrl: z.string(),
+  publicUrl: z.string(),
+  key: z.string(),
+  expiresIn: z.number()
+}).meta({ id: 'OgUploadResponse' });
+
 export const StatsTrendResponseSchema = z
   .object({
     ok: z.literal(true),

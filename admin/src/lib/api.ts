@@ -309,6 +309,16 @@ export const api = {
   broadcast: (payload: Record<string, unknown>) =>
     request<components['schemas']['SubscriberBroadcastResponse']>('/api/admin/subscribers/broadcast', { method: 'POST', ...json(payload) }),
 
+  /* 分享图（OG）：签发直传地址，前端 Canvas 出图后 PUT */
+  ogUploadUrl: (postId: string) =>
+    request<components['schemas']['OgUploadResponse']>('/api/admin/og-upload-url', { method: 'POST', ...json({ postId }) }),
+
+  /* 关联阅读 / 单篇统计 */
+  postRelations: (id: string) =>
+    request<components['schemas']['PostRelationsResponse']>('/api/posts/' + encodeURIComponent(id) + '/relations'),
+  postStats: (id: string) =>
+    request<components['schemas']['PostStatsResponse']>('/api/posts/' + encodeURIComponent(id) + '/stats'),
+
   /* Webmention */
   listWebmentions: () => request<components['schemas']['WebmentionListResponse']>('/api/admin/webmentions'),
   deleteWebmention: (id: number) => request<{ ok: true }>(`/api/admin/webmentions/${id}`, { method: 'DELETE' }),

@@ -806,6 +806,11 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
   - **单个编辑**：每行新增「编辑分组」弹窗，用逗号 / 中文逗号 / 顿号分隔即可新建、改名或清空分组，保存后本地即时更新并重算分组统计，不整页刷新
   - **群发修复**：发送范围改为分组多选（不勾选 = 全部已确认），补上必填的邮件正文，修好按钮 loading 态；所选分组没有已确认订阅者时给出明确提示而不是假装成功
   - **契约登记**：`PUT /api/admin/subscribers/:id` 进入契约与接口文档（请求 / 响应 schema + 契约测试），群发请求体也补了 body 声明
+- [x] **v0.9-x** 编辑器对照表补齐（相关阅读 / 单篇统计 / OG 分享图）：
+  - **OG 分享图**：文章编辑器「封面」卡片下新增「分享图（OG）」区块——手动「生成分享图」按钮 + 默认勾选的「保存时自动生成」；标题 / 日期 / 标签 / 系列任一变化（指纹不同）才会重画，生成失败不阻塞文章保存。画布 1200×630，配色跟随后台主色，落款用设置里的站点名；出图后拿 `POST /api/admin/og-upload-url` 签名直传，本地磁盘与 S3/R2 同一条路
+  - **相关阅读**：前台「相关阅读」本就已接，本轮把 `GET /api/posts/:id/relations` 从兼容占位收紧为强契约（关联项 / 反向链接的完整字段）
+  - **单篇数据统计**：`GET /api/posts/:id/stats`（读计数）补登记进契约，`POST` 上报同时收紧（`views` / `like` 请求体 + 去重时的 `duplicated` 字段），三条兼容路由全部移出 misc
+  - **契约与测试**：新增 `PostRelationItem` / `PostRelationsResponse` / `PostStatsBody` / `PostStatsResponse` / `OgUploadBody` / `OgUploadResponse` 六个 schema 与 4 条测试，测试 **151 passed / 5 skipped**
 - [x] **v0.3** 路径级契约覆盖完成（60 条路径；兼容接口响应字段将逐步收紧）
 - [x] **v0.3.1-a** Redis / Valkey 可选限流（配置 `REDIS_URL` 即启用）
 - [x] **v0.3.1-b** PostgreSQL 运行时适配（配置 `DATABASE_URL` 即切换）

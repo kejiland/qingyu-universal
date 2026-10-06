@@ -220,3 +220,36 @@ export const SettingsResponseSchema = z.object({
   ok: z.literal(true),
   settings: z.record(z.string(), z.string())
 }).meta({ id: 'SettingsResponse' });
+/* ---------- 关联阅读 / 单篇统计 ---------- */
+
+export const PostRelationItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  date: z.string(),
+  excerpt: z.string(),
+  cover: z.string(),
+  ogImage: z.string(),
+  pinned: z.boolean(),
+  tags: z.array(z.string()),
+  series: z.string(),
+  seriesOrder: z.number()
+}).meta({ id: 'PostRelationItem' });
+
+export const PostRelationsResponseSchema = z.object({
+  ok: z.literal(true),
+  postId: z.string(),
+  related: z.array(PostRelationItemSchema),
+  backlinks: z.array(PostRelationItemSchema)
+}).meta({ id: 'PostRelationsResponse' });
+
+export const PostStatsBodySchema = z.object({
+  action: z.enum(['views', 'like']),
+  ref: z.string().optional()
+}).meta({ id: 'PostStatsBody' });
+
+export const PostStatsResponseSchema = z.object({
+  ok: z.literal(true),
+  postId: z.string(),
+  stats: z.object({ likes: z.number(), views: z.number() }),
+  duplicated: z.boolean().optional()
+}).meta({ id: 'PostStatsResponse' });

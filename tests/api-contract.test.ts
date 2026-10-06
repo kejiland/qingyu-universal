@@ -13,7 +13,9 @@ import {
   CommentCreateResponseSchema,
   CommentListResponseSchema,
   PostListResponseSchema,
+  PostRelationsResponseSchema,
   PostResponseSchema,
+  PostStatsResponseSchema,
   SearchResponseSchema,
   SettingsResponseSchema
 } from '../src/api/contract/posts.js';
@@ -29,6 +31,7 @@ import {
   MediaListResponseSchema,
   MediaRegisterResponseSchema,
   MediaUploadTicketSchema,
+  OgUploadResponseSchema,
   StatsSourcesResponseSchema,
   StatsTrendResponseSchema,
   SubscriberListResponseSchema,
@@ -40,6 +43,7 @@ import type { ZodType } from 'zod';
 let server: TestServer;
 let token = '';
 let postId = '';
+let statsPostId = '';
 
 async function call(path: string, init: RequestInit = {}): Promise<{ status: number; data: unknown }> {
   const response = await fetch(server.baseUrl + path, init);
@@ -404,6 +408,24 @@ describe('订阅 / Webmention / 统计 契约', () => {
       body: JSON.stringify({ password: 'Contract-Test-Password-1' })
     });
     token = (again.data as { token?: string }).token ?? '';
+
+    // 关联阅读 / 单篇统计要一篇仍然存在的已发布文章（上面那篇在 DELETE 用例里已删掉）
+    statsPostId = 'contract-stats-' + Date.now().toString(36);
+    const created = await call('/api/posts', {
+      method: 'POST',
+      headers: jsonAuth(),
+      body: JSON.stringify({
+        id: statsPostId,
+        title: '契约测试文章（统计与关联）',
+        excerpt: '给关联阅读和阅读数接口用',
+        content: '# 正文\n\n统计用例正文。',
+        tags: ['契约', '统计'],
+        series: '契约系列',
+        date: '2026-07-02T00:00:00.000Z',
+        status: 'published'
+      })
+    });
+    expect(created.status).toBe(201);
   });
   it('GET /api/admin/subscribers → SubscriberListResponse', async () => {
     const { status, data } = await call('/api/admin/subscribers', { headers: jsonAuth() });
@@ -430,6 +452,48 @@ describe('订阅 / Webmention / 统计 契约', () => {
     const { status, data } = await call('/api/stats/trend', { headers: jsonAuth() });
     expect(status).toBe(200);
     expectSchema(StatsTrendResponseSchema, data);
+  });
+
+  it('GET /api/posts/:id/relations → PostRelationsResponse', async () => {
+    const { status, data } = await call('/api/posts/' + encodeURIComponent(statsPostId) + '/relations');
+    expect(status).toBe(200);
+    expectSchema(PostRelationsResponseSchema, data);
+    const body = data as { postId: string; related: unknown[]; backlinks: unknown[] };
+    expect(body.postId).toBe(statsPostId);
+    expect(Array.isArray(body.related)).toBe(true);
+    expect(Array.isArray(body.backlinks)).toBe(true);
+  });
+
+  it('GET /api/posts/:id/stats → PostStatsResponse', async () => {
+    const { status, data } = await call('/api/posts/' + encodeURIComponent(statsPostId) + '/stats');
+    expect(status).toBe(200);
+    expectSchema(PostStatsResponseSchema, data);
+    expect((data as { postId: string }).postId).toBe(statsPostId);
+  });
+
+  it('POST /api/posts/:id/stats → 上报阅读数（重复上报幂等）', async () => {
+    const { status, data } = await call('/api/posts/' + encodeURIComponent(statsPostId) + '/stats', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'views' })
+    });
+    expect(status).toBe(200);
+    expectSchema(PostStatsResponseSchema, data);
+    expect(typeof (data as { stats: { views: number } }).stats.views).toBe('number');
+  });
+
+  it('POST /api/admin/og-upload-url → OgUploadResponse', async () => {
+    const { status, data } = await call('/api/admin/og-upload-url', {
+      method: 'POST',
+      headers: { ...jsonAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ postId: 'contract-og-test' })
+    });
+    expect(status).toBe(200);
+    expectSchema(OgUploadResponseSchema, data);
+    const body = data as { uploadUrl: string; publicUrl: string; expiresIn: number };
+    expect(body.uploadUrl).toBeTruthy();
+    expect(body.publicUrl).toBeTruthy();
+    expect(body.expiresIn).toBeGreaterThan(0);
   });
 
   it('GET /api/admin/stats/sources → StatsSourcesResponse', async () => {

@@ -17,7 +17,10 @@ import {
   CreatePostBodySchema,
   PostListQuerySchema,
   PostListResponseSchema,
+  PostRelationsResponseSchema,
   PostResponseSchema,
+  PostStatsBodySchema,
+  PostStatsResponseSchema,
   SearchQuerySchema,
   SearchResponseSchema,
   SettingsResponseSchema,
@@ -74,6 +77,52 @@ export const postRoutes: ApiRoute[] = [
     responses: {
       200: { description: '文章详情', schema: PostResponseSchema },
       404: { description: '文章不存在，或对匿名访问者不可见', schema: ErrorResponseSchema }
+    },
+    handler: proxyToUpstream
+  },
+  {
+    method: 'GET',
+    path: '/api/posts/:id/relations',
+    tags: ['文章'],
+    auth: 'public',
+    summary: '相关阅读与反向链接',
+    description:
+      'related 为同系列 / 同标签的推荐文章（最多 4 篇），backlinks 为引用本文的文章（最多 8 篇）。' +
+      '两组都按发布时间倒序，文章不存在或未发布时返回 404。',
+    request: { params: IdParamSchema },
+    responses: {
+      200: { description: '关联文章列表', schema: PostRelationsResponseSchema },
+      404: { description: '文章不存在，或对匿名访问者不可见', schema: ErrorResponseSchema }
+    },
+    handler: proxyToUpstream
+  },
+  {
+    method: 'GET',
+    path: '/api/posts/:id/stats',
+    tags: ['统计'],
+    auth: 'public',
+    summary: '单篇文章统计',
+    description: '返回该文章的阅读数与点赞数。统计行不存在时返回 0，响应带 public 缓存与 stats 标签。',
+    request: { params: IdParamSchema },
+    responses: {
+      200: { description: '阅读 / 点赞计数', schema: PostStatsResponseSchema }
+    },
+    handler: proxyToUpstream
+  },
+  {
+    method: 'POST',
+    path: '/api/posts/:id/stats',
+    tags: ['统计'],
+    auth: 'public',
+    summary: '上报阅读或点赞',
+    description:
+      'action 只能是 views 或 like。服务端按 IP + 文章去重，重复上报返回 200 且 duplicated=true；' +
+      '短时间大量点赞会返回 429。',
+    request: { params: IdParamSchema, body: PostStatsBodySchema },
+    responses: {
+      200: { description: '上报结果（可能为去重后的幂等返回）', schema: PostStatsResponseSchema },
+      400: { description: 'action 非法', schema: ErrorResponseSchema },
+      429: { description: '上报过于频繁', schema: ErrorResponseSchema }
     },
     handler: proxyToUpstream
   },

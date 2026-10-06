@@ -5,7 +5,7 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import {
   Save, Loader2, ArrowLeft, Eye, Pencil, Columns2, ImagePlus, ExternalLink, Trash2, CalendarClock,
-  History, Link2, Sparkles, Copy, X, Undo2, Check
+  History, Link2, Sparkles, Copy, X, Undo2, Check, Wand
 } from '@lucide/vue';
 import {
   api, uploadTo, ApiError,
@@ -32,6 +32,8 @@ const form = ref({
   excerpt: '',
   content: '',
   cover: '',
+  ogImage: '',
+  date: '',
   tags: '',
   category: '',
   series: '',
@@ -59,6 +61,8 @@ function fillForm(post: PostDetail): void {
     excerpt: post.excerpt,
     content: post.content,
     cover: post.cover || post.ogImage || '',
+    ogImage: post.ogImage || '',
+    date: post.date || '',
     tags: (post.tags ?? []).join(', '),
     category: post.category ?? '',
     series: post.series ?? '',
@@ -68,9 +72,25 @@ function fillForm(post: PostDetail): void {
     pinned: post.pinned,
     seo: { title: '', desc: '', canonical: '', noindex: false, ...(post.seo ?? {}) }
   };
+  ogSource.value = ogFingerprint();
 }
 
 onMounted(async () => {
+  // 站点名用于分享图落款；设置接口异常时用默认名兜底
+  void api
+    .getSettings()
+    .then(({ settings }) => {
+      try {
+        const parsed = JSON.parse(settings.site || '{}') as { name?: unknown };
+        if (parsed && typeof parsed.name === 'string' && parsed.name.trim()) {
+          siteName.value = parsed.name.trim();
+        }
+      } catch {
+        /* 设置不是合法 JSON 时忽略 */
+      }
+    })
+    .catch(() => undefined);
+
   // AI 是否可用：服务端没配置 AI 时接口返回 404，AI 功能整块自动隐藏
   void api
     .aiPing()
@@ -104,12 +124,145 @@ watch(
   }
 );
 
+
+/* ---------- 分享图（OG）：Canvas 1200×630 + 签名直传 ---------- */
+const ogAuto = ref(true);
+const ogGenerating = ref(false);
+/** 上次成功生成分享图时的标题/日期/标签/系列指纹，变了才需要重画 */
+const ogSource = ref('');
+const siteName = ref("Qingyu'Blog");
+
+function parseTags(raw: string): string[] {
+  return raw.split(/[,，]/).map((t) => t.trim()).filter(Boolean);
+}
+
+function ogFingerprint(): string {
+  return [
+    form.value.title.trim(),
+    form.value.date.slice(0, 10),
+    parseTags(form.value.tags).join(','),
+    form.value.series.trim()
+  ].join('|');
+}
+
+/** 长标题按字符折行，最多 maxLines 行，超出用省略号收尾 */
+function wrapCanvasText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  maxLines: number
+): string[] {
+  const lines: string[] = [];
+  let line = '';
+  for (const ch of Array.from(text)) {
+    const test = line + ch;
+    if (line && ctx.measureText(test).width > maxWidth) {
+      lines.push(line);
+      line = ch;
+      if (lines.length === maxLines) {
+        let last = lines[lines.length - 1];
+        while (last.length > 1 && ctx.measureText(last + '…').width > maxWidth) {
+          last = last.slice(0, -1);
+        }
+        lines[lines.length - 1] = last + '…';
+        return lines;
+      }
+    } else {
+      line = test;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.slice(0, maxLines);
+}
+
+/** 画图 → 编码 PNG → 取签名 → 直传，返回可写进文章的 publicUrl */
+async function generateShareImage(): Promise<string> {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1200;
+  canvas.height = 630;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('当前浏览器不支持 Canvas');
+
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#b15635';
+  const grad = ctx.createLinearGradient(0, 0, 1200, 630);
+  grad.addColorStop(0, '#f8f2e9');
+  grad.addColorStop(0.55, '#ffffff');
+  grad.addColorStop(1, '#efe3d4');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 1200, 630);
+
+  ctx.globalAlpha = 0.12;
+  ctx.fillStyle = accent;
+  ctx.beginPath();
+  ctx.arc(1050, 80, 260, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(80, 590, 230, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  ctx.fillStyle = accent;
+  ctx.fillRect(92, 86, 8, 108);
+
+  ctx.fillStyle = '#332b25';
+  ctx.font = '700 72px "Microsoft YaHei","PingFang SC",sans-serif';
+  const lines = wrapCanvasText(ctx, form.value.title.trim() || '无标题', 960, 3);
+  lines.forEach((text, i) => ctx.fillText(text, 130, 150 + i * 86));
+
+  ctx.font = '28px "Microsoft YaHei","PingFang SC",sans-serif';
+  ctx.fillStyle = '#766b61';
+  const meta = [
+    form.value.date.slice(0, 10),
+    form.value.series.trim(),
+    parseTags(form.value.tags).slice(0, 3).join(' · ')
+  ].filter(Boolean).join('  ·  ');
+  ctx.fillText(meta, 132, 500);
+
+  ctx.font = '600 28px "Microsoft YaHei","PingFang SC",sans-serif';
+  ctx.fillStyle = accent;
+  ctx.fillText(siteName.value, 132, 555);
+
+  ctx.fillStyle = '#c9b9a8';
+  ctx.fillRect(132, 580, 936, 2);
+  ctx.font = '20px "Microsoft YaHei","PingFang SC",sans-serif';
+  ctx.fillStyle = '#9a8d80';
+  ctx.fillText('1200 × 630  ·  Open Graph', 760, 602);
+
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+  if (!blob) throw new Error('图片编码失败');
+
+  const postId = form.value.id.trim() || slugify(form.value.title) || 'post';
+  const signed = await api.ogUploadUrl(postId);
+  await uploadTo(signed.uploadUrl, blob, 'image/png');
+  return signed.publicUrl;
+}
+
+/** 手动按钮：画图并写入表单（不保存文章） */
+async function generateOg(): Promise<void> {
+  if (!form.value.title.trim()) {
+    toast.error('请先填写标题');
+    return;
+  }
+  ogGenerating.value = true;
+  try {
+    const url = await generateShareImage();
+    form.value.ogImage = url;
+    ogSource.value = ogFingerprint();
+    toast.success('分享图已生成');
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : '分享图生成失败');
+  } finally {
+    ogGenerating.value = false;
+  }
+}
+
 /* ---------- 保存 ---------- */
 const payload = computed(() => ({
   title: form.value.title.trim(),
   excerpt: form.value.excerpt.trim(),
   content: form.value.content,
   cover: form.value.cover.trim(),
+  ogImage: form.value.ogImage.trim(),
   tags: form.value.tags.split(/[,，]/).map((t) => t.trim()).filter(Boolean),
   category: form.value.category.trim(),
   series: form.value.series.trim(),
@@ -137,6 +290,20 @@ async function save(nextStatus?: typeof form.value.status): Promise<void> {
 
   saving.value = true;
   try {
+    if (isNew.value && !form.value.date) form.value.date = new Date().toISOString();
+    const fingerprint = ogFingerprint();
+    const online = typeof navigator === 'undefined' || navigator.onLine !== false;
+    if (ogAuto.value && online && (!form.value.ogImage || ogSource.value !== fingerprint)) {
+      ogGenerating.value = true;
+      try {
+        form.value.ogImage = await generateShareImage();
+        ogSource.value = fingerprint;
+      } catch {
+        /* 分享图生成失败不阻塞文章保存 */
+      } finally {
+        ogGenerating.value = false;
+      }
+    }
     if (isNew.value) {
       await api.createPost({ ...payload.value, id: form.value.id.trim() });
       toast.success('已创建');
@@ -647,6 +814,40 @@ async function copyText(text: string): Promise<void> {
             <ImagePlus v-else :size="15" />
             <span>{{ uploading ? '上传中…' : '上传图片' }}</span>
           </button>
+
+          <!-- 分享图（OG） -->
+          <div class="space-y-3 border-t border-line pt-3">
+            <div class="flex items-center justify-between gap-2">
+              <h3 class="text-[13px] font-semibold text-ink-soft">分享图（OG）</h3>
+              <label class="flex cursor-pointer items-center gap-1.5 text-[12px] text-ink-soft">
+                <input v-model="ogAuto" type="checkbox" class="accent-[var(--accent)]" />
+                保存时自动生成
+              </label>
+            </div>
+            <div
+              v-if="form.ogImage"
+              class="group relative aspect-[16/9] overflow-hidden rounded-xl border border-line bg-surface-2"
+            >
+              <img :src="form.ogImage" alt="分享图预览" class="size-full object-cover" />
+              <button
+                class="absolute top-2 right-2 btn btn-sm bg-black/55 text-white opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100"
+                @click="form.ogImage = ''"
+              >
+                移除
+              </button>
+            </div>
+            <p v-else class="hint">还没有分享图，社交平台抓取时会退回到封面或默认卡片。</p>
+            <button
+              class="btn btn-secondary w-full btn-sm"
+              :disabled="ogGenerating || saving"
+              @click="generateOg"
+            >
+              <Loader2 v-if="ogGenerating" :size="15" class="animate-spin" />
+              <Wand v-else :size="15" />
+              <span>{{ ogGenerating ? '生成中…' : form.ogImage ? '重新生成分享图' : '生成分享图' }}</span>
+            </button>
+            <p class="hint">画布 1200×630，按标题 / 日期 / 标签 / 系列自动生成；勾选上方选项后，保存文章时内容变了会自动重画。</p>
+          </div>
         </section>
 
         <!-- 属性 -->

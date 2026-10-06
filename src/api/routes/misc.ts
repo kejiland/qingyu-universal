@@ -46,8 +46,6 @@ export const miscRoutes: ApiRoute[] = [
   compat('POST', '/api/comments/:id/like', 'public', '评论点赞', ['评论']),
   compat('DELETE', '/api/posts/:id/comments/:cid', 'admin', '删除文章评论', ['评论']),
 
-  compat('GET', '/api/posts/:id/relations', 'public', '文章关联', ['文章']),
-  compat('POST', '/api/posts/:id/stats', 'public', '文章统计上报', ['统计']),
   compat('GET', '/api/posts/:id/revisions', 'admin', '文章修订列表', ['文章']),
   compat('GET', '/api/posts/:id/revisions/:rid', 'admin', '文章修订详情', ['文章']),
   compat('POST', '/api/posts/:id/revisions/:rid/restore', 'admin', '恢复文章修订', ['文章'], [200, 201]),
@@ -75,7 +73,6 @@ export const miscRoutes: ApiRoute[] = [
   compat('PUT', '/api/music/:id', 'admin', '更新音乐', ['音乐']),
   compat('DELETE', '/api/music/:id', 'admin', '删除音乐', ['音乐']),
 
-  compat('POST', '/api/admin/og-upload-url', 'admin', '分享图上传签名', ['媒体'], [200, 201]),
   compat('POST', '/api/admin/subscribers', 'admin', '新增订阅者', ['订阅'], [200, 201]),
   compat('GET', '/api/admin/post-analytics', 'admin', '文章分析', ['统计']),
   compat('POST', '/api/admin/preview-link', 'admin', '生成预览链接', ['文章'], [200, 201]),
