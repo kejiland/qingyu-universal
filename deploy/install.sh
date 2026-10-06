@@ -1143,6 +1143,127 @@ resolve_mode() {
   DOWNGRADED_DOMAIN="$DOMAIN"
 }
 
+# ----------------------------------------------------------
+# 防火墙：检测到 ufw / firewalld 就问一句，同意就代为放行
+# ----------------------------------------------------------
+# 只做「放行端口」这一件事：不改默认策略、不关防火墙、不动用户已有规则。
+# CI / -y 这类不能提问的场合，退回旧行为——只打印该执行的命令。
+# 云控制台的安全组是另一层，本机管不了，由 summary / doctor 另外提醒。
+ensure_firewall_open() {
+  local ports=() p
+  # 端口可能来自 --port，也可能只写在 .env 里（升级 / 二次配置场景）
+  if [ -z "${APP_PORT:-}" ]; then
+    local bind; bind="$(env_value APP_BIND 2>/dev/null || true)"
+    APP_PORT="${bind##*:}"
+  fi
+  if uses_caddy; then
+    ports=(80 443)
+  elif [ -n "${APP_PORT:-}" ]; then
+    ports=("$APP_PORT")
+  fi
+  [ "${#ports[@]}" -gt 0 ] || return 0
+
+  # ---------- ufw（Ubuntu / Debian 常见） ----------
+  if have ufw && ufw status 2>/dev/null | grep -q '^Status: active'; then
+    local status need=()
+    status="$($SUDO ufw status 2>/dev/null || true)"
+    for p in "${ports[@]}"; do
+      printf '%s\n' "$status" | grep -qE "^${p}/tcp[[:space:]]+ALLOW" || need+=("$p")
+    done
+    if [ "${#need[@]}" -eq 0 ]; then
+      log "本机防火墙（ufw）已放行端口 ${ports[*]}/tcp"
+      return 0
+    fi
+    echo
+    log "检测到 ufw 防火墙已启用，外网访问需要放行：${need[*]}/tcp"
+    if can_ask; then
+      ask "自动放行这些端口（只新增规则，不动其它设置）" "1"
+      case "$REPLY" in
+        1|y|Y|yes|YES)
+          for p in "${need[@]}"; do
+            if $SUDO ufw allow "${p}/tcp" >/dev/null 2>&1; then
+              log "已放行 ${p}/tcp"
+            else
+              warn "放行 ${p}/tcp 失败，请手动执行：ufw allow ${p}/tcp"
+            fi
+          done
+          # Caddy 的 HTTP/3 走 UDP 443，顺手放行（失败不影响主流程）
+          if uses_caddy && ! printf '%s\n' "$status" | grep -qE '^443/udp[[:space:]]+ALLOW'; then
+            if $SUDO ufw allow 443/udp >/dev/null 2>&1; then
+              log "已放行 443/udp（HTTP/3，可选）"
+            fi
+          fi
+          ;;
+        *)
+          warn "没有自动放行；以后需要时执行：ufw allow <端口>/tcp"
+          ;;
+      esac
+    else
+      warn "非交互模式：请手动放行 ufw，否则外网可能打不开："
+      for p in "${need[@]}"; do warn "    ufw allow ${p}/tcp"; done
+    fi
+    return 0
+  fi
+
+  # ---------- firewalld（CentOS / RHEL / Fedora 常见） ----------
+  if have firewall-cmd && firewall-cmd --state 2>/dev/null | grep -q running; then
+    local items=() it need_txt=""
+    if uses_caddy; then
+      local svcs; svcs="$($SUDO firewall-cmd --list-services 2>/dev/null || true)"
+      printf '%s\n' "$svcs" | grep -qw http  || { items+=("service:http");  need_txt="$need_txt http"; }
+      printf '%s\n' "$svcs" | grep -qw https || { items+=("service:https"); need_txt="$need_txt https"; }
+    else
+      local listed; listed="$($SUDO firewall-cmd --list-ports 2>/dev/null || true)"
+      if ! printf '%s\n' "$listed" | grep -qE "(^| )${APP_PORT}/tcp( |$)"; then
+        items+=("port:${APP_PORT}/tcp")
+        need_txt="$need_txt ${APP_PORT}/tcp"
+      fi
+    fi
+    if [ "${#items[@]}" -eq 0 ]; then
+      log "本机防火墙（firewalld）已放行所需端口/服务：${ports[*]}${need_txt}"
+      return 0
+    fi
+    echo
+    log "检测到 firewalld 防火墙已启用，外网访问需要放行：${need_txt# }"
+    if can_ask; then
+      ask "自动放行这些服务/端口（只新增规则，不动其它设置）" "1"
+      case "$REPLY" in
+        1|y|Y|yes|YES)
+          local okf=1
+          for it in "${items[@]}"; do
+            case "$it" in
+              service:*) $SUDO firewall-cmd --permanent --add-service="${it#service:}" >/dev/null 2>&1 || okf=0 ;;
+              port:*)    $SUDO firewall-cmd --permanent --add-port="${it#port:}" >/dev/null 2>&1 || okf=0 ;;
+            esac
+          done
+          $SUDO firewall-cmd --reload >/dev/null 2>&1 || okf=0
+          if [ "$okf" = "1" ]; then
+            log "已放行：${need_txt# }"
+          else
+            warn "放行没成功，请手动执行：firewall-cmd --permanent --add-port=<端口>/tcp && firewall-cmd --reload"
+          fi
+          ;;
+        *)
+          warn "没有自动放行；以后需要时用 firewall-cmd --permanent --add-port=<端口>/tcp"
+          ;;
+      esac
+    else
+      warn "非交互模式：请手动放行 firewalld，否则外网可能打不开："
+      for it in "${items[@]}"; do
+        case "$it" in
+          service:*) warn "    firewall-cmd --permanent --add-service=${it#service:}" ;;
+          port:*)    warn "    firewall-cmd --permanent --add-port=${it#port:}" ;;
+        esac
+      done
+      warn "    firewall-cmd --reload"
+    fi
+    return 0
+  fi
+
+  # 没启用本机防火墙（ufw / firewalld 都没跑）→ 什么都不用做
+  return 0
+}
+
 preflight() {
   local ok=1
   log "起飞前检查…"
@@ -1191,19 +1312,8 @@ preflight() {
     log "  无域名模式：应用监听 0.0.0.0:${APP_PORT}"
   fi
 
-  # 防火墙：不阻断，只给出该执行的命令（各家发行版工具不同，不宜代为修改）
-  if have ufw && ufw status 2>/dev/null | grep -q '^Status: active'; then
-    warn "检测到 ufw 已启用，若部署后无法访问请放行端口："
-    if [ -n "$DOMAIN" ]; then warn "    ufw allow 80,443/tcp"
-    else warn "    ufw allow ${APP_PORT}/tcp"; fi
-  elif have firewall-cmd && firewall-cmd --state 2>/dev/null | grep -q running; then
-    warn "检测到 firewalld 已启用，若部署后无法访问请放行端口："
-    if [ -n "$DOMAIN" ]; then
-      warn "    firewall-cmd --permanent --add-service=http --add-service=https && firewall-cmd --reload"
-    else
-      warn "    firewall-cmd --permanent --add-port=${APP_PORT}/tcp && firewall-cmd --reload"
-    fi
-  fi
+  # 防火墙：检测到就问一句，同意则自动放行（非交互时只打印命令）
+  ensure_firewall_open
 
   if [ "$ok" -ne 1 ]; then
     die "起飞前检查未通过，已中止（避免装到一半才失败）"
@@ -1345,6 +1455,7 @@ cmd_upgrade() {
   compose pull --ignore-pull-failures 2>/dev/null || true
   compose up -d --build
   wait_healthy
+  ensure_firewall_open
   log "升级完成（版本 $BUILD_REVISION）"
 }
 

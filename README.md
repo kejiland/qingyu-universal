@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/depl
   | bash -s -- --domain blog.example.com
 ```
 
-脚本会自动：安装 Docker → 判断部署模式 → 生成 `.env` 与随机密钥 → 构建镜像 →
+脚本会自动：安装 Docker → 判断部署模式 → 检测本机防火墙并询问是否放行 → 生成 `.env` 与随机密钥 → 构建镜像 →
 启动容器 → 等待健康检查 → 输出**访问地址**与初始化密钥。
 
 ### 国内服务器：网络卡就加 `--mirror`
@@ -81,6 +81,7 @@ curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/depl
 | 没给域名 | 自动探测公网 IP，挑一个空闲端口，用 `http://<IP>:<端口>` 访问 |
 | 给了域名，且 80/443 空闲、DNS 已指向本机 | 启动 Caddy，自动申请 Let's Encrypt 证书 |
 | 给了域名，但 80/443 被占用或 DNS 未生效 | **自动降级**为自定义端口 + 纯 HTTP，并说明原因 |
+| 服务器开着 ufw / firewalld | 问一句「要不要自动放行端口」，同意就代劳；`-y` 时只打印命令 |
 
 关键点是**它不会因为端口或 DNS 问题中止**。你不需要先搞清楚端口占用、
 DNS 解析这些事——脚本自己选好能跑通的配置，最后告诉你访问地址。
@@ -714,6 +715,7 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
 - [x] **v0.9** 部署脚本一键体检 `doctor`：Docker / 容器 / 端口 / 防火墙 / 公网地址 / 磁盘 / 错误日志，每项给 ✅⚠️❌ 加一句修复命令
 - [x] **v0.9-a** 国内网络加速 `--mirror`：GitHub 代码加速、Docker Hub `registry-mirrors`、npm npmmirror，失败自动回落官方源
 - [x] **v0.9-b** 二次运行弹数字菜单：升级 / 体检 / 信息 / 状态 / 备份 / 日志 / 重启 / 停止 / 启动 / 回滚 / 卸载，回车即退出；交互终端 + 已部署过才会出现，CI 与 `-y` 不受影响
+- [x] **v0.9-c** 防火墙询问后自动放行：检测 ufw / firewalld，确认后只「新增放行规则」（域名模式含 80/443+443udp），非交互时退回打印命令；升级时也会复查端口
 - [x] **v0.3** 路径级契约覆盖完成（60 条路径；兼容接口响应字段将逐步收紧）
 - [x] **v0.3.1-a** Redis / Valkey 可选限流（配置 `REDIS_URL` 即启用）
 - [x] **v0.3.1-b** PostgreSQL 运行时适配（配置 `DATABASE_URL` 即切换）
