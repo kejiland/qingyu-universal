@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import AdminLayout from './components/layout/AdminLayout.vue';
 import ToastHost from './components/ui/ToastHost.vue';
+import WelcomeGuide from './components/WelcomeGuide.vue';
 import { session } from './lib/api';
 
 const route = useRoute();
@@ -19,6 +20,8 @@ const showLayout = computed(() => route.name !== 'login' && Boolean(session.toke
   </AdminLayout>
 
   <RouterView v-else />
+
+  <WelcomeGuide v-if="showLayout" />
 
   <ToastHost />
 </template>

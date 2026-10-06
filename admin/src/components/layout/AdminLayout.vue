@@ -3,7 +3,7 @@ import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   FileText, Image as ImageIcon, MessageSquare, Settings, Users, DatabaseBackup,
-  ScrollText, LogOut, Moon, Sun, Menu, X, PenLine, AtSign, BarChart3
+  ScrollText, LogOut, Moon, Sun, Menu, X, PenLine, AtSign, BarChart3, Sparkles
 } from '@lucide/vue';
 import { api, session } from '../../lib/api';
 import { toast } from '../../lib/toast';
@@ -57,6 +57,11 @@ const drawerOpen = ref(false);
 function navigate(to: string): void {
   drawerOpen.value = false;
   void router.push(to);
+}
+
+/* ---------- 重新打开上手引导 ---------- */
+function openGuide(): void {
+  window.dispatchEvent(new CustomEvent('qy:open-welcome'));
 }
 
 /* ---------- 退出 ---------- */
@@ -133,6 +138,15 @@ async function logout(): Promise<void> {
 
       <!-- 底部操作 -->
       <div class="shrink-0 border-t border-line p-3 space-y-1">
+        <button
+          class="w-full flex items-center gap-2.5 h-9 px-2.5 rounded-[9px] text-sm text-ink-soft
+                 hover:bg-surface-2 hover:text-ink transition-colors"
+          @click="openGuide"
+        >
+          <Sparkles :size="17" />
+          <span>新手上路</span>
+        </button>
+
         <button
           class="w-full flex items-center gap-2.5 h-9 px-2.5 rounded-[9px] text-sm text-ink-soft
                  hover:bg-surface-2 hover:text-ink transition-colors disabled:opacity-50"
