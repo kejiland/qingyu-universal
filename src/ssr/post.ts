@@ -17,6 +17,7 @@
  * ============================================================ */
 import { marked } from 'marked';
 import { escapeHtml, type PostRow, type SiteIdentity } from '../seo/meta.js';
+import { formatDate } from './format.js';
 
 /** 与 public/index.html 里的启动动画元素匹配（app.js 不引用它，替换安全）。 */
 const BOOT_LOADER = /<div class="boot-load" id="bootLoad">[\s\S]*?<\/div>\s*<\/div>/;
@@ -45,7 +46,7 @@ function parseTags(raw: unknown): string[] {
 
 /** 与 renderPost() 的 .post-header / .meta 结构对齐。 */
 function renderHeader(post: PostRow): string {
-  const parts: string[] = [`<span class="meta-date">${escapeHtml(post.date ?? '')}</span>`];
+  const parts: string[] = [`<span class="meta-date">${escapeHtml(formatDate(post.date))}</span>`];
   if (post.series) {
     parts.push(
       `<a class="pin" href="/series/${encodeURIComponent(post.series)}/">${escapeHtml(post.series)}</a>`

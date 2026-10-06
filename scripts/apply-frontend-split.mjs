@@ -157,6 +157,46 @@ function splitLegacy(app) {
   return rest.join('\n');
 }
 
+function patchDisplayPolish(app) {
+  if (app.includes('function fmtDate(')) return app;
+
+  const anchor = 'function renderCard(p, idx) {';
+  if (!app.includes(anchor)) throw new Error('未找到 renderCard()，上游结构可能已变化');
+
+  const helper = [
+    '/** 卡片 / 文章头的日期展示：ISO 串收敛成 YYYY-MM-DD，其余格式原样返回。',
+    ' *  RSS rfc822、JSON-LD datePublished、archive 年份切片都不走这里。 */',
+    'function fmtDate(v) {',
+    "  var m = /^(\\d{4}-\\d{2}-\\d{2})/.exec(String(v || '').trim());",
+    "  return m ? m[1] : String(v || '');",
+    '}',
+    ''
+  ].join('\n');
+
+  let out = app.replace(anchor, helper + '\n' + anchor);
+
+  const swaps = [
+    ["esc(tags || p.date || '')", "esc(tags || fmtDate(p.date) || '')"],
+    ["esc(p.date || '')", "esc(fmtDate(p.date) || '')"],
+    ["esc(c.date || '')", "esc(fmtDate(c.date) || '')"],
+    ["esc(post.date || '')", "esc(fmtDate(post.date) || '')"]
+  ];
+  let hits = 0;
+  for (const pair of swaps) {
+    const n = out.split(pair[0]).length - 1;
+    if (n === 0) throw new Error('日期展示点未找到：' + pair[0]);
+    out = out.split(pair[0]).join(pair[1]);
+    hits += n;
+  }
+
+  const oldExcerpt = "var excerpt = p.excerpt || stripMd(p.content || '').slice(0, 100);";
+  const newExcerpt = "var excerpt = p.excerpt || stripMd(p.content || p.search || '').slice(0, 100);";
+  if (!out.includes(oldExcerpt)) throw new Error('renderCard 摘要兜底语句未找到');
+  out = out.split(oldExcerpt).join(newExcerpt);
+
+  report.push('[ok]   日期规范化 fmtDate x' + hits + ' + 摘要兜底（search 全文）');
+  return out;
+}
 function bumpCacheVersion(app) {
   const m = app.match(/BLOG_VERSION\s*=\s*'([^']+)'/);
   if (!m) throw new Error('未找到 BLOG_VERSION');
@@ -223,6 +263,44 @@ function patchShellReferences() {
   }
 }
 
+function ensurePolishShell() {
+  const version = (read('app.js').match(/BLOG_VERSION\s*=\s*'([^']+)'/) || [])[1];
+  if (!version) throw new Error('app.js 未找到 BLOG_VERSION');
+
+  let html = read('index.html');
+  if (!html.includes('polish.min.css')) {
+    const before = html;
+    html = html.replace(
+      /(<link id="global-style"[^>]*style\.min\.css[^>]*>\s*\r?\n)/,
+      '$1  <link rel="stylesheet" href="polish.min.css?v=' + version + '">\n'
+    );
+    if (html === before) throw new Error('index.html 未找到 style.min.css 锚点，无法插入 polish 样式');
+    write('index.html', html);
+    report.push('index.html -> polish.min.css 叠加样式');
+  }
+
+  let sw = read('sw.js');
+  if (!sw.includes('./polish.min.css')) {
+    const before = sw;
+    sw = sw.replace("  './style.min.css',", "  './style.min.css',\n  './polish.min.css',");
+    if (sw === before) throw new Error('sw.js 未找到 style.min.css 锚点');
+    write('sw.js', sw);
+    report.push('sw.js 缓存清单补齐 polish.min.css');
+  }
+
+  let headers = read('_headers');
+  if (!headers.includes('/polish.min.css*')) {
+    const nl = headers.includes('\r\n') ? '\r\n' : '\n';
+    const anchor = '/style.min.css*' + nl + '  Cache-Control: public, max-age=31536000, immutable';
+    if (!headers.includes(anchor)) throw new Error('_headers 未找到 style.min.css 缓存锚点');
+    headers = headers.replace(
+      anchor,
+      anchor + nl + nl + '/polish.min.css*' + nl + '  Cache-Control: public, max-age=31536000, immutable'
+    );
+    write('_headers', headers);
+    report.push('_headers 缓存规则补齐 polish.min.css');
+  }
+}
 let app = read('app.js');
 if (app.includes('function ensureLegacyAdmin()')) {
   if (!fs.existsSync(path.join(PUB, 'admin-legacy.js'))) {
@@ -237,6 +315,9 @@ if (app.includes('function ensureLegacyAdmin()')) {
 }
 
 if (!fs.existsSync(path.join(PUB, 'boot.js'))) write('boot.js', BOOT_SOURCE);
+app = patchDisplayPolish(app);
+write('app.js', app);
+ensurePolishShell();
 patchShellReferences();
 
 console.log(report.join('\n'));

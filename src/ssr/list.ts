@@ -6,6 +6,7 @@
  *   main.container.page-fade > .list-head + #homeBody > a.post-card
  * ============================================================ */
 import { escapeHtml, stripMarkdown, type PostRow, type SiteIdentity } from '../seo/meta.js';
+import { formatDate } from './format.js';
 
 function parseTags(raw: unknown): string[] {
   if (typeof raw !== 'string' || !raw.trim()) return [];
@@ -42,7 +43,7 @@ function renderCard(post: PostRow, index: number): string {
   return (
     `<a class="post-card" href="/posts/${encodeURIComponent(post.id)}/">` +
     '<div class="post-card-main">' +
-    `<div class="meta"><span class="date">${escapeHtml(post.date ?? '')}</span>${badges}</div>` +
+    `<div class="meta"><span class="date">${escapeHtml(formatDate(post.date))}</span>${badges}</div>` +
     `<h2>${escapeHtml(post.title ?? '')}</h2>` +
     `<div class="excerpt">${escapeHtml(excerpt)}</div>` +
     // 恒渲染：无标签时留空容器，保证卡片等高

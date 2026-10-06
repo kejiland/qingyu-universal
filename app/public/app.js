@@ -6,7 +6,7 @@
  * ============================================================================ */
 'use strict';
 
-var BLOG_VERSION = '2.10.61';
+var BLOG_VERSION = '2.10.62';
 
 /* i18n 兜底：万一 i18n.js 没加载成功（网络抖动 / 缓存缺失 / 被拦截），
  * 也必须保证 t() 可用 —— 否则整页会在第一个 t(...) 处抛 “t is not defined” 而白屏。 */
@@ -1588,7 +1588,7 @@ function renderPopularList(items) {
     return '<a class="popular-card" href="' + esc(href(postUrl(p.id))) + '">'
       + '<span class="popular-rank">' + (index + 1) + '</span>'
       + '<div class="popular-main"><div class="popular-card-title">' + esc(p.title || t('post.untitled')) + '</div>'
-      + '<div class="popular-card-meta">' + esc(tags || p.date || '') + '</div></div>'
+      + '<div class="popular-card-meta">' + esc(tags || fmtDate(p.date) || '') + '</div></div>'
       + '<div class="popular-metrics"><span title="' + esc(t('post.views')) + '">' + svgIcon('eye', 13) + ' ' + (Number(p.views) || 0) + '</span>'
       + '<span title="' + esc(t('post.likes')) + '">' + svgIcon('heart', 13) + ' ' + (Number(p.likes) || 0) + '</span>'
       + '<span title="' + esc(t('comment.title')) + '">' + svgIcon('quote', 13) + ' ' + (Number(p.comments) || 0) + '</span></div></a>';
@@ -2376,11 +2376,18 @@ function renderCardList(plist, ads, adsEnabled) {
   return out;
 }
 
+/** 卡片 / 文章头的日期展示：ISO 串收敛成 YYYY-MM-DD，其余格式原样返回。
+ *  RSS rfc822、JSON-LD datePublished、archive 年份切片都不走这里。 */
+function fmtDate(v) {
+  var m = /^(\d{4}-\d{2}-\d{2})/.exec(String(v || '').trim());
+  return m ? m[1] : String(v || '');
+}
+
 function renderCard(p, idx) {
   var badges = '';
   if (p.pinned) badges += '<span class="pin">' + svgIcon('pin', 13) + ' ' + t('post.pin') + '</span>';
   var tags = normalizeTags(p).map(function (t) { return '<span>' + esc(t) + '</span>'; }).join('');
-  var excerpt = p.excerpt || stripMd(p.content || '').slice(0, 100);
+  var excerpt = p.excerpt || stripMd(p.content || p.search || '').slice(0, 100);
   // 云端可 AI 摘要的文章：摘要位标记 data-ai-excerpt，aiFillSlots 异步拉取 AI 摘要后替换；
   // 没有 AI 摘要（未生成/未启用/拉取失败）时保持默认摘要兜底
   var aiExcerpt = (_cloudOn() && !p.enc && !(Number(p.protected || 0) === 1))
@@ -2388,7 +2395,7 @@ function renderCard(p, idx) {
     : '';
   return '<a class="post-card" href="' + esc(href(postUrl(p.id))) + '">'
     + '<div class="post-card-main">'
-    + '<div class="meta"><span class="date">' + esc(p.date || '') + '</span>' + badges + '</div>'
+    + '<div class="meta"><span class="date">' + esc(fmtDate(p.date) || '') + '</span>' + badges + '</div>'
     + '<h2>' + esc(p.title || '') + '</h2>'
     + '<div class="excerpt"' + aiExcerpt + '>' + esc(excerpt) + '</div>'
     // 标签区恒渲染（无标签时为空容器）：固定高度占位，保证每张卡片等高、布局协调
@@ -2615,7 +2622,7 @@ function renderCommentTree(list, canDel, opts) {
     return '<li class="comment' + (Number(c.pinned) ? ' pinned' : '') + (Number(c.featured) ? ' featured' : '') + '" data-id="' + esc(c.id) + '"><div class="comment-head">'
       + '<span class="comment-avatar" aria-hidden="true">' + esc(initial) + '</span>'
       + '<span class="comment-author">' + esc(c.author) + '</span>' + badges
-      + '<span class="comment-date">' + esc(c.date || '') + '</span>'
+      + '<span class="comment-date">' + esc(fmtDate(c.date) || '') + '</span>'
       + '<span class="comment-actions">' + likeBtn + replyBtn + delBtn + '</span>'
       + '</div>'
       + '<div class="comment-main">'
@@ -2732,14 +2739,14 @@ function renderRelationsHtml(relations) {
     html += '<section class="relations-section related-posts"><div class="relations-title">' + svgIcon('link', 15) + ' ' + esc(t('post.related')) + '</div><div class="related-grid">';
     related.forEach(function (p) {
       var tags = normalizeTags(p).slice(0, 2).join(' · ');
-      html += '<a class="related-card" href="' + esc(href(postUrl(p.id))) + '"><div class="related-card-title">' + esc(p.title || t('post.untitled')) + '</div><div class="related-card-meta">' + esc(tags || p.date || '') + '</div></a>';
+      html += '<a class="related-card" href="' + esc(href(postUrl(p.id))) + '"><div class="related-card-title">' + esc(p.title || t('post.untitled')) + '</div><div class="related-card-meta">' + esc(tags || fmtDate(p.date) || '') + '</div></a>';
     });
     html += '</div></section>';
   }
   if (backlinks.length) {
     html += '<section class="relations-section backlinks"><div class="relations-title">' + svgIcon('arrow-left', 15) + ' ' + esc(t('post.backlinks')) + '</div><ul class="backlink-list">';
     backlinks.forEach(function (p) {
-      html += '<li class="backlink-item"><a href="' + esc(href(postUrl(p.id))) + '"><span class="backlink-title">' + esc(p.title || t('post.untitled')) + '</span><span class="backlink-date">' + esc(p.date || '') + '</span></a></li>';
+      html += '<li class="backlink-item"><a href="' + esc(href(postUrl(p.id))) + '"><span class="backlink-title">' + esc(p.title || t('post.untitled')) + '</span><span class="backlink-date">' + esc(fmtDate(p.date) || '') + '</span></a></li>';
     });
     html += '</ul></section>';
   }
@@ -2853,7 +2860,7 @@ async function renderPost(id) {
   var tags = normalizeTags(post).map(function (t) { return '<a href="' + esc(href('/', { tag: t })) + '" data-tag-link>' + esc(t) + '</a>'; }).join('');
   var minutes = Math.max(1, Math.ceil((stripMd(content || '').length / 400)));
   var seriesMeta = post.series ? '<a class="pin" href="' + esc(href(seriesUrl(post.series))) + '">' + svgIcon('list', 13) + ' ' + esc(post.series) + '</a>' : '';
-  html += '<div class="post-header"><h1>' + esc(post.title || '') + '</h1><div class="meta"><span class="meta-date">' + esc(post.date || '') + '</span>' + (post.author ? '<span class="meta-dot">·</span><span class="meta-author">' + esc(post.author) + '</span>' : '') + '<span class="meta-dot">·</span><span>' + minutes + ' ' + t('post.minRead') + '</span><span class="meta-dot">·</span><span class="meta-views">' + svgIcon('eye', 14) + ' <span id="viewCount">0</span> ' + t('post.views') + '</span>' + seriesMeta + (post.pinned ? '<span class="pin">' + svgIcon('pin', 13) + ' ' + t('post.pin') + '</span>' : '') + '</div></div>';
+  html += '<div class="post-header"><h1>' + esc(post.title || '') + '</h1><div class="meta"><span class="meta-date">' + esc(fmtDate(post.date) || '') + '</span>' + (post.author ? '<span class="meta-dot">·</span><span class="meta-author">' + esc(post.author) + '</span>' : '') + '<span class="meta-dot">·</span><span>' + minutes + ' ' + t('post.minRead') + '</span><span class="meta-dot">·</span><span class="meta-views">' + svgIcon('eye', 14) + ' <span id="viewCount">0</span> ' + t('post.views') + '</span>' + seriesMeta + (post.pinned ? '<span class="pin">' + svgIcon('pin', 13) + ' ' + t('post.pin') + '</span>' : '') + '</div></div>';
   html += '<div class="reading-tools"><span class="rt-label">' + t('post.fontSize') + '</span>' +
     '<button type="button" class="rt-btn" data-rs="-1" aria-label="' + t('post.fontSmaller') + '" title="' + t('post.fontSmaller') + '">A−</button>' +
     '<button type="button" class="rt-btn" data-rs="0" aria-label="' + t('post.fontReset') + '" title="' + t('post.fontReset') + '">A</button>' +
@@ -3551,7 +3558,7 @@ async function renderPreviewPage(token) {
     var html = renderNav('/');
     html += '<main class="container page-fade"><div class="post-body">';
     html += '<div class="preview-banner">' + svgIcon('eye', 14) + ' ' + t('preview.banner') + ' · ' + esc(post.title || t('post.untitled')) + '</div>';
-    html += '<div class="post-header"><h1>' + esc(post.title || t('post.untitled')) + '</h1><div class="meta"><span class="meta-date">' + esc(post.date || '') + '</span>' + (post.tags && post.tags.length ? '<span class="meta-dot">·</span><span>' + post.tags.map(function (x) { return esc(x); }).join(' / ') + '</span>' : '') + '</div></div>';
+    html += '<div class="post-header"><h1>' + esc(post.title || t('post.untitled')) + '</h1><div class="meta"><span class="meta-date">' + esc(fmtDate(post.date) || '') + '</span>' + (post.tags && post.tags.length ? '<span class="meta-dot">·</span><span>' + post.tags.map(function (x) { return esc(x); }).join(' / ') + '</span>' : '') + '</div></div>';
     html += tocRes.html;
     if (post.enc) {
       html += '<div class="post-lock"><div class="post-lock-ico">' + svgIcon('lock', 26) + '</div><p class="post-lock-title">' + t('post.lockedTitle') + '</p><p class="post-lock-desc">' + t('post.lockedDesc') + '</p></div>';
@@ -3569,7 +3576,7 @@ async function renderPreviewPage(token) {
 
 function renderPostFail(post) {
   var html = renderNav(currentRoute().path);
-  html += '<main class="container page-fade"><div class="post-body"><div class="post-header"><h1>' + esc(post.title || t('post.untitled')) + '</h1><div class="meta"><span class="meta-date">' + esc(post.date || '') + '</span></div></div>';
+  html += '<main class="container page-fade"><div class="post-body"><div class="post-header"><h1>' + esc(post.title || t('post.untitled')) + '</h1><div class="meta"><span class="meta-date">' + esc(fmtDate(post.date) || '') + '</span></div></div>';
   html += '<div class="empty" style="padding:44px 0"><div class="big">' + svgIcon('cloud', 32) + '</div><p>' + t('post.loadFail') + '</p><p style="margin-top:14px"><button class="btn btn-primary" id="retryPostBtn">' + svgIcon('refresh', 14) + ' ' + t('post.retry') + '</button> <a class="btn" href="' + esc(href('/')) + '">' + t('post.backHome') + '</a></p></div>';
   html += '</div></main>' + renderFooter();
   app().innerHTML = html;
@@ -3936,7 +3943,7 @@ async function bindGuestbook() {
         + '<span class="gb-avatar">' + esc((c.author || '?').slice(0, 1)) + '</span>'
         + '<span class="gb-author">' + esc(c.author || '') + '</span>'
         + '<span class="gb-kind-badge ' + kindClass + '">' + kindLabel + '</span>'
-        + '<span class="gb-date">' + esc(c.date || '') + '</span>'
+        + '<span class="gb-date">' + esc(fmtDate(c.date) || '') + '</span>'
         + '</div>'
         + '<div class="gb-entry-content">' + escSmoji(esc(c.content || '')) + '</div>'
         + '</div>';

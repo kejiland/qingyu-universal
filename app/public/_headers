@@ -24,6 +24,9 @@
 /style.min.css*
   Cache-Control: public, max-age=31536000, immutable
 
+/polish.min.css*
+  Cache-Control: public, max-age=31536000, immutable
+
 /app.js*
   Cache-Control: public, max-age=31536000, immutable
 

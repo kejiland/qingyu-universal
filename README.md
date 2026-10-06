@@ -509,6 +509,19 @@ npm run build            # 类型检查 + 前端分包
 
 `npm run sync:upstream` 会自动重新应用这份拆分（`apply-frontend-split.mjs`，幂等，必要时递增补丁版本）。
 
+### 视觉打磨：独立叠加样式 `polish.min.css`
+
+上游的 `style.css`（133 KB）由同步脚本覆盖，**本项目不直接改它**。所有外观改进写在自有文件
+`app/public/polish.css`（约 11 KB），由 `npm run frontend:build` 压缩成 `polish.min.css`，
+紧跟在主样式之后加载 —— 升级上游样式不会冲掉这些改动，也不会反过来被它污染。
+
+覆盖范围：顶栏毛玻璃与导航胶囊态、首页标题排版、文章卡片层次 / 日期胶囊 / 标签芯片、
+文章页阅读节奏（标题、引用、代码块、表格）、页脚分层、焦点可见性、滚动条，以及
+`prefers-reduced-motion` 动效降级。全部只用既有的 `--bg / --card / --fg / --muted / --border / --accent` 变量，
+因此四套 accent 主题与暗色模式自动跟随，无需重复写配色。
+
+同步后 `apply-frontend-split.mjs` 会幂等补回 `index.html` 的样式引用、`sw.js` 缓存清单与 `_headers` 长缓存规则。
+
 ---
 
 ## SEO 与社交分享
@@ -673,6 +686,7 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
 - [x] **v0.6** comments.parent_id 自引用外键（删除父评论时级联清理回复）
 - [x] **v0.7-a** 撤下旧后台入口；高级设置完整迁移到新版（旧路径保留为紧急回退）
 - [x] **v0.7-b** 公开站前端拆分（SSR 首屏 + 轻量启动器按需加载；旧后台独立分包，弃用 Astro 重写）
+- [x] **v0.8** 公开站视觉打磨：日期规范成 YYYY-MM-DD、卡片摘要回退到 search 全文、独立叠加样式 `polish.min.css`
 - [x] **v0.3** 路径级契约覆盖完成（60 条路径；兼容接口响应字段将逐步收紧）
 - [x] **v0.3.1-a** Redis / Valkey 可选限流（配置 `REDIS_URL` 即启用）
 - [x] **v0.3.1-b** PostgreSQL 运行时适配（配置 `DATABASE_URL` 即切换）

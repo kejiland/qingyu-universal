@@ -116,6 +116,11 @@ BASE_URL=http://localhost:8787 SETUP_KEY=... npm run smoke
 并相应修改了 `index.html`、`sw.js`、`_headers`。`npm run sync:upstream` 已串联 `apply-frontend-split.mjs`，
 上游覆盖回单文件形态时会幂等重新拆分，并在必要时递增补丁版本。
 
+视觉打磨（自有改动）：外观改进**不写进上游 `style.css`**，全部放在独立的 `app/public/polish.css`，
+由构建产出 `polish.min.css` 并在主样式后加载。同步脚本同样幂等补回 `index.html` 的样式引用、
+`sw.js` 缓存清单与 `_headers` 规则；同时以 `function fmtDate` 是否存在为标记，重新应用
+卡片日期规范化（YYYY-MM-DD）与摘要回退到 `search` 字段这两处展示层补丁。
+
 > 若上游删除了旧文件，`cp -a` 不会清理残留，请用 `git status` 核对后再提交。
 
 > **注意**：上游若新增平台绑定（例如 `env.QUEUE`、`env.BROWSER`），需要在 `src/`
