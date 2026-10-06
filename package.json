@@ -31,7 +31,8 @@
     "admin:install": "npm --prefix admin ci --no-audit --no-fund",
     "admin:dev": "npm --prefix admin run dev",
     "admin:build": "npm --prefix admin run build",
-    "build:all": "npm run build && npm run admin:build"
+"build:all": "npm run build && npm run admin:build",
+    "check:contrast": "node scripts/check-contrast.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.3",

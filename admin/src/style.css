@@ -21,17 +21,18 @@
 
   --ink: #1c1917;
   --ink-soft: #57534e;
-  --ink-muted: #8f857a;
+  --ink-muted: #746b63;
 
-  --accent: #c25e3a;
-  --accent-hover: #a94e2e;
-  --accent-soft: #fdf1ea;
+  --accent: #b15635;
+  --accent-hover: #9a4a2c;
   --accent-ring: rgba(194, 94, 58, 0.32);
+  --accent-fg: #ffffff; /* 主色实心底上的文字色 */
+  --accent-soft: #fdf4ee;
 
-  --success: #2f855a;
-  --success-soft: #eaf6ef;
-  --warning: #b7791f;
-  --warning-soft: #fdf6e6;
+  --success: #2d7e56;
+  --success-soft: #eef8f2;
+  --warning: #9b671a;
+  --warning-soft: #fdf8eb;
   --danger: #c53030;
   --danger-soft: #fdecec;
   --info: #2b6cb0;
@@ -53,12 +54,13 @@
 
   --ink: #f5f1ec;
   --ink-soft: #bdb2a6;
-  --ink-muted: #8b8177;
+  --ink-muted: #9c9288;
 
   --accent: #e0794f;
   --accent-hover: #ec8f6d;
   --accent-soft: #2c1d16;
   --accent-ring: rgba(224, 121, 79, 0.34);
+  --accent-fg: #1c1917; /* 深色主题主色偏亮，改用深色字保证可读 */
 
   --success: #68d391;
   --success-soft: #16251c;
@@ -196,7 +198,7 @@
 
   .btn-primary {
     background: var(--accent);
-    color: #fff;
+    color: var(--accent-fg);
     box-shadow: var(--shadow-xs);
   }
   .btn-primary:hover:not(:disabled) {

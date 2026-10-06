@@ -53,6 +53,9 @@ jobs:
       - name: 后台类型检查与构建
         run: npm run admin:build
 
+      - name: 界面对比度自检
+        run: npm run check:contrast
+
       - name: bash 语法检查
         run: bash -n deploy/install.sh
 
