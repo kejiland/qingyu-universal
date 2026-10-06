@@ -285,6 +285,23 @@ export const SubscriberGroupListResponseSchema = z
 export const SubscriberBroadcastResponseSchema = z
   .object({ ok: z.literal(true), queued: z.number(), groups: z.array(z.string()) })
   .meta({ id: 'SubscriberBroadcastResponse' });
+/** 群发邮件请求：subject 与 body（正文）必填，groups 留空表示发给全部已确认订阅者 */
+export const SubscriberBroadcastBodySchema = z
+  .object({
+    subject: z.string().min(1),
+    body: z.string().min(1).max(20000),
+    groups: z.array(z.string()).optional()
+  })
+  .meta({ id: 'SubscriberBroadcastBody', description: '群发请求体；body 为纯文本正文' });
+
+/** 编辑单个订阅者的分组（用逗号分隔即可新建 / 改名，无需独立分组表） */
+export const SubscriberUpdateBodySchema = z
+  .object({ groups: z.array(z.string()).max(50) })
+  .meta({ id: 'SubscriberUpdateBody', description: '订阅者分组列表' });
+
+export const SubscriberUpdateResponseSchema = z
+  .object({ ok: z.literal(true), groups: z.array(z.string()) })
+  .meta({ id: 'SubscriberUpdateResponse', description: '返回更新后的分组' });
 
 /* ---------- Webmention ---------- */
 

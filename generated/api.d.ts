@@ -459,7 +459,11 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        /**
+         * 编辑订阅者分组
+         * @description 分组来自订阅者行上的 groups 字段（逗号分隔存储）；传入新列表即可新建分组或改名，无需独立分组表。
+         */
+        put: operations["putApiAdminSubscribersById"];
         post?: never;
         /** 删除订阅者 */
         delete: operations["deleteApiAdminSubscribersById"];
@@ -1455,11 +1459,27 @@ export interface components {
             last_notified_at?: number | null;
             groups: string[];
         };
+        /** @description 返回更新后的分组 */
+        SubscriberUpdateResponse: {
+            /** @constant */
+            ok: true;
+            groups: string[];
+        };
+        /** @description 订阅者分组列表 */
+        SubscriberUpdateBody: {
+            groups: string[];
+        };
         SubscriberBroadcastResponse: {
             /** @constant */
             ok: true;
             queued: number;
             groups: string[];
+        };
+        /** @description 群发请求体；body 为纯文本正文 */
+        SubscriberBroadcastBody: {
+            subject: string;
+            body: string;
+            groups?: string[];
         };
         /** @description 注意：数组字段名是 mentions，不是 webmentions */
         WebmentionListResponse: {
@@ -2754,6 +2774,41 @@ export interface operations {
             };
         };
     };
+    putApiAdminSubscribersById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubscriberUpdateBody"];
+            };
+        };
+        responses: {
+            /** @description 已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriberUpdateResponse"];
+                };
+            };
+            /** @description 未授权或凭证失效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     deleteApiAdminSubscribersById: {
         parameters: {
             query?: never;
@@ -2790,7 +2845,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubscriberBroadcastBody"];
+            };
+        };
         responses: {
             /** @description 已入队 */
             200: {

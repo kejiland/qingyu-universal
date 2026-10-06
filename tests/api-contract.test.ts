@@ -32,6 +32,7 @@ import {
   StatsSourcesResponseSchema,
   StatsTrendResponseSchema,
   SubscriberListResponseSchema,
+  SubscriberUpdateResponseSchema,
   WebmentionListResponseSchema
 } from '../src/api/contract/admin.js';
 import type { ZodType } from 'zod';
@@ -410,6 +411,15 @@ describe('订阅 / Webmention / 统计 契约', () => {
     expectSchema(SubscriberListResponseSchema, data);
   });
 
+  it('PUT /api/admin/subscribers/:id → SubscriberUpdateResponse', async () => {
+    const { status, data } = await call('/api/admin/subscribers/nonexistent-id', {
+      method: 'PUT',
+      headers: { ...jsonAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ groups: ['朋友', 'RSS'] })
+    });
+    expect(status).toBe(200);
+    expectSchema(SubscriberUpdateResponseSchema, data);
+  });
   it('GET /api/admin/webmentions → WebmentionListResponse', async () => {
     const { status, data } = await call('/api/admin/webmentions', { headers: jsonAuth() });
     expect(status).toBe(200);

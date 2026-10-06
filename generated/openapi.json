@@ -1279,6 +1279,44 @@
         ],
         "additionalProperties": false
       },
+      "SubscriberUpdateResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "groups"
+        ],
+        "additionalProperties": false,
+        "description": "返回更新后的分组"
+      },
+      "SubscriberUpdateBody": {
+        "type": "object",
+        "properties": {
+          "groups": {
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "groups"
+        ],
+        "additionalProperties": false,
+        "description": "订阅者分组列表"
+      },
       "SubscriberBroadcastResponse": {
         "type": "object",
         "properties": {
@@ -1302,6 +1340,32 @@
           "groups"
         ],
         "additionalProperties": false
+      },
+      "SubscriberBroadcastBody": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "subject",
+          "body"
+        ],
+        "additionalProperties": false,
+        "description": "群发请求体；body 为纯文本正文"
       },
       "WebmentionListResponse": {
         "type": "object",
@@ -3561,6 +3625,62 @@
       }
     },
     "/api/admin/subscribers/{id}": {
+      "put": {
+        "tags": [
+          "订阅"
+        ],
+        "summary": "编辑订阅者分组",
+        "operationId": "putApiAdminSubscribersById",
+        "responses": {
+          "200": {
+            "description": "已更新",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriberUpdateResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或凭证失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "分组来自订阅者行上的 groups 字段（逗号分隔存储）；传入新列表即可新建分组或改名，无需独立分组表。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscriberUpdateBody"
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "tags": [
           "订阅"
@@ -3640,7 +3760,17 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscriberBroadcastBody"
+              }
+            }
+          }
+        }
       }
     },
     "/api/admin/webmentions": {

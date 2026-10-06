@@ -301,6 +301,11 @@ export const api = {
   /* 订阅者 */
   listSubscribers: () => request<components['schemas']['SubscriberListResponse']>('/api/admin/subscribers'),
   deleteSubscriber: (id: string) => request<{ ok: true }>(`/api/admin/subscribers/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  updateSubscriber: (id: string, payload: { groups: string[] }) =>
+    request<components['schemas']['SubscriberUpdateResponse']>(
+      '/api/admin/subscribers/' + encodeURIComponent(id),
+      { method: 'PUT', ...json(payload) }
+    ),
   broadcast: (payload: Record<string, unknown>) =>
     request<components['schemas']['SubscriberBroadcastResponse']>('/api/admin/subscribers/broadcast', { method: 'POST', ...json(payload) }),
 

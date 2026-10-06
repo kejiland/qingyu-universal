@@ -4,7 +4,7 @@
  * 全部是 proxyToUpstream：契约层只校验，业务仍由上游处理。
  * 新增接口只需在这里登记 + 在 contract/ 写 schema。
  * ============================================================ */
-import { ErrorResponseSchema, OkResponseSchema } from '../contract/common.js';
+import { ErrorResponseSchema, IdParamSchema, OkResponseSchema } from '../contract/common.js';
 import {
   AuditLogResponseSchema,
   AuditQuerySchema,
@@ -31,8 +31,11 @@ import {
   SetupBodySchema,
   StatsSourcesResponseSchema,
   StatsTrendResponseSchema,
+  SubscriberBroadcastBodySchema,
   SubscriberBroadcastResponseSchema,
   SubscriberListResponseSchema,
+  SubscriberUpdateBodySchema,
+  SubscriberUpdateResponseSchema,
   WebmentionListResponseSchema
 } from '../contract/admin.js';
 import { proxyToUpstream, type ApiRoute } from '../registry.js';
@@ -347,6 +350,23 @@ export const adminRoutes: ApiRoute[] = [
     handler: proxyToUpstream
   },
   {
+    method: 'PUT',
+    path: '/api/admin/subscribers/:id',
+    tags: ['订阅'],
+    auth: 'admin',
+    summary: '编辑订阅者分组',
+    description: '分组来自订阅者行上的 groups 字段（逗号分隔存储）；传入新列表即可新建分组或改名，无需独立分组表。',
+    request: {
+      params: IdParamSchema,
+      body: SubscriberUpdateBodySchema
+    },
+    responses: {
+      200: { description: '已更新', schema: SubscriberUpdateResponseSchema },
+      ...AUTH_ERRORS
+    },
+    handler: proxyToUpstream
+  },
+  {
     method: 'DELETE',
     path: '/api/admin/subscribers/:id',
     tags: ['订阅'],
@@ -364,6 +384,7 @@ export const adminRoutes: ApiRoute[] = [
     tags: ['订阅'],
     auth: 'admin',
     summary: '群发邮件',
+    request: { body: SubscriberBroadcastBodySchema },
     description: '按分组或全量投递到发件队列（mail_outbox），由定时任务逐条发送。未配置发信时返回 503。',
     responses: {
       200: { description: '已入队', schema: SubscriberBroadcastResponseSchema },
