@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import {
-  FileDown, FileUp, Loader2, Search, FileText, Inbox, UploadCloud, PackageOpen, FileJson
+  FileDown, FileUp, Loader2, Search, FileText, Inbox, UploadCloud, PackageOpen, FileJson, Globe
 } from '@lucide/vue';
 import { api, ApiError, type PostSummary } from '../lib/api';
 import { postStatusMeta, formatDate } from '../lib/format';
@@ -81,6 +81,21 @@ async function exportJson(): Promise<void> {
     const list = asTransfer(posts.value);
     downloadText(`qingyu-backup-${stamp()}.json`, backupJson(list), 'application/json;charset=utf-8');
     toast.success(`已导出 ${list.length} 篇文章`);
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : '导出失败');
+  } finally {
+    busy.value = false;
+    statusText.value = '';
+  }
+}
+
+async function exportStaticSite(): Promise<void> {
+  busy.value = true;
+  statusText.value = '正在生成静态站…';
+  try {
+    const { name, blob } = await api.exportStaticSite();
+    downloadBlob(name, blob);
+    toast.success('静态站已导出，上传 ZIP 里的全部文件即可');
   } catch (e) {
     toast.error(e instanceof ApiError ? e.message : '导出失败');
   } finally {
@@ -219,11 +234,21 @@ onMounted(load);
             <FileJson v-else :size="16" />
             导出备份 JSON
           </button>
+          <button class="btn btn-secondary w-full" :disabled="busy || loading || !posts.length" @click="exportStaticSite">
+            <Loader2 v-if="busy && statusText.includes('静态站')" :size="16" class="animate-spin" />
+            <Globe v-else :size="16" />
+            导出静态站（ZIP）
+          </button>
         </div>
 
         <p class="hint">
           ZIP 内每篇文章一个 <code>.md</code>，另附 <code>posts.json</code>；
           JSON 是整站文章备份，两种文件都能再导回来。
+        </p>
+
+        <p class="hint">
+          静态站是整站快照：上传 ZIP 里的全部文件即可，无需服务端。
+          它不含图片与音频本体，纯静态下自定义导航/页脚会回到默认值。
         </p>
       </section>
 

@@ -94,7 +94,8 @@ export async function readChrome(db: AppDatabase, siteName: string): Promise<Chr
 
   return {
     siteName: str(site.name) || siteName,
-    nav: normalizeNav(safeJson<unknown>(map.get('nav'), null)),
+    // 后台保存的键是 nav_menu；早期数据里可能残留 nav，两个都读。
+    nav: normalizeNav(safeJson<unknown>(map.get('nav_menu') ?? map.get('nav'), null)),
     footer: {
       copyrightName: str(footer.copyrightName) || siteName,
       startYear: str(footer.startYear),

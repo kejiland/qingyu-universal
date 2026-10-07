@@ -207,6 +207,12 @@ async function request<T>(path: string, init: RequestInit = {}, options: { auth?
   return data as T;
 }
 
+/** 响应里没带文件名时自己造一个（与服务端口径一致：20261007-1530）。 */
+function zipStamp(d = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+}
+
 const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
 
 /* ---------- 接口 ---------- */
@@ -351,6 +357,34 @@ export const api = {
   statsSources: () => request<components['schemas']['StatsSourcesResponse']>('/api/admin/stats/sources'),
   postAnalytics: (range: 'all' | '30' | '7' = 'all') =>
     request<PostAnalyticsResponse>(`/api/admin/post-analytics?range=${range}`),
+
+  /* 静态站导出（兼容接口，schema 尚未登记）：返回 ZIP 二进制，不是 JSON */
+  exportStaticSite: async (): Promise<{ name: string; blob: Blob }> => {
+    const headers = new Headers();
+    const token = session.token;
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    const response = await fetch('/api/admin/export-static', { headers });
+    if (!response.ok) {
+      let message = `导出失败（HTTP ${response.status}）`;
+      try {
+        const data = await response.json();
+        if (data && typeof data.error === 'string') message = data.error;
+      } catch {
+        /* 非 JSON 错误体，保留默认文案 */
+      }
+      if (response.status === 401) {
+        session.clear();
+        onUnauthorized?.();
+      }
+      throw new ApiError(message, response.status);
+    }
+    const disposition = response.headers.get('content-disposition') || '';
+    const matched = /filename="?([^";]+)"?/.exec(disposition);
+    return {
+      name: matched?.[1] || `qingyu-static-site-${zipStamp()}.zip`,
+      blob: await response.blob()
+    };
+  },
 
   /* 设置 */
   getSettings: () => request<{ ok: true; settings: Record<string, string> }>('/api/settings'),

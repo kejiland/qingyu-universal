@@ -6,10 +6,11 @@
  *   2. 探针（/healthz）
  *   3. 契约路由（/api/posts、/api/search…）—— 校验后转发给上游
  *   4. OpenAPI 文档（/openapi.json）
- *   5. 本地存储路由（/api/local-upload、/media/*…）
- *   6. 服务端 SEO（/ 与 /posts/:id）
- *   7. 前端配置注入（/config.js）
- *   8. 兜底：其余全部交给上游 worker.fetch()
+ *   5. 静态站导出（/api/admin/export-static）
+ *   6. 本地存储路由（/api/local-upload、/media/*…）
+ *   7. 服务端 SEO（/ 与 /posts/:id）
+ *   8. 前端配置注入（/config.js）
+ *   9. 兜底：其余全部交给上游 worker.fetch()
  *
  * 契约路由与兜底路径共用同一份 withEdgeHeaders 实现，行为一致。
  * ============================================================ */
@@ -23,6 +24,7 @@ import { createHealthHandler } from './routes/health.js';
 import { createConfigJsHandler } from './routes/config-js.js';
 import { adminAppAvailable, createAdminAppHandler } from './routes/admin-app.js';
 import { createSeoHandlers, type SeoDeps } from './routes/seo.js';
+import { createStaticExportHandler } from './routes/static-export.js';
 import {
   createLocalDownloadHandler,
   createLocalUploadHandler,
@@ -101,6 +103,9 @@ export function createApp(deps: AppDeps): Hono {
 
   /* ---------- OpenAPI 文档 ---------- */
   app.get('/openapi.json', (c) => c.json(createApiDocument(config.siteUrl)));
+
+  /* ---------- 静态站导出（本地实现，不进契约） ---------- */
+  app.get('/api/admin/export-static', createStaticExportHandler({ config, db: deps.db }));
 
   /* ---------- 本地存储（仅在未配置对象存储时挂载） ---------- */
   if (deps.storage) {
