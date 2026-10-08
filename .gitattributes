@@ -10,6 +10,11 @@ tests/** -text
 scripts/** -text
 *.md -text
 
+# 生成产物：CI 会在 Linux 上 `npm run api:generate` 后要求 `git diff --quiet generated/`。
+# 生成器固定输出 LF，若在 Windows 上被 autocrlf 转成 CRLF 再入库，
+# 这条检查会永远红——所以这里钉死 -text，禁止任何换行转换。
+generated/** -text
+
 # 来自上游、原样复用的文件保持入库时的字节（同步脚本按原文替换，不能被改写）
 app/public/** -text
 app/functions/** -text

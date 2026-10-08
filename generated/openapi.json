@@ -2100,13 +2100,15 @@
                   "publishAt": {
                     "type": [
                       "number",
-                      "string"
+                      "string",
+                      "null"
                     ]
                   },
                   "publish_at": {
                     "type": [
                       "number",
-                      "string"
+                      "string",
+                      "null"
                     ]
                   },
                   "seo": {
@@ -2308,13 +2310,15 @@
                   "publishAt": {
                     "type": [
                       "number",
-                      "string"
+                      "string",
+                      "null"
                     ]
                   },
                   "publish_at": {
                     "type": [
                       "number",
-                      "string"
+                      "string",
+                      "null"
                     ]
                   },
                   "seo": {
@@ -2676,7 +2680,10 @@
                     "minLength": 1
                   },
                   "parent_id": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "hp": {
                     "type": "string"
@@ -3957,46 +3964,6 @@
             "bearerAuth": []
           }
         ]
-      },
-      "post": {
-        "tags": [
-          "订阅"
-        ],
-        "summary": "新增订阅者",
-        "operationId": "postApiAdminSubscribers",
-        "responses": {
-          "200": {
-            "description": "兼容响应（字段将在后续版本逐步收紧）",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "201": {
-            "description": "兼容响应（字段将在后续版本逐步收紧）",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "401": {
-            "description": "未授权或凭证失效",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ]
       }
     },
     "/api/admin/subscribers/{id}": {
@@ -4661,14 +4628,22 @@
           }
         }
       },
-      "put": {
+      "post": {
         "tags": [
           "站点"
         ],
-        "summary": "保存站点文件",
-        "operationId": "putApiSite-files",
+        "summary": "批量写入站点文件（body.files 数组）",
+        "operationId": "postApiSite-files",
         "responses": {
           "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "201": {
             "description": "兼容响应（字段将在后续版本逐步收紧）",
             "content": {
               "application/json": {
@@ -4712,12 +4687,12 @@
           }
         }
       },
-      "put": {
+      "post": {
         "tags": [
           "站点"
         ],
-        "summary": "写入站点文件",
-        "operationId": "putApiSite-filesByName",
+        "summary": "写入单个站点文件",
+        "operationId": "postApiSite-filesByName",
         "responses": {
           "200": {
             "description": "兼容响应（字段将在后续版本逐步收紧）",
@@ -4727,31 +4702,7 @@
               }
             }
           },
-          "401": {
-            "description": "未授权或凭证失效",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ]
-      },
-      "delete": {
-        "tags": [
-          "站点"
-        ],
-        "summary": "删除站点文件",
-        "operationId": "deleteApiSite-filesByName",
-        "responses": {
-          "200": {
+          "201": {
             "description": "兼容响应（字段将在后续版本逐步收紧）",
             "content": {
               "application/json": {
@@ -4860,23 +4811,6 @@
         ],
         "summary": "AI 可用性检查",
         "operationId": "getApiAiPing",
-        "responses": {
-          "200": {
-            "description": "兼容响应（字段将在后续版本逐步收紧）",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "AI"
-        ],
-        "summary": "AI 可用性检查",
-        "operationId": "postApiAiPing",
         "responses": {
           "200": {
             "description": "兼容响应（字段将在后续版本逐步收紧）",
@@ -5255,14 +5189,22 @@
       }
     },
     "/api/admin/tags": {
-      "get": {
+      "post": {
         "tags": [
           "文章"
         ],
-        "summary": "标签列表",
-        "operationId": "getApiAdminTags",
+        "summary": "批量重命名 / 删除标签",
+        "operationId": "postApiAdminTags",
         "responses": {
           "200": {
+            "description": "兼容响应（字段将在后续版本逐步收紧）",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "201": {
             "description": "兼容响应（字段将在后续版本逐步收紧）",
             "content": {
               "application/json": {

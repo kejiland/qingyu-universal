@@ -507,8 +507,7 @@ export interface paths {
          */
         get: operations["getApiAdminSubscribers"];
         put?: never;
-        /** 新增订阅者 */
-        post: operations["postApiAdminSubscribers"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -847,9 +846,9 @@ export interface paths {
         };
         /** 站点文件列表 */
         get: operations["getApiSite-files"];
-        /** 保存站点文件 */
-        put: operations["putApiSite-files"];
-        post?: never;
+        put?: never;
+        /** 批量写入站点文件（body.files 数组） */
+        post: operations["postApiSite-files"];
         delete?: never;
         options?: never;
         head?: never;
@@ -865,11 +864,10 @@ export interface paths {
         };
         /** 读取站点文件 */
         get: operations["getApiSite-filesByName"];
-        /** 写入站点文件 */
-        put: operations["putApiSite-filesByName"];
-        post?: never;
-        /** 删除站点文件 */
-        delete: operations["deleteApiSite-filesByName"];
+        put?: never;
+        /** 写入单个站点文件 */
+        post: operations["postApiSite-filesByName"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -953,8 +951,7 @@ export interface paths {
         /** AI 可用性检查 */
         get: operations["getApiAiPing"];
         put?: never;
-        /** AI 可用性检查 */
-        post: operations["postApiAiPing"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1123,10 +1120,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 标签列表 */
-        get: operations["getApiAdminTags"];
+        get?: never;
         put?: never;
-        post?: never;
+        /** 批量重命名 / 删除标签 */
+        post: operations["postApiAdminTags"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1692,8 +1689,8 @@ export interface operations {
                     author?: string;
                     /** @enum {string} */
                     status?: "published" | "draft" | "scheduled";
-                    publishAt?: number | string;
-                    publish_at?: number | string;
+                    publishAt?: number | string | null;
+                    publish_at?: number | string | null;
                     seo?: components["schemas"]["Seo"];
                     tags?: string[] | string;
                 };
@@ -1798,8 +1795,8 @@ export interface operations {
                     author?: string;
                     /** @enum {string} */
                     status?: "published" | "draft" | "scheduled";
-                    publishAt?: number | string;
-                    publish_at?: number | string;
+                    publishAt?: number | string | null;
+                    publish_at?: number | string | null;
                     seo?: components["schemas"]["Seo"];
                     tags?: string[] | string;
                     id?: string;
@@ -2013,7 +2010,7 @@ export interface operations {
                 "application/json": {
                     author: string;
                     content: string;
-                    parent_id?: string;
+                    parent_id?: string | null;
                     hp?: string;
                     website?: string;
                     ts?: number | string;
@@ -2933,44 +2930,6 @@ export interface operations {
             };
         };
     };
-    postApiAdminSubscribers: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 兼容响应（字段将在后续版本逐步收紧） */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description 兼容响应（字段将在后续版本逐步收紧） */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description 未授权或凭证失效 */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
     putApiAdminSubscribersById: {
         parameters: {
             query?: never;
@@ -3547,7 +3506,7 @@ export interface operations {
             };
         };
     };
-    "putApiSite-files": {
+    "postApiSite-files": {
         parameters: {
             query?: never;
             header?: never;
@@ -3558,6 +3517,15 @@ export interface operations {
         responses: {
             /** @description 兼容响应（字段将在后续版本逐步收紧） */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description 兼容响应（字段将在后续版本逐步收紧） */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3596,7 +3564,7 @@ export interface operations {
             };
         };
     };
-    "putApiSite-filesByName": {
+    "postApiSite-filesByName": {
         parameters: {
             query?: never;
             header?: never;
@@ -3614,28 +3582,8 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
-            /** @description 未授权或凭证失效 */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    "deleteApiSite-filesByName": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
             /** @description 兼容响应（字段将在后续版本逐步收紧） */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3735,26 +3683,6 @@ export interface operations {
         };
     };
     getApiAiPing: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 兼容响应（字段将在后续版本逐步收紧） */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    postApiAiPing: {
         parameters: {
             query?: never;
             header?: never;
@@ -4111,7 +4039,7 @@ export interface operations {
             };
         };
     };
-    getApiAdminTags: {
+    postApiAdminTags: {
         parameters: {
             query?: never;
             header?: never;
@@ -4122,6 +4050,15 @@ export interface operations {
         responses: {
             /** @description 兼容响应（字段将在后续版本逐步收紧） */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description 兼容响应（字段将在后续版本逐步收紧） */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
