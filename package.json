@@ -13,6 +13,7 @@
     "frontend:build": "node scripts/build-frontend.mjs",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
+    "docker:sync": "bash scripts/sync-docker.sh",
     "migrate": "node dist/cli/migrate.js",
     "seed": "node dist/cli/seed.js",
     "health": "node dist/cli/health.js",
