@@ -42,6 +42,20 @@
   --shadow-sm: 0 1px 3px rgba(28, 25, 23, 0.07), 0 1px 2px rgba(28, 25, 23, 0.04);
   --shadow-md: 0 4px 12px rgba(28, 25, 23, 0.07), 0 2px 4px rgba(28, 25, 23, 0.04);
   --shadow-lg: 0 12px 32px rgba(28, 25, 23, 0.11), 0 4px 8px rgba(28, 25, 23, 0.05);
+
+  /* 深色侧栏：与原版后台（admin.css 的 --ab-sider-*）同一组色值，
+     保证两侧后台放在一起看不出差别 */
+  --sider-bg: linear-gradient(180deg, #23201a 0%, #191612 100%);
+  --sider-text: #e8e2d8;
+  --sider-muted: #8d8375;
+  --sider-hover: rgba(255, 255, 255, 0.06);
+  --sider-line: rgba(255, 255, 255, 0.07);
+  --sider-tile: rgba(255, 255, 255, 0.05);
+  --sider-tile-line: rgba(255, 255, 255, 0.06);
+  --sider-tile-hover: rgba(255, 255, 255, 0.1);
+
+  /* 页头大标题用品牌衬线体，与前台文章标题同源 */
+  --serif: "Source Han Serif SC", "Noto Serif SC", "Songti SC", "SimSun", serif;
 }
 
 .dark {
@@ -75,6 +89,13 @@
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.38);
   --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.42);
   --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5);
+
+  /* 深色主题下侧栏再压暗一档（同原版 [data-theme="dark"]） */
+  --sider-bg: linear-gradient(180deg, #1e1b17 0%, #15120f 100%);
+  --sider-text: #ded6ca;
+  --sider-muted: #84796c;
+  --sider-hover: rgba(255, 255, 255, 0.05);
+  --sider-tile-hover: rgba(255, 255, 255, 0.09);
 }
 
 .dark {
@@ -114,6 +135,10 @@
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", "Source Han Sans SC", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+  --font-serif: var(--serif);
+
+  --color-sider-text: var(--sider-text);
+  --color-sider-muted: var(--sider-muted);
 
   --radius-card: 14px;
 }
@@ -398,6 +423,406 @@
     text-align: left;
   }
   .prose-qingyu th { background: var(--surface-2); font-weight: 600; }
+
+  /* ============================================================
+   * 后台外壳布局
+   * ------------------------------------------------------------
+   * 与原版后台（app/public/admin.css）逐项对齐：侧栏 252px / 折叠 72px、
+   * 顶栏 62px、内容区 max-width 1280px + 28/30/36 内边距、
+   * 页头衬线大标题、页脚居中版权。数值与色值都取自原版，
+   * 以后上游调整外壳时只需要改这一节。
+   * ============================================================ */
+  .admin-shell {
+    --sider-w: 252px;
+    --sider-w-collapsed: 72px;
+    --shell-header-h: 62px;
+    min-height: 100vh;
+  }
+
+  /* ---------- 侧栏 ---------- */
+  .admin-sider {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: var(--sider-w);
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    background: var(--sider-bg);
+    color: var(--sider-text);
+    border-right: 1px solid rgba(0, 0, 0, 0.25);
+    box-shadow: 8px 0 30px rgba(20, 12, 4, 0.08);
+    transition: width 0.22s ease, transform 0.22s ease;
+  }
+
+  .admin-sider-brand {
+    flex: 0 0 auto;
+    height: var(--shell-header-h);
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--sider-line);
+    overflow: hidden;
+  }
+
+  .admin-logo {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 auto;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    font-weight: 700;
+    font-size: 15px;
+    color: #fff;
+    background: linear-gradient(135deg, var(--accent), var(--accent-hover), var(--accent));
+    background-size: 220% 220%;
+    animation: sider-logo-flow 5s ease-in-out infinite;
+    box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  @keyframes sider-logo-flow {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  .admin-logo img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    padding: 7px;
+    box-sizing: border-box;
+  }
+
+  .admin-brand-name {
+    font-weight: 700;
+    font-size: 14.5px;
+    color: var(--sider-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .admin-nav {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 14px 12px 10px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  }
+  .admin-nav::-webkit-scrollbar { width: 5px; }
+  .admin-nav::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+  }
+
+  .admin-nav-group { margin-bottom: 6px; }
+  .admin-nav-group-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--sider-muted);
+    padding: 16px 14px 7px;
+    white-space: nowrap;
+  }
+
+  .admin-nav-item {
+    position: relative;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 2px 0;
+    padding: 10px 13px;
+    border-radius: 10px;
+    font-size: 14px;
+    color: var(--sider-muted);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.18s, color 0.18s;
+  }
+  .admin-nav-item:hover { background: var(--sider-hover); color: var(--sider-text); }
+  .admin-nav-item.active {
+    background: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--accent) 28%, transparent),
+      rgba(255, 255, 255, 0.04)
+    );
+    color: #fff;
+    font-weight: 600;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+  /* 左侧高亮竖条（原版 .ab-nav-item.active::after） */
+  .admin-nav-item.active::after {
+    content: "";
+    position: absolute;
+    left: -2px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 22px;
+    border-radius: 0 3px 3px 0;
+    background: var(--accent);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 70%, transparent);
+  }
+
+  .admin-nav-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    background: var(--sider-tile);
+    border: 1px solid var(--sider-tile-line);
+    color: var(--sider-text);
+    transition: background 0.18s, border-color 0.18s, color 0.18s, transform 0.18s;
+  }
+  .admin-nav-item:hover .admin-nav-icon {
+    background: var(--sider-tile-hover);
+    border-color: rgba(255, 255, 255, 0.12);
+    transform: translateY(-1px);
+  }
+  .admin-nav-item.active .admin-nav-icon {
+    background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 58%, #000 10%));
+    border-color: transparent;
+    color: #fff;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 45%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  }
+
+  .admin-nav-count {
+    margin-left: auto;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--accent-fg);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 50%, transparent);
+  }
+
+  /* 侧栏底部：头像 + 名称 + 描述 + 退出 */
+  .admin-sider-foot {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 12px 14px;
+    border-top: 1px solid var(--sider-line);
+  }
+  .admin-sider-avatar {
+    width: 37px;
+    height: 37px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    font-size: 14px;
+    color: #fff;
+    background: color-mix(in srgb, var(--accent) 85%, #000);
+    box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  .admin-sider-avatar img { width: 100%; height: 100%; object-fit: cover; }
+  .admin-sider-foot-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.3;
+    min-width: 0;
+  }
+  .admin-sider-foot-text b {
+    font-size: 13px;
+    color: var(--sider-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .admin-sider-foot-text span { font-size: 11px; color: var(--sider-muted); }
+
+  /* 侧栏内的图标按钮（退出 / 折叠）*/
+  .admin-sider-btn {
+    margin-left: auto;
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--sider-muted);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .admin-sider-btn:hover { background: var(--sider-hover); color: var(--sider-text); }
+
+  /* ---------- 主区域 ---------- */
+  .admin-main {
+    margin-left: var(--sider-w);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    transition: margin-left 0.22s ease;
+    background:
+      radial-gradient(1100px 520px at 88% -12%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 60%),
+      radial-gradient(900px 480px at -8% 108%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 55%),
+      var(--canvas);
+  }
+
+  /* ---------- 顶栏 ---------- */
+  .admin-header {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    flex: 0 0 auto;
+    height: var(--shell-header-h);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 24px;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 80%, transparent);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+
+  .admin-crumb {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 14px;
+    color: var(--ink-muted);
+    min-width: 0;
+  }
+  .admin-crumb b { color: var(--ink); font-weight: 700; }
+  .admin-crumb .sep { opacity: 0.5; }
+
+  .admin-header-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 38px;
+    padding: 0 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--ink);
+    font-size: 13.5px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .admin-header-btn:hover { background: var(--surface-2); border-color: var(--border-strong); }
+
+  .admin-icon-btn {
+    width: 38px;
+    height: 38px;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .admin-icon-btn:hover {
+    background: var(--surface-2);
+    border-color: var(--border);
+    color: var(--accent);
+  }
+
+  /* ---------- 内容区 ---------- */
+  .admin-content {
+    /* 左右装订线抽成变量：内容区自己的内边距、以及需要「横向铺满」的子元素
+     * （编辑页的吸顶操作条）都读它。两处各写一个数的话，差几像素就会撑出横向滚动。 */
+    --content-gutter: 30px;
+    flex: 1 1 auto;
+    width: 100%;
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 28px var(--content-gutter) 36px;
+  }
+
+  .page-head {
+    display: flex;
+    align-items: flex-end;
+    gap: 14px;
+    margin-bottom: 22px;
+    flex-wrap: wrap;
+  }
+  /* 与原版 .ab-page-title 同字号/同衬线体 */
+  .page-title {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    font-family: var(--serif);
+    color: var(--ink);
+  }
+  .page-sub {
+    margin: 5px 0 0;
+    font-size: 13px;
+    color: var(--ink-muted);
+  }
+
+  .admin-foot {
+    flex: 0 0 auto;
+    padding: 18px;
+    text-align: center;
+    font-size: 12.5px;
+    color: var(--ink-muted);
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  /* ---------- 折叠态（桌面） ---------- */
+  .admin-sider.is-collapsed { width: var(--sider-w-collapsed); }
+  .admin-sider.is-collapsed .admin-brand-name,
+  .admin-sider.is-collapsed .admin-nav-text,
+  .admin-sider.is-collapsed .admin-nav-group-title,
+  .admin-sider.is-collapsed .admin-sider-foot-text { display: none; }
+  .admin-sider.is-collapsed .admin-nav-item { justify-content: center; padding: 11px 0; }
+  .admin-sider.is-collapsed .admin-nav-item.active::after { left: -12px; }
+  .admin-sider.is-collapsed .admin-nav-icon { width: 36px; height: 36px; border-radius: 11px; }
+  .admin-sider.is-collapsed .admin-sider-foot { justify-content: center; padding: 12px 0; }
+  .admin-sider.is-collapsed .admin-sider-btn { margin-left: 0; }
+  .admin-shell.is-collapsed .admin-main { margin-left: var(--sider-w-collapsed); }
+
+  .admin-sider-mask {
+    position: fixed;
+    inset: 0;
+    z-index: 35;
+    background: rgba(0, 0, 0, 0.4);
+    border: 0;
+    padding: 0;
+  }
+
+  /* ---------- 移动端：侧栏改抽屉 ---------- */
+  @media (max-width: 991px) {
+    .admin-sider {
+      width: var(--sider-w);
+      transform: translateX(-100%);
+      box-shadow: var(--shadow-lg);
+    }
+    .admin-sider.is-open { transform: translateX(0); }
+    /* 抽屉态忽略折叠，始终展开显示文字 */
+    .admin-sider.is-collapsed { width: var(--sider-w); }
+    .admin-sider.is-collapsed .admin-brand-name,
+    .admin-sider.is-collapsed .admin-nav-text,
+    .admin-sider.is-collapsed .admin-nav-group-title,
+    .admin-sider.is-collapsed .admin-sider-foot-text { display: block; }
+    .admin-sider.is-collapsed .admin-nav-item { justify-content: flex-start; padding: 10px 13px; }
+    .admin-sider.is-collapsed .admin-nav-icon { width: 30px; height: 30px; border-radius: 9px; }
+    .admin-main,
+    .admin-shell.is-collapsed .admin-main { margin-left: 0; }
+    .admin-content { --content-gutter: 18px; padding: 20px var(--content-gutter) 28px; }
+    .admin-header { padding: 0 16px; }
+  }
 }
 
 @layer utilities {
@@ -427,4 +852,56 @@
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+/* ============================================================
+ * 设置页 tab 切换：与上游 admin.css 的 .ab-tabs / .ab-tab 对齐
+ * ------------------------------------------------------------
+ * 上游设置页是「同页 6 个 tab 切换」（site / features / profile /
+ * nav / footerNav / friends），Vue 后台的高级设置沿用同一套划分。
+ *
+ * 色值**直接取自 app/public/admin.css**，不复用本文件的
+ * --ink / --ink-muted / --border —— 那几个值与上游略有差异
+ * （如 --ink #1c1917 vs --ab-text #26201a），并排看能看出来。
+ * ============================================================ */
+:root {
+  --ab-text: #26201a;
+  --ab-muted: #877f72;
+  --ab-border: #e5ded2;
+  --ab-primary: var(--accent);
+}
+
+.dark {
+  --ab-text: #ece7df;
+  --ab-muted: #988d80;
+  --ab-border: #312b25;
+}
+
+.ab-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--ab-border);
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.ab-tab {
+  padding: 11px 15px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--ab-muted);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s;
+  margin-bottom: -1px;
+}
+
+.ab-tab:hover {
+  color: var(--ab-text);
+}
+
+.ab-tab.active {
+  color: var(--ab-primary);
+  border-bottom-color: var(--ab-primary);
+  font-weight: 600;
 }

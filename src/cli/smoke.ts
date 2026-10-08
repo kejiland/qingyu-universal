@@ -13,6 +13,7 @@ const SETUP_KEY = process.env.SETUP_KEY || '';
 
 let passed = 0;
 let failed = 0;
+let skipped = 0;
 const failures: string[] = [];
 
 function ok(name: string, condition: boolean, detail = ''): void {
@@ -24,6 +25,12 @@ function ok(name: string, condition: boolean, detail = ''): void {
     failures.push(`${name}${detail ? ` — ${detail}` : ''}`);
     console.log(`  \u2717 ${name}${detail ? ` — ${detail}` : ''}`);
   }
+}
+
+/** 环境不满足、无法验证（不是代码问题）：只提示，不计入失败 */
+function skip(name: string, detail = ''): void {
+  skipped++;
+  console.log(`  \u25CB ${name}${detail ? ` — ${detail}` : ''}`);
 }
 
 interface ApiResponse<T = Record<string, unknown>> {
@@ -68,12 +75,20 @@ ok('存储模式已上报', health.data.storage === 'local' || health.data.stora
 
 /* ---------- 2. 管理员初始化 ---------- */
 const setupHeaders: Record<string, string> = SETUP_KEY ? { 'X-Setup-Key': SETUP_KEY } : {};
-const setup = await api('/api/admin/setup', {
+const setup = await api<{ error?: string }>('/api/admin/setup', {
   method: 'POST',
   headers: setupHeaders,
   body: { password: 'Smoke-Test-Password-123' }
 });
-ok('管理员初始化（已初始化则跳过）', setup.status === 201 || setup.status === 409, `status=${setup.status}`);
+// 201 = 本次完成初始化；409 = 已初始化；403 = 服务端配了安装密钥而本次未提供
+// （此时无法区分「已初始化」与「密钥不匹配」，交给下面的登录断言把关：管理员不可用必然暴露）
+if (setup.status === 201 || setup.status === 409) {
+  ok('管理员初始化（已初始化则跳过）', true);
+} else if (setup.status === 403) {
+  skip('管理员初始化（服务端启用了安装密钥）', '未提供 SETUP_KEY，跳过初始化');
+} else {
+  ok('管理员初始化（已初始化则跳过）', false, `status=${setup.status}`);
+}
 
 /* ---------- 3. 登录 ---------- */
 const login = await api<{ token?: string }>('/api/admin/login', {
@@ -184,7 +199,7 @@ ok('站点备份可创建', backup.status === 200 || backup.status === 201, `sta
 const removed = await api(`/api/posts/${encodeURIComponent(POST_ID)}`, { method: 'DELETE', headers: auth });
 ok('删除文章成功', removed.status === 200 || removed.status === 204, `status=${removed.status}`);
 
-console.log(`\n结果：${passed} 项通过，${failed} 项失败`);
+console.log(`\n结果：${passed} 项通过，${failed} 项失败${skipped ? `，${skipped} 项跳过` : ''}`);
 if (failed > 0) {
   console.log('\n失败项：');
   for (const item of failures) console.log(`  · ${item}`);

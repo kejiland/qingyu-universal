@@ -9,6 +9,16 @@ interface ListField {
   mono?: boolean;
 }
 
+/** 导航项「出现位置」三态：与前台 app.js 的 isDiscoverNav 完全对齐
+ *  null → 不写 discover 字段，按内置规则（标签/历史/系列/热门 收进「发现」）
+ *  true → 即使在「发现」，也放进下拉
+ *  false → 即使是内置入口，也移出一级导航 */
+const DISCOVER_OPTIONS: { label: string; value: boolean | null; title: string }[] = [
+  { label: '跟随默认', value: null, title: '按内置规则：标签 / 历史 / 系列 / 热门 收进「发现」，其余留在一级导航' },
+  { label: '进「发现」', value: true, title: '放进「发现」下拉（自定义项也适用）' },
+  { label: '留一级', value: false, title: '移出「发现」，直接显示在一级导航（内置入口也适用）' }
+];
+
 const props = withDefaults(
   defineProps<{
     title: string;
@@ -21,6 +31,8 @@ const props = withDefaults(
     jsonHint?: string;
     resettable?: boolean;
     createItem?: () => Record<string, unknown>;
+    /** 为真时每行额外渲染「跟随默认 / 进发现 / 留一级」三态开关（用于顶部导航） */
+    showDiscover?: boolean;
   }>(),
   {
     hint: '',
@@ -33,7 +45,8 @@ const props = withDefaults(
     emptyText: '暂无内容，点击下方按钮添加。',
     jsonHint: '高级模式：直接编辑 JSON，点“应用 JSON”前会校验格式。',
     resettable: false,
-    createItem: () => ({ text: '', url: '/' })
+    createItem: () => ({ text: '', url: '/' }),
+    showDiscover: false
   }
 );
 
@@ -59,6 +72,25 @@ function commit(next: Record<string, unknown>[]): void {
 function setField(index: number, key: string, event: Event): void {
   const value = (event.target as HTMLInputElement).value;
   const next = props.modelValue.map((item, i) => (i === index ? { ...item, [key]: value } : item));
+  commit(next);
+}
+
+/** 读导航项的出现位置；未写过 discover 的项返回 null（= 跟随内置默认） */
+function discoverState(item: Record<string, unknown>): boolean | null {
+  if (item.discover === true) return true;
+  if (item.discover === false) return false;
+  return null;
+}
+
+/** 写导航项的出现位置；选「跟随默认」时删掉该字段，保持与前台判定一致 */
+function setDiscover(index: number, value: boolean | null): void {
+  const next = props.modelValue.map((item, i) => {
+    if (i !== index) return item;
+    const copy: Record<string, unknown> = { ...item };
+    if (value === null) delete copy.discover;
+    else copy.discover = value;
+    return copy;
+  });
   commit(next);
 }
 
@@ -212,16 +244,32 @@ function applyJson(): void {
               @dragstart="onDragStart(index)"
               @dragend="onDragEnd"
             />
-            <div class="grid min-w-0 flex-1 gap-2 sm:grid-cols-2">
-              <input
-                v-for="field in fields"
-                :key="field.key"
-                class="input"
-                :class="field.mono ? 'font-mono text-[12px]' : ''"
-                :value="String(row.item[field.key] ?? '')"
-                :placeholder="field.placeholder || ''"
-                @input="setField(index, field.key, $event)"
-              />
+            <div class="min-w-0 flex-1 space-y-2">
+              <div class="grid gap-2 sm:grid-cols-2">
+                <input
+                  v-for="field in fields"
+                  :key="field.key"
+                  class="input"
+                  :class="field.mono ? 'font-mono text-[12px]' : ''"
+                  :value="String(row.item[field.key] ?? '')"
+                  :placeholder="field.placeholder || ''"
+                  @input="setField(index, field.key, $event)"
+                />
+              </div>
+              <div v-if="showDiscover" class="flex flex-wrap items-center gap-1.5">
+                <span class="text-[12px] text-ink-muted">出现位置</span>
+                <button
+                  v-for="opt in DISCOVER_OPTIONS"
+                  :key="opt.label"
+                  type="button"
+                  class="btn btn-sm"
+                  :class="discoverState(row.item) === opt.value ? 'btn-primary' : 'btn-ghost'"
+                  :title="opt.title"
+                  @click="setDiscover(index, opt.value)"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
             </div>
             <div class="flex shrink-0 flex-wrap items-center justify-end gap-0.5">
               <button class="btn btn-sm btn-ghost btn-icon" type="button" title="上移" :disabled="index === 0" @click="move(index, -1)">

@@ -22,7 +22,9 @@ import type { AppConfig } from '../config.js';
 import type { AppDatabase } from '../types.js';
 import type { ZipEntry } from '../lib/zip.js';
 import { readChrome, wrapWithChrome } from './chrome.js';
+import { readBlogVersion } from './blog-config.js';
 import { injectAppContent, renderPostContent } from './post.js';
+import { toClientPost } from './post-payload.js';
 import { renderHomeContent } from './list.js';
 import {
   POPULAR_POSTS_SQL,
@@ -80,6 +82,11 @@ export interface StaticSiteResult {
 
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
+/** 把数据库行转成 app.js 期望的文章形态 —— 映射器与 /posts.min.js 共用，
+ *  避免「静态导出的 posts.min.js」与「服务端动态生成的 posts.min.js」不同形。 */
+export { toClientPost };
+
+/** 读 JSON（数组也接受，用于 static-export.json 清单）。 */
 function safeJson<T>(raw: unknown, fallback: T): T {
   if (typeof raw === 'string' && raw.trim()) {
     try {
@@ -90,34 +97,6 @@ function safeJson<T>(raw: unknown, fallback: T): T {
     }
   }
   return fallback;
-}
-
-/** 把数据库行转成 app.js 期望的文章形态（字段名/类型都对齐 normalizePost）。 */
-function toClientPost(row: StaticPostRow): Record<string, unknown> {
-  const isProtected = Boolean(row.protected);
-  const enc = isProtected ? safeJson<unknown>(row.enc, null) : null;
-  const seo = safeJson<Record<string, unknown>>(row.seo, {});
-
-  return {
-    id: str(row.id),
-    title: str(row.title),
-    date: str(row.date),
-    excerpt: str(row.excerpt),
-    cover: str(row.cover),
-    ogImage: str(row.og_image),
-    content: isProtected ? '' : str(row.content),
-    pinned: Boolean(row.pinned),
-    protected: isProtected,
-    enc,
-    category: str(row.category),
-    series: str(row.series),
-    author: str(row.author),
-    seriesOrder: Number(row.series_order) || 0,
-    status: 'published',
-    publishAt: null,
-    seo,
-    tags: safeJson<string[]>(row.tags, []).map((t) => str(t)).filter(Boolean)
-  };
 }
 
 /** 文章 id 可能是任意字符串，做成目录名时必须转义，否则会穿出目录层。 */
@@ -306,11 +285,17 @@ export async function buildStaticSite(deps: StaticSiteDeps): Promise<StaticSiteR
   const clientPosts = posts.map(toClientPost);
   files.push({ name: 'posts.min.js', text: `window.BLOG_POSTS = ${JSON.stringify(clientPosts)};` });
 
-  const footerCfg = await readSettingJson<Record<string, unknown>>(db, 'footer', {});
-  const siteCfg = await readSettingJson<Record<string, unknown>>(db, 'site', {});
+  // `[[双链]]` 解析索引：静态导出里文章全量在手，直接复用，不必再查一次库
+  const wikiPosts = posts.map((p) => ({ id: String(p.id), title: str(p.title) }));
+
+  const siteCfg = await readSettingJson<Record<string, unknown>>(db, 'site_info', {});
   // 纯静态模式：前端不再请求任何接口，数据全部来自 posts.min.js。
   // 注意导航 / 页脚菜单 / 功能开关只从接口取，静态站里会回到默认值——
   // 这与原版静态导出是同一个限制，不在这里另开一套前端分支。
+  //
+  // 页脚必须与导出页面的 SSR 用同一份数据（chrome 已按 app.js 的规则合成），
+  // 否则导出站的 HTML 页脚会带着 config.js 的声明/邮箱/友链，
+  // 而 SPA 接管后（用的是这里生成的 config.min.js）又变成空的，前后不一致。
   const staticConfig = {
     mode: 'static',
     apiBase: '',
@@ -323,9 +308,14 @@ export async function buildStaticSite(deps: StaticSiteDeps): Promise<StaticSiteR
       desc: str(siteCfg.desc) || site.description
     },
     footer: {
-      copyrightName: str(footerCfg.copyrightName),
-      startYear: str(footerCfg.startYear),
-      icp: str(footerCfg.icp)
+      text: chrome.footer.text,
+      icp: chrome.footer.icp,
+      decl: chrome.footer.decl,
+      email: chrome.footer.email,
+      startYear: chrome.footer.startYear || 2019,
+      copyrightName: chrome.footer.copyrightName,
+      contact: chrome.footerNav.map((it) => ({ text: it.text, url: it.url })),
+      links: chrome.footer.friends.map((it) => ({ text: it.text, url: it.url }))
     },
     ads: {}
   };
@@ -339,7 +329,16 @@ export async function buildStaticSite(deps: StaticSiteDeps): Promise<StaticSiteR
     name: 'index.html',
     text: finalize(
       injectHead(
-        injectAppContent(shell, wrapWithChrome(chrome, renderHomeContent(posts.slice(0, 10), site), '/')),
+        injectAppContent(
+          shell,
+          // 导出站的 config.min.js 里 pageSize 固定为 0（不分页、全量渲染），
+          // 因此首页 SSR 也要按 pageSize:0 渲染，否则两边列表条数对不上。
+          wrapWithChrome(
+            chrome,
+            renderHomeContent(posts, site, { ...chrome, pageSize: 0 }, {}),
+            '/'
+          )
+        ),
         buildHomeMeta(site, siteUrl),
         renderHeadBlock(buildHomeMeta(site, siteUrl))
       ),
@@ -350,7 +349,7 @@ export async function buildStaticSite(deps: StaticSiteDeps): Promise<StaticSiteR
   /* 页面：文章页 */
   for (const post of posts) {
     const meta = buildArticleMeta(post, site, siteUrl);
-    const content = renderPostContent(post, site);
+    const content = renderPostContent(post, site, wikiPosts);
     const body = content ? injectAppContent(shell, wrapWithChrome(chrome, content, '/posts')) : shell;
     files.push({
       name: `posts/${postDir(str(post.id))}/index.html`,
@@ -414,14 +413,31 @@ export async function buildStaticSite(deps: StaticSiteDeps): Promise<StaticSiteR
     };
   };
 
-  const aboutCfg = await readSettingJson<Record<string, unknown>>(db, 'site', {});
-  const linksCfg = await readSettingJson<Record<string, unknown>>(db, 'footer', {});
+  const aboutCfg = await readSettingJson<Record<string, unknown>>(db, 'site_info', {});
+  const profileCfg = await readSettingJson<{ name?: string; bio?: string; avatar?: string }>(db, 'profile', {});
+  // 导出站是纯静态（config.mode='static'），对应 app.js 的 _cloudOn() === false → 「静态模式」。
+  // 版本号沿用线上的 index.html ?v=，保证导出站版本行与线上一致（铁律 1）。
+  const exportVersion = await readBlogVersion(config.publicDir);
+  // 友链在 `friend_links` 键下（与 app.js 的 cfg.friendLinks 一致），不是 footer.links
+  const friendLinksCfg = await readSettingJson<Record<string, unknown> | unknown[]>(db, 'friend_links', []);
   const popularRows = await db.all<StaticPostRow>(POPULAR_POSTS_SQL);
 
   files.push(
-    await fixedPage('about', '关于', async () => renderAboutContent(str(aboutCfg.about), site)),
-    await fixedPage('links', '友链', async () => renderLinksContent(toFriendLinks(linksCfg.links))),
-    await fixedPage('popular', '热门', async () => renderPopularContent(popularRows))
+    await fixedPage('about', '关于', async () =>
+      renderAboutContent({
+        markdown: str(aboutCfg.about),
+        site,
+        posts,
+        profile: profileCfg,
+        blogVersion: exportVersion,
+        cloudMode: false,
+        wikiPosts
+      })
+    ),
+    await fixedPage('links', '友情链接', async () =>
+      renderLinksContent(toFriendLinks(Array.isArray(friendLinksCfg) ? friendLinksCfg : friendLinksCfg.links))
+    ),
+    await fixedPage('popular', '热门文章', async () => renderPopularContent(popularRows))
   );
 
   /* 页面：只有前端才能渲染的路由 —— 保留启动动画，让 app.min.js 立刻接管 */

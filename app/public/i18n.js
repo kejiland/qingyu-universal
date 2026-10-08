@@ -19,7 +19,7 @@
 
   var DEFAULT_LANG = 'zh-CN';
   /* 语言 JSON 缓存版本：修改 locales/*.json 后递增，强制浏览器拉新文件 */
-  var I18N_VER = '9';
+  var I18N_VER = '14';
   var _locale = DEFAULT_LANG;
   var _translations = {};
 
@@ -51,6 +51,7 @@
     "categories.title": "分类",
     "categories.empty": "暂无分类",
     "nav.archive": "归档",
+    "nav.explore": "发现",
     "nav.about": "关于",
     "nav.admin": "后台",
     "nav.toggle": "展开导航",
@@ -85,16 +86,17 @@
     "search.placeholder": "搜索文章…",
     "search.close": "关闭搜索",
     "home.latest": "最新发布",
-     "home.stats.title": "站点概览",
-     "home.stats.posts": "文章",
-     "home.stats.categories": "分类",
-     "home.stats.tags": "标签",
-     "home.stats.words": "总字数",
-     "home.stats.updated": "最近更新",
-     "home.stats.none": "还没有可统计的内容",
+    "home.stats.title": "站点概览",
+    "home.stats.posts": "文章",
+    "home.stats.categories": "分类",
+    "home.stats.tags": "标签",
+    "home.stats.words": "总字数",
+    "home.stats.updated": "最近更新",
+    "home.stats.none": "还没有可统计的内容",
     "home.noPosts": "这里还没有文章。",
     "home.loadingCloud": "正在拉取文章…",
     "home.noPostsCloud": "你还未发布文章",
+    "home.noPostsFiltered": "这里暂时还没有文章",
     "home.loadFail": "加载文章列表失败",
     "home.categoryLabel": "标签",
     "featured.title": "精选文章",
@@ -317,6 +319,22 @@
     "admin.changeHint": "（请登录后立即修改）",
     "admin.sidebar.overview": "概览",
     "admin.sidebar.dashboard": "仪表盘",
+    "admin.extra.newPostDesc": "支持 Markdown、AI 助手与定时发布",
+    "admin.extra.editPostDesc": "修改正文、标签与发布设置",
+    "admin.extra.pendingDesc": "优先处理访客的新留言",
+    "admin.extra.closeMenu": "关闭菜单",
+    "admin.extra.loggedOut": "已退出登录",
+    "admin.extra.breadcrumb": "面包屑",
+    "admin.extra.statsDesc": "流量趋势与来源分布",
+    "admin.extra.advancedSettings": "高级设置",
+    "admin.extra.advancedSettingsDesc": "导航、页脚、公告、功能开关、评论规则与广告位",
+    "admin.extra.notMigrated": "尚未迁移",
+    "admin.extra.stats": "访问统计",
+    "admin.extra.guide": "新手上路",
+    "admin.extra.themeLight": "切换到浅色",
+    "admin.extra.themeDark": "切换到深色",
+    "admin.extra.siderExpand": "展开侧栏",
+    "admin.extra.siderCollapse": "收起侧栏",
     "admin.sidebar.postManage": "文章管理",
     "admin.sidebar.allPosts": "全部文章",
     "admin.sidebar.analytics": "文章数据",
@@ -613,6 +631,14 @@
     "admin.staticExport.building": "正在生成静态站…",
     "admin.staticExport.progress": "正在打包资源 {done}/{total}",
     "admin.staticExport.done": "已导出 {count} 篇文章（{files} 个文件）",
+    "admin.staticExport.cancelled": "已取消导出，未保存文件",
+    "admin.settings.featHomeTags": "首页显示的标签",
+    "admin.settings.featHomeTagsHint": "文章多了标签会堆积，这里勾选只希望在首页出现的标签；一个都不勾 = 全部显示。点标签名可切换选中，数字是该标签的文章数。",
+    "admin.settings.featHomeTagAdd": "标签名（可手动添加还没有文章使用的标签）",
+    "admin.settings.featHomeTagAddBtn": "添加",
+    "admin.settings.featHomeTagClear": "清空选择",
+    "admin.settings.featHomeTagsEmpty": "还没有任何标签，先去文章里添加标签吧",
+    "admin.settings.featHomeTagsLoading": "正在统计标签…",
     "admin.staticExport.fail": "导出静态站失败：",
     "admin.staticExport.readme": "轻语博客 · 静态站导出说明\n\n本 ZIP 是可直接部署的纯静态站点：\n· 每个路由都有独立 index.html，无需配置 SPA 重写规则\n· 只包含「已发布」文章（草稿 / 定时文章不会导出）\n· 数据在 posts.min.js，配置在 config.min.js（已切换为 static 模式）\n· 不包含后台管理功能（admin 相关文件未打包）\n· 加密文章保存的是密文，需要在页面上输入密码解锁\n· 图片/媒体若在 R2 等对象存储，本 ZIP 不含媒体文件本体\n\n使用方法：\n1. 解压到一个空目录\n2. 整个目录上传到任意静态托管（Netlify / Vercel / GitHub Pages / 对象存储 / Nginx…）\n3. 若部署在子目录，请保持目录结构不变（页面内资源链接已用相对路径）\n\n站点：{site}\n已发布文章数：{count}",
     "admin.transfer.noSelection": "请先选择文章",
@@ -699,10 +725,10 @@
     "admin.settings.featDiag": "诊断与上报",
     "admin.settings.featRich": "内容渲染",
     "admin.settings.featRichContent": "图表 / 公式渲染",
-    "admin.settings.featRichContentHint": "开启后，正文里的 ```mermaid 代码块会渲染成图表、$…$ / $$…$$ 会渲染成数学公式；仅在页面真的用到时才加载对应库，普通页面零额外请求",
-    "admin.settings.featNavigation": "顶部导航",
-    "admin.settings.featNavExtras": "显示新增导航项",
-    "admin.settings.featNavExtrasHint": "开启后显示分类、历史、系列、热门等新增默认导航项；关闭只隐藏这些新增项，不影响后台自定义链接",
+  "admin.settings.featRichContentHint": "开启后，正文里的 Mermaid 代码块会渲染成图表，数学公式语法会渲染成公式；仅在页面真的用到时才加载对应库，普通页面零额外请求",
+  "admin.settings.featNavigation": "顶部导航",
+  "admin.settings.featNavExtras": "显示新增导航项",
+  "admin.settings.featNavExtrasHint": "开启后显示分类、历史、系列、热门等新增默认导航项；关闭只隐藏这些新增项，不影响后台自定义链接",
     "admin.settings.featErrReport": "前端错误上报",
     "admin.settings.featErrReportHint": "开启后，访客浏览器里的运行时异常会匿名上报到「错误日志」，便于及时发现功能异常（不含个人隐私）",
     "admin.settings.featAntiSpam": "评论反垃圾",
@@ -994,6 +1020,11 @@
     "admin.settings.navEmpty": "暂无导航项，点击下方按钮添加菜单。",
     "admin.settings.newMenu": "新菜单",
     "admin.settings.subMenu": "子菜单",
+    "admin.settings.navDragHint": "拖动左侧手柄可自由调整顺序；标为「发现 · 二级」的项会出现在前台「发现」下拉里，点层级按钮可把自定义项也放进去。",
+    "admin.settings.navDragHandle": "拖动排序",
+    "admin.settings.navDiscoverBadge": "发现 · 二级",
+    "admin.settings.navDiscoverToggle": "放入 / 移出「发现」下拉",
+    "admin.settings.navDiscoverRemove": "移出「发现」下拉",
     "admin.settings.addMenuItem": "添加菜单项",
     "admin.settings.resetDefault": "重置为默认导航",
     "toast.encryptedCloud": "已加密（云端已更新）",
@@ -1083,15 +1114,22 @@
     var base = _baseDir();
     var url = base + '/locales/' + lang + '.json?v=' + I18N_VER;
     var loaded = false;
+    // 超时兜底：网络/CDN 挂起时（弱网、Workers 冷启动）最多等 LOCALE_TIMEOUT_MS，
+    // 超时立刻回退内嵌字典，绝不让首屏卡在这里
+    var LOCALE_TIMEOUT_MS = 6000;
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, LOCALE_TIMEOUT_MS) : null;
     try {
-      var resp = await fetch(url);
+      var resp = await fetch(url, ctrl ? { signal: ctrl.signal } : undefined);
       if (resp.ok) {
         _translations = await resp.json();
         loaded = true;
       }
     } catch (e) {}
-    // fetch 失败时回退 XMLHttpRequest
-    if (!loaded) {
+    if (timer) clearTimeout(timer);
+    // fetch 失败时回退 XMLHttpRequest：仅用于 file:// 直开（fetch/XHR 被拦截），
+    // 网络环境不再用同步 XHR 兜底——同步请求遇到挂起的连接会冻结整个页面
+    if (!loaded && typeof location !== 'undefined' && location.protocol === 'file:') {
       try {
         var xhr = new XMLHttpRequest();
         xhr.open('GET', url, false);

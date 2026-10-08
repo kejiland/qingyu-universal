@@ -213,6 +213,46 @@ function zipStamp(d = new Date()): string {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
 }
 
+/**
+ * 取「非 JSON 的二进制响应」（静态站 ZIP、备份 JSON 附件）。
+ * 401 时同样走会话失效流程，保证下载失败也能正确踢回登录页。
+ */
+async function fetchBinary(path: string, fallbackName: string): Promise<{ name: string; blob: Blob }> {
+  const headers = new Headers();
+  const token = session.token;
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const response = await fetch(path, { headers });
+  if (!response.ok) {
+    let message = `下载失败（HTTP ${response.status}）`;
+    try {
+      const data = await response.json();
+      if (data && typeof data.error === 'string') message = data.error;
+    } catch {
+      /* 非 JSON 错误体，保留默认文案 */
+    }
+    if (response.status === 401) {
+      session.clear();
+      onUnauthorized?.();
+    }
+    throw new ApiError(message, response.status);
+  }
+  const disposition = response.headers.get('content-disposition') || '';
+  const matched = /filename="?([^";]+)"?/.exec(disposition);
+  return { name: matched?.[1] || fallbackName, blob: await response.blob() };
+}
+
+/** 触发浏览器下载，并回收临时对象地址。 */
+export function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
 
 /* ---------- 接口 ---------- */
@@ -290,13 +330,25 @@ export const api = {
     ),
 
   /* 日志 */
-  listAudit: (limit = 200) => request<{ ok: true; logs: AuditLogItem[]; counts: Record<string, number> }>(`/api/admin/audit?limit=${limit}`),
+  listAudit: (opts: { limit?: number; action?: string } = {}) => {
+    const params = new URLSearchParams();
+    params.set('limit', String(opts.limit ?? 200));
+    if (opts.action) params.set('action', opts.action);
+    return request<{ ok: true; logs: AuditLogItem[]; counts: Record<string, number> }>(
+      `/api/admin/audit?${params.toString()}`
+    );
+  },
+  clearAudit: () => request<{ ok: true }>('/api/admin/audit', { method: 'DELETE' }),
   listErrors: () => request<{ ok: true; total: number; sumHits: number; errors: ErrorLogItem[] }>('/api/admin/errors'),
+  clearErrors: () => request<{ ok: true }>('/api/admin/errors', { method: 'DELETE' }),
 
   /* 备份 */
   listBackups: () => request<{ ok: true; configured: boolean; backups: BackupItem[] }>('/api/admin/backups'),
   createBackup: () => request<{ ok: true; backup: BackupItem }>('/api/admin/backups', { method: 'POST' }),
   deleteBackup: (id: string) => request<{ ok: true }>(`/api/admin/backups/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /** 下载单份备份：服务端以 attachment 返回 JSON。 */
+  downloadBackup: (id: string): Promise<{ name: string; blob: Blob }> =>
+    fetchBinary(`/api/admin/backups/${encodeURIComponent(id)}`, `qingyu-backup-${id}.json`),
   restoreBackup: (id: string) =>
     request<{ ok: true; result: Record<string, unknown> }>(`/api/admin/backups/${encodeURIComponent(id)}/restore`, { method: 'POST' }),
 
@@ -333,6 +385,14 @@ export const api = {
   aiPing: () => request<{ ok: true }>('/api/ai/ping'),
   aiAssist: (action: 'title' | 'tags' | 'polish' | 'translate', text: string, lang: string) =>
     request<AiAssistResponse>('/api/ai/assist', { method: 'POST', ...json({ action, text, lang }) }),
+  /** 评论 AI：summarize 汇总最近评论要点（服务端缓存 1h）；screen 单条垃圾判定 */
+  aiSummarizeComments: () =>
+    request<{ ok: true; summary: string; cached?: boolean; empty?: boolean }>('/api/ai/comments', {
+      method: 'POST',
+      ...json({ action: 'summarize' })
+    }),
+  aiScreenComment: (text: string) =>
+    request<{ ok: true; spam: boolean; reason: string }>('/api/ai/comments', { method: 'POST', ...json({ action: 'screen', text }) }),
 
   /* 修订历史 */
   listRevisions: (id: string) =>
@@ -359,32 +419,8 @@ export const api = {
     request<PostAnalyticsResponse>(`/api/admin/post-analytics?range=${range}`),
 
   /* 静态站导出（兼容接口，schema 尚未登记）：返回 ZIP 二进制，不是 JSON */
-  exportStaticSite: async (): Promise<{ name: string; blob: Blob }> => {
-    const headers = new Headers();
-    const token = session.token;
-    if (token) headers.set('Authorization', `Bearer ${token}`);
-    const response = await fetch('/api/admin/export-static', { headers });
-    if (!response.ok) {
-      let message = `导出失败（HTTP ${response.status}）`;
-      try {
-        const data = await response.json();
-        if (data && typeof data.error === 'string') message = data.error;
-      } catch {
-        /* 非 JSON 错误体，保留默认文案 */
-      }
-      if (response.status === 401) {
-        session.clear();
-        onUnauthorized?.();
-      }
-      throw new ApiError(message, response.status);
-    }
-    const disposition = response.headers.get('content-disposition') || '';
-    const matched = /filename="?([^";]+)"?/.exec(disposition);
-    return {
-      name: matched?.[1] || `qingyu-static-site-${zipStamp()}.zip`,
-      blob: await response.blob()
-    };
-  },
+  exportStaticSite: (): Promise<{ name: string; blob: Blob }> =>
+    fetchBinary('/api/admin/export-static', `qingyu-static-site-${zipStamp()}.zip`),
 
   /* 设置 */
   getSettings: () => request<{ ok: true; settings: Record<string, string> }>('/api/settings'),

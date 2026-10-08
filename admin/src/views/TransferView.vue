@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import {
-  FileDown, FileUp, Loader2, Search, FileText, Inbox, UploadCloud, PackageOpen, FileJson, Globe
+  FileDown, FileUp, Loader2, Search, FileText, Inbox, UploadCloud, PackageOpen, FileJson, Globe, FolderOpen
 } from '@lucide/vue';
 import { api, ApiError, type PostSummary } from '../lib/api';
 import { postStatusMeta, formatDate } from '../lib/format';
@@ -20,7 +20,9 @@ const keyword = ref('');
 const busy = ref(false);
 const statusText = ref('');
 const fileInput = ref<HTMLInputElement | null>(null);
+const folderInput = ref<HTMLInputElement | null>(null);
 const dragging = ref(false);
+const selected = ref<Set<string>>(new Set());
 
 const filtered = computed(() => {
   const q = keyword.value.trim().toLowerCase();
@@ -30,12 +32,33 @@ const filtered = computed(() => {
   );
 });
 
+const selectedPosts = computed(() => posts.value.filter((post) => selected.value.has(post.id)));
+const allSelected = computed(() => filtered.value.length > 0 && filtered.value.every((post) => selected.value.has(post.id)));
+const someSelected = computed(() => selected.value.size > 0 && !allSelected.value);
+
+function toggleSelect(id: string, checked: boolean): void {
+  const next = new Set(selected.value);
+  if (checked) next.add(id);
+  else next.delete(id);
+  selected.value = next;
+}
+
+function toggleAll(checked: boolean): void {
+  const next = new Set(selected.value);
+  filtered.value.forEach((post) => {
+    if (checked) next.add(post.id);
+    else next.delete(post.id);
+  });
+  selected.value = next;
+}
+
 async function load(): Promise<void> {
   loading.value = true;
   try {
     // full=1：一次拿回草稿 + 正文，避免导出时逐篇请求
     const data = await api.listPosts({ full: true });
     posts.value = (data.posts ?? []) as FullPost[];
+    selected.value = new Set();
   } catch (e) {
     toast.error(e instanceof ApiError ? e.message : '加载文章失败');
   } finally {
@@ -96,6 +119,26 @@ async function exportStaticSite(): Promise<void> {
     const { name, blob } = await api.exportStaticSite();
     downloadBlob(name, blob);
     toast.success('静态站已导出，上传 ZIP 里的全部文件即可');
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : '导出失败');
+  } finally {
+    busy.value = false;
+    statusText.value = '';
+  }
+}
+
+/** 只导出勾选的文章为 Markdown ZIP。 */
+async function exportSelected(): Promise<void> {
+  if (!selectedPosts.value.length) {
+    toast.error('请先勾选要导出的文章');
+    return;
+  }
+  busy.value = true;
+  statusText.value = '正在打包选中文章…';
+  try {
+    const list = asTransfer(selectedPosts.value);
+    downloadBlob(`qingyu-posts-${stamp()}.zip`, zipForPosts(list));
+    toast.success(`已导出 ${list.length} 篇文章`);
   } catch (e) {
     toast.error(e instanceof ApiError ? e.message : '导出失败');
   } finally {
@@ -196,10 +239,17 @@ async function importFiles(files: FileList | null | undefined): Promise<void> {
     busy.value = false;
     statusText.value = '';
     if (fileInput.value) fileInput.value.value = '';
+    if (folderInput.value) folderInput.value.value = '';
   }
 }
 
 function pick(files: FileList | null | undefined): void {
+  if (!files?.length) return;
+  void importFiles(files);
+}
+
+/** 文件夹选择：webkitdirectory 会递归带上子目录里的文件。 */
+function pickFolder(files: FileList | null | undefined): void {
   if (!files?.length) return;
   void importFiles(files);
 }
@@ -286,6 +336,22 @@ onMounted(load);
           <p class="text-[12px] text-ink-muted mt-1">.md / .markdown / .json，可多选</p>
         </div>
 
+        <div class="flex items-center gap-2 mt-3">
+          <button class="btn btn-ghost btn-sm shrink-0" @click="folderInput?.click()">
+            <FolderOpen :size="14" /> 导入文件夹
+          </button>
+          <span class="hint !mt-0">选择整个目录，会递归读取其中的 .md / .json</span>
+        </div>
+        <input
+          ref="folderInput"
+          type="file"
+          accept=".md,.markdown,.json"
+          multiple
+          webkitdirectory
+          class="hidden"
+          @change="pickFolder(($event.target as HTMLInputElement).files)"
+        />
+
         <p class="hint">
           导入时按文章 ID 匹配：ID 已存在则覆盖，不存在则新建；批次内重复 ID 会自动加序号。
         </p>
@@ -302,6 +368,24 @@ onMounted(load);
     <div v-if="posts.length > 0" class="relative mb-4">
       <Search :size="16" class="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted pointer-events-none" />
       <input v-model="keyword" class="input pl-9" type="search" placeholder="搜索标题或标签…" />
+    </div>
+
+    <!-- 选择工具条 -->
+    <div v-if="!loading && posts.length > 0" class="flex items-center gap-3 mb-3 flex-wrap">
+      <label class="flex items-center gap-2 text-[13px] cursor-pointer select-none">
+        <input
+          type="checkbox"
+          class="accent-[var(--accent)] size-4"
+          :checked="allSelected"
+          :indeterminate.prop="someSelected"
+          @change="toggleAll(($event.target as HTMLInputElement).checked)"
+        />
+        全选
+      </label>
+      <span class="text-[13px] text-ink-muted tabular-nums">已选 {{ selected.size }} 篇</span>
+      <button class="btn btn-sm btn-primary ml-auto shrink-0" :disabled="!selected.size || busy" @click="exportSelected">
+        <PackageOpen :size="14" /> 导出选中
+      </button>
     </div>
 
     <!-- 骨架 -->
@@ -323,6 +407,13 @@ onMounted(load);
     <!-- 文章列表 -->
     <div v-else class="card divide-y divide-line overflow-hidden">
       <div v-for="post in filtered" :key="post.id" class="flex items-center gap-3 px-4 py-3">
+        <input
+          type="checkbox"
+          class="accent-[var(--accent)] size-4 shrink-0"
+          :checked="selected.has(post.id)"
+          @change="toggleSelect(post.id, ($event.target as HTMLInputElement).checked)"
+        />
+
         <span class="grid place-items-center size-9 rounded-lg bg-surface-2 text-ink-muted shrink-0">
           <FileText :size="16" />
         </span>

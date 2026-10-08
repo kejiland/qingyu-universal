@@ -41,6 +41,22 @@ export function downloadBlob(name: string, blob: Blob): void {
   saveBlob(name, blob);
 }
 
+/**
+ * 生成 CSV 文本：逐格加双引号并转义内部引号（RFC 4180），
+ * 前置 UTF-8 BOM，Excel 打开中文才不乱码。首行由调用方给出表头。
+ */
+export function toCsv(rows: Array<Array<string | number | null | undefined>>): string {
+  const body = rows
+    .map((row) => row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+  return `\ufeff${body}`;
+}
+
+/** 导出 CSV 文件（BOM + RFC 4180 转义）。审计与订阅者共用。 */
+export function downloadCsv(name: string, rows: Array<Array<string | number | null | undefined>>): void {
+  downloadText(name, toCsv(rows), 'text/csv;charset=utf-8');
+}
+
 /** 用于文件名的时间戳，如 20261007-1530。 */
 export function stamp(): string {
   const now = new Date();

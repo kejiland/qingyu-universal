@@ -103,6 +103,13 @@ const EnvSchema = z.object({
   AI_MODEL: z.string().trim().default(''),
   BLOG_AI_ENABLED: z.string().trim().default(''),
   BLOG_AI_PUBLIC: z.string().trim().default(''),
+  /* 单次模型请求超时（毫秒）。上游 Workers AI 没有这个概念；
+   * 自托管接第三方网关时，慢网关会撞上适配器默认的 60s 上限而报 502，
+   * 所以这里开放配置。 */
+  AI_TIMEOUT_MS: z.coerce.number().int().positive().max(600_000).default(60_000),
+  /* 失败后的额外重试次数（不含首次）。第三方网关会间歇性失败，
+   * 重试一次就能救回大部分；0 = 不重试。 */
+  AI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(1),
 
   /* 其它 */
   COMMENT_BLOCKLIST: z.string().default(''),
@@ -163,7 +170,7 @@ export interface AppConfig {
     readonly from: string;
     readonly replyTo: string;
   };
-  readonly ai: { baseUrl: string; apiKey: string; model: string };
+  readonly ai: { baseUrl: string; apiKey: string; model: string; timeoutMs: number };
   readonly admin: { setupKey: string; writeToken: string; email: string };
   readonly flags: { aiEnabled: string; aiPublic: string };
   readonly extra: { commentBlocklist: string };
@@ -267,7 +274,13 @@ export function loadConfig(): AppConfig {
       from: env.BLOG_MAIL_FROM,
       replyTo: env.BLOG_MAIL_REPLY_TO
     },
-    ai: { baseUrl: normalizeBaseUrl(env.AI_BASE_URL), apiKey: env.AI_API_KEY, model: env.AI_MODEL },
+    ai: {
+      baseUrl: normalizeBaseUrl(env.AI_BASE_URL),
+      apiKey: env.AI_API_KEY,
+      model: env.AI_MODEL,
+      timeoutMs: env.AI_TIMEOUT_MS,
+      maxRetries: env.AI_MAX_RETRIES
+    },
     admin: {
       setupKey: env.BLOG_ADMIN_SETUP_KEY,
       writeToken: env.BLOG_WRITE_TOKEN,

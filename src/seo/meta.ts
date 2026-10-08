@@ -12,6 +12,8 @@
  *
  * 对应上游：app/public/app.js → updateSEO() / _setMeta() / _setOG() / _setJsonLd()
  * ============================================================ */
+import { PUBLIC_DIR } from '../config.js';
+import { readBlogConfig } from '../ssr/blog-config.js';
 import type { AppDatabase } from '../types.js';
 
 /* ---------- 常量（与 app/public/locales/zh-CN.json 的默认值保持一致） ---------- */
@@ -97,10 +99,17 @@ export interface SiteIdentity {
 
 /**
  * 读取站点身份。回退顺序与前端 getSiteName() / getSiteAuthor() 一致：
- *   name   : settings.site.name → settings.footer.copyrightName → i18n 默认
- *   author : settings.profile.name → footer.copyrightName → name
+ *   name   : site_info.name → site_info.copyright → config.js footer.copyrightName → 默认
+ *   author : profile.name   → 同上的版权署名 → name
+ *
+ * 注意 copyrightName **不是** site_settings 的键：app.js 的 `cfg.footer` 取自
+ * `window.BLOG_CONFIG`（静态 config.js），后台保存的 site_settings 只把
+ * `site_info.copyright` 叠加进去。
  */
-export async function readSiteIdentity(db: AppDatabase): Promise<SiteIdentity> {
+export async function readSiteIdentity(
+  db: AppDatabase,
+  publicDir: string = PUBLIC_DIR
+): Promise<SiteIdentity> {
   let rows: Array<{ k: string; v: string }> = [];
   try {
     rows = await db.all<{ k: string; v: string }>('SELECT k, v FROM site_settings');
@@ -108,11 +117,16 @@ export async function readSiteIdentity(db: AppDatabase): Promise<SiteIdentity> {
     rows = [];
   }
   const map = new Map(rows.map((row) => [row.k, row.v]));
-  const site = safeJson(map.get('site'), {} as Record<string, unknown>);
-  const footer = safeJson(map.get('footer'), {} as Record<string, unknown>);
+  // 站点信息存在 `site_info` 键下（前台 app.js:1026 读的也是这个键）。
+  // 早期这里误写成 `site`，导致站点名称/简介/头像静默回落默认值。
+  const site = safeJson(map.get('site_info'), {} as Record<string, unknown>);
   const profile = safeJson(map.get('profile'), {} as Record<string, unknown>);
+  const blog = await readBlogConfig(publicDir);
+  const cfgFooter = blog.footer && typeof blog.footer === 'object' ? blog.footer : {};
 
-  const copyrightName = str((footer as Record<string, unknown>).copyrightName);
+  const cfgCopyrightName =
+    typeof cfgFooter.copyrightName === 'string' ? cfgFooter.copyrightName.trim() : '';
+  const copyrightName = str(site.copyright) || cfgCopyrightName;
   const name = str(site.name) || copyrightName || DEFAULT_SITE_NAME;
 
   return {
@@ -134,10 +148,15 @@ export interface PostRow {
   cover?: string | null;
   category?: string | null;
   series?: string | null;
+  /** 文章作者（app.js renderPost 的 meta-author 用它，缺省时不渲染作者段） */
+  author?: string | null;
+  /** 系列内序号（seriesSort 用它排序） */
+  series_order?: number | null;
   og_image?: string | null;
   tags?: string | null;
   seo?: string | null;
   status?: string | null;
+  publish_at?: string | null;
   protected?: number | null;
   pinned?: number | null;
   updated_at?: string | null;

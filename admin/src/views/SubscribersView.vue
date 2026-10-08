@@ -1,19 +1,26 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { Loader2, Trash2, Send, Users, Inbox, Tags, X, Check } from '@lucide/vue';
+import { Loader2, RefreshCw, Download, Trash2, Send, Users, Inbox, Tags, X, Check } from '@lucide/vue';
 import { api, ApiError, type components } from '../lib/api';
 import { formatDateTime } from '../lib/format';
+import { downloadCsv, stamp } from '../lib/transfer';
 import { toast } from '../lib/toast';
+import PaginationBar from '../components/ui/PaginationBar.vue';
 
 type Sub = components['schemas']['SubscriberItem'];
+
+const PER_PAGE = 20;
 
 const items = ref<Sub[]>([]);
 const counts = ref({ total: 0, active: 0, pending: 0, unsubscribed: 0 });
 const groups = ref<Array<{ name: string; count: number }>>([]);
 const enabled = ref(false);
 const loading = ref(true);
+const refreshing = ref(false);
 const filter = ref<'all' | 'active' | 'pending' | 'unsubscribed'>('all');
 const groupFilter = ref('');
+const keyword = ref('');
+const page = ref(1);
 const subject = ref('');
 const body = ref('');
 const bcGroups = ref<string[]>([]);
@@ -28,9 +35,21 @@ const visible = computed(() =>
   items.value.filter((s) => {
     if (filter.value !== 'all' && s.status !== filter.value) return false;
     if (groupFilter.value && !(s.groups ?? []).includes(groupFilter.value)) return false;
+    const q = keyword.value.trim().toLowerCase();
+    if (q) {
+      const hay = `${s.email} ${(s.groups ?? []).join(' ')}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
     return true;
   })
 );
+
+const totalPages = computed(() => Math.max(1, Math.ceil(visible.value.length / PER_PAGE)));
+
+const pageItems = computed(() => {
+  const current = Math.min(page.value, totalPages.value);
+  return visible.value.slice((current - 1) * PER_PAGE, current * PER_PAGE);
+});
 
 const statusMeta: Record<string, { label: string; badge: string }> = {
   active: { label: '已确认', badge: 'badge-success' },
@@ -48,8 +67,9 @@ function recomputeGroups(): void {
   if (groupFilter.value && !map.has(groupFilter.value)) groupFilter.value = '';
 }
 
-async function load(): Promise<void> {
-  loading.value = true;
+async function load(showSpinner = true): Promise<void> {
+  if (showSpinner) loading.value = true;
+  else refreshing.value = true;
   try {
     const data = await api.listSubscribers();
     items.value = data.subscribers ?? [];
@@ -61,7 +81,18 @@ async function load(): Promise<void> {
     toast.error(e instanceof ApiError ? e.message : '加载订阅者失败');
   } finally {
     loading.value = false;
+    refreshing.value = false;
   }
+}
+
+/** 导出当前筛选结果为 CSV（列：email, status, created_at）。 */
+function exportCsv(): void {
+  const rows: Array<Array<string | number>> = [['email', 'status', 'created_at']];
+  visible.value.forEach((s) => {
+    rows.push([s.email, s.status, s.created_at ? new Date(Number(s.created_at)).toISOString() : '']);
+  });
+  downloadCsv(`subscribers-${stamp()}.csv`, rows);
+  toast.success(`已导出 ${visible.value.length} 位订阅者`);
 }
 
 async function remove(sub: Sub): Promise<void> {
@@ -158,7 +189,7 @@ onMounted(load);
         :key="tab[0]"
         class="card p-4 text-left transition-colors"
         :class="filter === tab[0] ? 'border-accent/50 bg-accent-soft' : 'hover:border-line-strong'"
-        @click="filter = tab[0]"
+        @click="filter = tab[0]; page = 1"
       >
         <div class="text-[24px] font-semibold tabular-nums" :class="filter === tab[0] ? 'text-accent' : ''">{{ tab[2] }}</div>
         <div class="text-[12.5px] text-ink-muted mt-0.5">{{ tab[1] }}</div>
@@ -192,12 +223,31 @@ onMounted(load);
       </div>
     </section>
 
+    <!-- 搜索 / 刷新 / 导出 -->
+    <div class="flex flex-wrap items-center gap-2 mb-4">
+      <input
+        v-model="keyword"
+        class="input flex-1 min-w-[200px]"
+        type="search"
+        placeholder="搜索邮箱或分组…"
+        @input="page = 1"
+      />
+      <button class="btn btn-ghost btn-sm shrink-0" :disabled="refreshing" @click="load(false)">
+        <Loader2 v-if="refreshing" :size="14" class="animate-spin" />
+        <RefreshCw v-else :size="14" />
+        刷新
+      </button>
+      <button class="btn btn-ghost btn-sm shrink-0" :disabled="!visible.length" @click="exportCsv">
+        <Download :size="14" /> 导出 CSV
+      </button>
+    </div>
+
     <!-- 分组筛选 -->
     <div v-if="groups.length" class="flex flex-wrap items-center gap-2 mb-4">
       <button
         class="btn btn-ghost btn-sm"
         :class="!groupFilter ? 'bg-surface-2 font-medium' : ''"
-        @click="groupFilter = ''"
+        @click="groupFilter = ''; page = 1"
       >
         全部分组
       </button>
@@ -206,7 +256,7 @@ onMounted(load);
         :key="g.name"
         class="btn btn-ghost btn-sm"
         :class="groupFilter === g.name ? 'bg-accent-soft text-accent' : ''"
-        @click="groupFilter = groupFilter === g.name ? '' : g.name"
+        @click="groupFilter = groupFilter === g.name ? '' : g.name; page = 1"
       >
         {{ g.name }}<span class="text-ink-muted">· {{ g.count }}</span>
       </button>
@@ -220,7 +270,7 @@ onMounted(load);
     </div>
 
     <div v-else class="card divide-y divide-line overflow-hidden">
-      <div v-for="sub in visible" :key="sub.id" class="flex items-center gap-3 px-4 py-3">
+      <div v-for="sub in pageItems" :key="sub.id" class="flex items-center gap-3 px-4 py-3">
         <span class="grid place-items-center size-8 rounded-lg bg-surface-2 text-ink-muted shrink-0"><Users :size="15" /></span>
         <div class="flex-1 min-w-0">
           <p class="text-[13.5px] truncate">{{ sub.email }}</p>
@@ -239,6 +289,7 @@ onMounted(load);
         </button>
         <button class="btn btn-ghost btn-sm hover:text-danger shrink-0" title="删除" @click="remove(sub)"><Trash2 :size="14" /></button>
       </div>
+      <PaginationBar v-model:page="page" :total="visible.length" :per="PER_PAGE" unit="位" />
     </div>
 
     <!-- 编辑分组弹窗 -->

@@ -1,0 +1,16 @@
+# 换行符钉死，避免 core.autocrlf=true 把文件反复转换。
+# 事故：app/public/polish.css 曾被转成 `\r\r\r\r\n`（435 行全中招），
+#       浏览器能容错所以没暴露，但 diff 与补丁脚本都会因此失配。
+
+# 本项目自有文件统一 LF
+app/public/polish.css -text
+src/** -text
+admin/src/** -text
+tests/** -text
+scripts/** -text
+*.md -text
+
+# 来自上游、原样复用的文件保持入库时的字节（同步脚本按原文替换，不能被改写）
+app/public/** -text
+app/functions/** -text
+app/migrations/** -text

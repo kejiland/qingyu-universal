@@ -216,28 +216,47 @@ describe('SEO · 站点身份', () => {
   });
 
   it('无设置时回退到默认站点名', async () => {
-    const site = await readSiteIdentity(db);
+    // 传空 publicDir：本组只验证 site_settings 侧，不受仓库里 config.min.js 影响
+    const site = await readSiteIdentity(db, tmp);
     expect(site.name).toBe("Qingyu'Blog");
     expect(site.author).toBe("Qingyu'Blog");
   });
 
-  it('site.name 优先于 footer.copyrightName', async () => {
-    db.native.prepare('INSERT INTO site_settings (k,v) VALUES (?,?)').run('site', JSON.stringify({ name: '我的博客', desc: '我的简介' }));
-    db.native.prepare('INSERT INTO site_settings (k,v) VALUES (?,?)').run('footer', JSON.stringify({ copyrightName: '页脚名' }));
-    const site = await readSiteIdentity(db);
+  it('site_info.name 优先于版权署名', async () => {
+    // 键名必须是 `site_info`：前台 app.js:1026 读的就是 s.site_info，
+    // 后台保存的也是这个键。早先测试用 `site` 断言，等于把读错键的 bug 锁死了。
+    db.native.prepare('INSERT INTO site_settings (k,v) VALUES (?,?)').run('site_info', JSON.stringify({ name: '我的博客', desc: '我的简介' }));
+    const site = await readSiteIdentity(db, tmp);
     expect(site.name).toBe('我的博客');
     expect(site.description).toBe('我的简介');
   });
 
+  it('站点名缺失时用 site_info.copyright 顶替（app.js getSiteName 的第二级回退）', async () => {
+    db.native.prepare('INSERT INTO site_settings (k,v) VALUES (?,?)').run('site_info', JSON.stringify({ copyright: '版权署名' }));
+    const site = await readSiteIdentity(db, tmp);
+    expect(site.name).toBe('版权署名');
+  });
+
+  it('写成 `site` / `footer` 键时不被采用（防止再退回旧键名）', async () => {
+    // `site` 不是合法键（应为 site_info）；
+    // `footer` 也不是 site_settings 的键——app.js 的 cfg.footer 取自静态 config.js，
+    // 后台只把 site_info.copyright / site_info.footerText 叠加进去。
+    db.native.prepare('INSERT INTO site_settings (k,v) VALUES (?,?)').run('site', JSON.stringify({ name: '错误的键', desc: '不该被读到' }));
+    db.native.prepare('INSERT INTO site_settings (k,v) VALUES (?,?)').run('footer', JSON.stringify({ copyrightName: '页脚名' }));
+    const site = await readSiteIdentity(db, tmp);
+    expect(site.name).toBe("Qingyu'Blog");
+    expect(site.description).not.toBe('不该被读到');
+  });
+
   it('profile.name 作为作者名', async () => {
     db.native.prepare('INSERT INTO site_settings (k,v) VALUES (?,?)').run('profile', JSON.stringify({ name: '李四' }));
-    expect((await readSiteIdentity(db)).author).toBe('李四');
+    expect((await readSiteIdentity(db, tmp)).author).toBe('李四');
   });
 
   it('损坏的 JSON 不会抛错', async () => {
-    db.native.prepare('INSERT INTO site_settings (k,v) VALUES (?,?)').run('site', '{坏掉的 json');
-    await expect(readSiteIdentity(db)).resolves.toBeDefined();
-    expect((await readSiteIdentity(db)).name).toBe("Qingyu'Blog");
+    db.native.prepare('INSERT INTO site_settings (k,v) VALUES (?,?)').run('site_info', '{坏掉的 json');
+    await expect(readSiteIdentity(db, tmp)).resolves.toBeDefined();
+    expect((await readSiteIdentity(db, tmp)).name).toBe("Qingyu'Blog");
   });
 });
 

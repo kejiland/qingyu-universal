@@ -169,8 +169,12 @@ describe('静态站导出', () => {
     const files = readZip(zipBytes);
     const html = text(files, 'index.html');
     expect(html).toContain('style.min.css');
-    // 带协议的地址不能被 rebase 改坏
-    expect(html).not.toMatch(/(?:href|src)="mailto:/);
+    // 带协议的地址（https:// 与页脚的 mailto:）不能被 rebase 加上路径前缀，
+    // 例如变成 "../../mailto:x@y" 或 "posts/https://…" 都是坏的。
+    const badRebase = [...html.matchAll(/(?:href|src)="([^"]*)"/g)]
+      .map((m) => m[1] as string)
+      .filter((u) => /^(?:\.\.?\/)+[a-z][a-z0-9+.-]*:/i.test(u) || /\/[a-z][a-z0-9+.-]*:\/\//i.test(u));
+    expect(badRebase, '带协议的地址被 rebase 加了路径前缀').toEqual([]);
     expect(html).toContain('https://schema.org');
   });
 

@@ -31,15 +31,22 @@ describe('公开站 SSR · 归档/标签/分类', () => {
     expect(html).toContain('<span class="count">1 篇</span>');
   });
 
-  it('归档链接指向文章页，并忽略无日期文章', () => {
+  it('归档把无日期文章归到「未知」年（与 app.js 的分组算法一致）', () => {
     const html = renderArchiveContent(posts, SITE);
     expect(html).toContain('href="/posts/a/"');
     expect(html).toContain('href="/posts/b/"');
-    expect(html).not.toContain('无日期文章');
+    // app.js: yr = (p.date || '').slice(0,4) || t('archive.unknown')，不会丢弃这篇文章
+    expect(html).toContain('未知 年');
+    expect(html).toContain('href="/posts/c/"');
+    expect(html).toContain('无日期文章');
   });
 
-  it('归档在没有任何文章时给出空态', () => {
-    expect(renderArchiveContent([], SITE)).toContain('还没有文章');
+  it('归档在没有文章时只渲染标题（app.js 没有空态）', () => {
+    const html = renderArchiveContent([], SITE);
+    expect(html).toContain('<h2 class="page-title">归档</h2>');
+    expect(html).not.toContain('archive-year');
+    // 不能自己造一个 app.js 没有的空态文案，否则首屏会多出一行再消失
+    expect(html).not.toContain('还没有文章');
   });
 
   it('标签云按名称排序并统计计数', () => {

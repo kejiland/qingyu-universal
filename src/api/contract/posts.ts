@@ -85,8 +85,14 @@ const PostWriteFields = {
   series_order: z.union([z.number(), z.string()]).optional(),
   author: z.string().optional(),
   status: PostStatusSchema.optional(),
-  publishAt: z.union([z.number(), z.string()]).optional(),
-  publish_at: z.union([z.number(), z.string()]).optional(),
+  // ── 必须容忍 null ────────────────────────────────────────────────
+  // 上游 `admin.js` 构造保存请求体时写的是 `publishAt: post.publishAt || null`
+  // （见 app/public/admin.js 的 publishAt 赋值），而 GET /api/posts/:id 对未定时
+  // 的文章也返回 `publishAt: null`。Cloudflare 版没有校验中间件，null 一路畅通；
+  // 这里若只写 .optional()（允许 undefined 但拒绝 null），同一份请求体在本版会
+  // 直接 400 —— 属于「上游能存、我们存不了」的双向不对称。
+  publishAt: z.union([z.number(), z.string()]).nullable().optional(),
+  publish_at: z.union([z.number(), z.string()]).nullable().optional(),
   seo: SeoSchema.optional(),
   tags: z.union([z.array(z.string()), z.string()]).optional()
 };
@@ -164,7 +170,12 @@ export const CommentCreateResponseSchema = z.object({
 export const CommentCreateBodySchema = z.object({
   author: z.string().min(1),
   content: z.string().min(1),
-  parent_id: z.string().optional(),
+  /* 顶层评论的前台写法是 `parentId = parentId || null`（app.js:1396），
+   * 也就是**必定传 null** 而不是省略字段。只写 .optional() 会放行 undefined
+   * 却拒绝 null，于是「一篇评论都发不出去」——前台状态行直接显示
+   * 「body.parent_id: Invalid input: expected string, received null」。
+   * 与 publishAt 同一个坑（见铁律：请求体必须容忍 GET 会返回的 null）。 */
+  parent_id: z.string().nullable().optional(),
   hp: z.string().optional(),
   website: z.string().optional(),
   ts: z.union([z.number(), z.string()]).optional()

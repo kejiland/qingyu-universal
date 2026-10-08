@@ -1,18 +1,43 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
-import { DatabaseBackup, Loader2, Trash2, RotateCcw, AlertTriangle, Inbox } from '@lucide/vue';
-import { api, ApiError, type BackupItem } from '../lib/api';
+import { computed, onMounted, ref } from 'vue';
+import { DatabaseBackup, Loader2, Trash2, RotateCcw, Download, RefreshCw, AlertTriangle, Inbox } from '@lucide/vue';
+import { api, saveBlob, ApiError, type BackupItem } from '../lib/api';
 import { formatBytes, formatDateTime } from '../lib/format';
 import { toast } from '../lib/toast';
+import PaginationBar from '../components/ui/PaginationBar.vue';
+
+const PER_PAGE = 10;
 
 const items = ref<BackupItem[]>([]);
 const configured = ref(true);
 const loading = ref(true);
+const refreshing = ref(false);
+const page = ref(1);
 const creating = ref(false);
 const busyId = ref<string | null>(null);
+const downloadingId = ref<string | null>(null);
 
-async function load(): Promise<void> {
-  loading.value = true;
+const totalPages = computed(() => Math.max(1, Math.ceil(items.value.length / PER_PAGE)));
+
+const pageItems = computed(() => {
+  const current = Math.min(page.value, totalPages.value);
+  return items.value.slice((current - 1) * PER_PAGE, current * PER_PAGE);
+});
+
+/** 备份原因三态：auto / manual / pre-restore（与上游 backupReasonLabel 一致）。 */
+const reasonMeta: Record<string, { label: string; badge: string }> = {
+  auto: { label: '自动', badge: 'badge-neutral' },
+  manual: { label: '手动', badge: 'badge-info' },
+  'pre-restore': { label: '恢复前快照', badge: 'badge-warning' }
+};
+
+function reasonLabel(reason: string): string {
+  return reasonMeta[reason]?.label ?? (reason === 'auto' ? '自动' : '手动');
+}
+
+async function load(showSpinner = true): Promise<void> {
+  if (showSpinner) loading.value = true;
+  else refreshing.value = true;
   try {
     const data = await api.listBackups();
     items.value = data.backups ?? [];
@@ -21,6 +46,7 @@ async function load(): Promise<void> {
     toast.error(e instanceof ApiError ? e.message : '加载备份失败');
   } finally {
     loading.value = false;
+    refreshing.value = false;
   }
 }
 
@@ -43,11 +69,25 @@ async function remove(item: BackupItem): Promise<void> {
   try {
     await api.deleteBackup(item.id);
     items.value = items.value.filter((b) => b.id !== item.id);
+    if (page.value > totalPages.value) page.value = totalPages.value;
     toast.success('已删除');
   } catch (e) {
     toast.error(e instanceof ApiError ? e.message : '删除失败');
   } finally {
     busyId.value = null;
+  }
+}
+
+/** 下载单份备份 JSON（服务端以附件返回，取回后用 saveBlob 落盘）。 */
+async function download(item: BackupItem): Promise<void> {
+  downloadingId.value = item.id;
+  try {
+    const { name, blob } = await api.downloadBackup(item.id);
+    saveBlob(blob, name);
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : '下载失败');
+  } finally {
+    downloadingId.value = null;
   }
 }
 
@@ -96,7 +136,12 @@ onMounted(load);
       <p class="text-[13px] text-ink-muted">
         最多保留 30 份，超出后自动清理最旧的。每天 19:00 UTC 会创建一次自动备份。
       </p>
-      <button class="btn btn-primary ml-auto shrink-0" :disabled="creating || !configured" @click="create">
+      <button class="btn btn-ghost btn-sm ml-auto shrink-0" :disabled="refreshing" @click="load(false)">
+        <Loader2 v-if="refreshing" :size="14" class="animate-spin" />
+        <RefreshCw v-else :size="14" />
+        刷新
+      </button>
+      <button class="btn btn-primary shrink-0" :disabled="creating || !configured" @click="create">
         <Loader2 v-if="creating" :size="16" class="animate-spin" />
         <DatabaseBackup v-else :size="16" />
         <span>{{ creating ? '备份中…' : '立即备份' }}</span>
@@ -116,7 +161,7 @@ onMounted(load);
     </div>
 
     <div v-else class="space-y-2.5">
-      <article v-for="item in items" :key="item.id" class="card p-4">
+      <article v-for="item in pageItems" :key="item.id" class="card p-4">
         <div class="flex items-start gap-4">
           <span class="grid place-items-center size-10 rounded-xl bg-surface-2 text-ink-soft shrink-0">
             <DatabaseBackup :size="18" />
@@ -125,8 +170,8 @@ onMounted(load);
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-[14px] font-semibold">{{ formatDateTime(item.createdAt) }}</span>
-              <span class="badge" :class="item.reason === 'auto' ? 'badge-neutral' : 'badge-info'">
-                {{ item.reason === 'auto' ? '自动' : '手动' }}
+              <span class="badge" :class="reasonMeta[item.reason]?.badge ?? 'badge-info'">
+                {{ reasonLabel(item.reason) }}
               </span>
               <span class="text-[12px] text-ink-muted">{{ formatBytes(item.size) }}</span>
             </div>
@@ -136,6 +181,11 @@ onMounted(load);
           </div>
 
           <div class="flex items-center gap-1 shrink-0">
+            <button class="btn btn-sm btn-secondary" :disabled="downloadingId === item.id" @click="download(item)">
+              <Loader2 v-if="downloadingId === item.id" :size="14" class="animate-spin" />
+              <Download v-else :size="14" />
+              <span class="hidden sm:inline">下载</span>
+            </button>
             <button class="btn btn-sm btn-secondary" :disabled="busyId === item.id" @click="restore(item)">
               <Loader2 v-if="busyId === item.id" :size="14" class="animate-spin" />
               <RotateCcw v-else :size="14" />
@@ -147,6 +197,8 @@ onMounted(load);
           </div>
         </div>
       </article>
+
+      <PaginationBar v-model:page="page" :total="items.length" :per="PER_PAGE" unit="份" />
     </div>
   </div>
 </template>

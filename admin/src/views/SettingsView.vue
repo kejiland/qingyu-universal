@@ -8,18 +8,29 @@ const loading = ref(true);
 const saving = ref(false);
 const changing = ref(false);
 
-const site = ref({ name: '', desc: '', avatar: '' });
+const site = ref({ name: '', desc: '', avatar: '', about: '' });
+/** 站点对象里本页未编辑的其它字段（版权、页脚、公告等）：保存时原样回写，避免整体覆盖丢失 */
+const siteExtra = ref<Record<string, unknown>>({});
 const pwd = ref({ current: '', password: '', confirm: '' });
 
 onMounted(async () => {
   try {
     const { settings } = await api.getSettings();
-    const parsed = safeParse(settings.site);
+    // 只读 site_info：`site` 是旧键名（前台读的是 site_info），
+    // 再让旧值覆盖会盖掉刚保存的新值。
+    const merged = safeParse(settings.site_info);
     site.value = {
-      name: String(parsed.name ?? ''),
-      desc: String(parsed.desc ?? ''),
-      avatar: String(parsed.avatar ?? '')
+      name: String(merged.name ?? ''),
+      desc: String(merged.desc ?? ''),
+      avatar: String(merged.avatar ?? ''),
+      about: String(merged.about ?? '')
     };
+    const extra = { ...merged };
+    delete extra.name;
+    delete extra.desc;
+    delete extra.avatar;
+    delete extra.about;
+    siteExtra.value = extra;
   } catch (e) {
     toast.error(e instanceof ApiError ? e.message : '加载设置失败');
   } finally {
@@ -40,8 +51,14 @@ function safeParse(raw: unknown): Record<string, unknown> {
 async function saveSite(): Promise<void> {
   saving.value = true;
   try {
-    const payload = { name: site.value.name.trim(), desc: site.value.desc.trim(), avatar: site.value.avatar.trim() };
-    await api.saveSettings({ site: payload, site_info: payload });
+    const payload = {
+      ...siteExtra.value,
+      name: site.value.name.trim(),
+      desc: site.value.desc.trim(),
+      avatar: site.value.avatar.trim(),
+      about: site.value.about
+    };
+    await api.saveSettings({ site_info: payload });
     toast.success('站点信息已保存（标题、分享卡片会立即更新）');
   } catch (e) {
     toast.error(e instanceof ApiError ? e.message : '保存失败');
@@ -100,6 +117,11 @@ async function changePassword(): Promise<void> {
           <div>
             <label class="label" for="siteAvatar">站点头像 / Logo URL</label>
             <input id="siteAvatar" v-model="site.avatar" class="input font-mono text-[13px]" placeholder="https://… 或 /media/…" />
+          </div>
+          <div>
+            <label class="label" for="siteAbout">关于页正文</label>
+            <textarea id="siteAbout" v-model="site.about" class="textarea" rows="5" placeholder="显示在 /about 页面，支持 Markdown" />
+            <p class="hint">用于「关于」页面的正文内容，支持 Markdown；留空则回退到内置默认文案。</p>
           </div>
           <button class="btn btn-primary" :disabled="saving" @click="saveSite">
             <Loader2 v-if="saving" :size="16" class="animate-spin" />

@@ -1,7 +1,7 @@
 # 与原版 qingyu-blog 功能对照
 
 > 对照基准：原版 [kejiland/qingyu-blog](https://github.com/kejiland/qingyu-blog)
-> 上游同步基线 `ad3bfb95`（2026-10-04）+ 之后 3 个提交，原版当前版本 **2.10.63**。
+> 上游同步基线 `99ce57a`（2026-10-07），原版当前版本 **2.10.92**；本项目版本 **2.10.93**。
 > 本文档每次大版本同步后更新，用来回答一个老问题：**「通用版比之前那版还缺什么？」**
 
 ---
@@ -48,7 +48,9 @@
 
 ---
 
-## 三、本轮已经补齐（v0.9-o）
+## 三、本轮已经补齐
+
+### 3.1 v0.9-o（原版 2.10.60 → 2.10.63）
 
 | 缺口 | 处理 |
 | --- | --- |
@@ -57,6 +59,150 @@
 | 上游「AI 结果不再按代码块显示」 | ✅ 旧后台已同步；新编辑器 AI 助手 v0.9-y 补齐 |
 | 接口文档缺 `GET /api/admin/backups/:id`（下载单份备份） | ✅ 已补登记 |
 | 上游新增的 3 个提交（2.10.60 → 2.10.63） | ✅ 已全部人工合并 |
+
+### 3.2 v0.9-aa（原版 2.10.63 → 2.10.92，约 22 个提交）
+
+本轮上游改动**全部落在 `app/public/**`**（23 个文件，+1670/−140），
+`functions/` / `migrations/` / `worker.js` 零变化，所以后端与绑定层完全不用动。
+
+| 上游新增 | 处理 | 说明 |
+| --- | --- | --- |
+| 「首页显示的标签」白名单（`site_settings.home_tags`） | ✅ 前台已同步 + 后台已补 | 标签一多首页标签条会被拉长，站长可勾选只显示哪几个；**空 = 全部显示**。后台在「高级设置 → 首页显示的标签」，支持按用量排序的标签芯片与手动补一个暂时没文章的标签 |
+| 导航项三态 `discover`（内置入口也可移出一级导航、自定义项可收进「发现」） | ✅ 前台已同步 + 后台已补 | `true` 收进「发现」、`false` 留一级、**键不存在**＝跟随内置默认。后台在「高级设置 → 顶部导航」每行的「出现位置」三态按钮 |
+| 新版「分类」下拉（一级入口 + 子菜单按分类筛选） | ✅ 已同步 | SSR 外壳同步复刻了这套结构，避免首屏导航与服务端不一致 |
+| 首字封面、`admin.css` / `admin.js` 增量 | ✅ 已同步 | 旧后台整包照搬 |
+| `style.css` / `app.js` 视觉与渲染细节 | ✅ 已同步 | 自有补丁（主题色校准、首页概览卡）走 `apply-own-patches.mjs` 幂等重放 |
+
+关键一致性修复（本轮踩到的）：
+
+| 问题 | 处理 |
+| --- | --- |
+| 上游版本号漂移：`app.js` 写 `2.10.83`，`index.html` / `sw.js` 写 `2.10.92`，`llms.txt` 也漏改 | ✅ 同步脚本改为取四者最高版本再递增，全站统一到 `2.10.93` |
+| 主题色 WCAG 校准「改了但不生效」：校准只改 `style.css`，而页面加载的是 `style.min.css` | ✅ `build-frontend.mjs` 新增 `style.css → style.min.css` 压缩任务 |
+| SSR 首屏导航是旧版扁平结构，app.js 接管后变新版 → 布局抖动 | ✅ 重写 `src/ssr/chrome.ts`，逐函数对齐 `app.js` 的 `DEFAULT_NAV` / `SECONDARY_NAV` / `discover` 判定 |
+
+> 验证方式（真机，非纸面）：亮色 / 深色 / 移动端三档截图；`home_tags` 与
+> `discover` 用「后台保存格式写入 → 真实渲染断言 → 还原」跑通端到端；
+> 320→1920 共 10 档宽度做横向溢出体检。
+
+### 3.3 v0.9-ab（后台外壳对齐上游）
+
+用户反馈「后台布局与上游不一致」。核对上游 `app/public/admin.css` 后发现：
+上游后台**本来就有侧栏**，差异全在外壳细节，不在页面内容。因此口径定为——
+**保留现有 Vue 后台的功能与全部页面，只把外壳改成与上游一致**，页面内部沿现状。
+
+| 差异点 | 上游 | 改造前（本版 Vue 后台） | 改造后 |
+| --- | --- | --- | --- |
+| 侧栏配色 | 深色渐变 `#23201a → #191612` | 浅色 `w-[248px]` | 深色渐变，深色主题 `#1e1b17 → #15120f` |
+| 侧栏品牌区 | 站点头像 + 站名（读 `/api/settings`） | 纯文字 | `.admin-sider-brand`，同上游取 `footer.copyrightName` → `site.name` |
+| 侧栏折叠 | 252px ↔ 72px，记忆到 localStorage | 无 | `qingyu.admin.siderCollapsed`，移动端转抽屉 |
+| 顶栏 | 汉堡 + 面包屑 + 预览站点 + 语言 + 账户 | 直接放页面标题 | 面包屑（概览组只显示当前页，同上游 `crumbsFor`） |
+| 页头 | 衬线体 24px 大标题 | 无 | `.page-title` 走 `--serif`（同上游 `--ab-serif`） |
+| 内容区 | `max-width:1280px`、`padding:28px 30px 36px` | `max-w-6xl`（1152px） | 1280px，同参数 |
+| 页脚 | `博客管理后台 © 2026` | 无 | `.admin-foot` |
+| 导航分组 | 概览 / 文章管理 / 评论管理 / 内容与设置 | 单层平铺 | 四组，条目与上游同名 |
+
+连带修掉的两个「假不一致」：
+
+| 问题 | 处理 |
+| --- | --- |
+| 页面自带 `<h1>` + 外壳新页头 → 同一标题渲染两遍 | `AdvancedSettingsView.vue` 去掉自带头部（保留右对齐保存按钮）、`DashboardView.vue` 去掉重复副标题；页头副标题统一由路由 `meta.subtitle` 提供 |
+| 后台产物更新后 `/admin` 仍显示旧界面 → 被误判成 UI 不一致 | `src/app.ts` 的挂载判定由「启动时一次性」改为**按需判定 + 1s 缓存**，`admin:build` 后无需重启 |
+
+> 验证方式（真机）：桌面展开 / 折叠 / 深色 / 移动端抽屉四态截图；
+> `/admin`、`/admin/posts`、`/admin/settings/advanced` 三页面 × 320→1920 共 10 档
+> 横向溢出体检；另起临时实例验证「运行中放入 / 移走产物」双向自动切换。
+
+### 3.4 v0.9-ac（前台真机实测 + SSR 同构修复）
+
+用户反馈「浏览器预览与 Cloudflare 版不一致」。用 CDP 驱动本机 Chrome 做
+**同路由双快照差分**（服务端吐出的 HTML vs `app.js` 接管后的 DOM 子树），
+定位到一批「爬虫视角与真机视角不同构」的问题并全部修掉：
+
+| 页面 | 问题 | 处理 |
+| --- | --- | --- |
+| 文章页 `/posts/:id` | SSR 比 SPA 少 **140+ 节点** | `src/ssr/post.ts` 整文件重写（96 → 约 480 行），逐块复刻 `renderPost()`：post-header / reading-tools / ai-slot / toc / print-foot / like-bar / article-footer（分享菜单）/ 系列导航 / 上下篇 / relations-slot / webmentions / 评论区骨架 / featured / 广告位 |
+| 文章页 | 受保护文章 SSR 直接返回 `null`，整页空白 | 改为渲染标题 + `.post-lock` + 隐藏的 `<article id="postArticle">`（上游对加密文章照样渲染标题/meta/锁屏，早期 return null 反而不同构） |
+| 文章页 | 目录编号逻辑不对 | 复刻 `buildToc()` + `stampHeadingNumbers()`：**标题不足 2 个时 app.js 提前 return、编号不计算，但仍插入空的 `.toc-num`** |
+| 文章页 | 阅读工具条多渲染了 5 个按钮 | 只渲染字号三件套——高亮 / 稍后读 / 导入导出那 5 个由 `initHighlight()` 事后 append |
+| `/about` | 缺作者卡 / 统计卡 / 版本行 | 路由改传 `AboutContext`（含 `posts` / `profile` / `blogVersion`）；`ABOUT_POSTS_SQL` 必须带 `content`，否则总字数恒为 0 |
+| `/popular` | `.popular-ranges` 层级错、缺 `.popular-list`、卡片缺三连指标 | `renderPopularContent` 重写：ranges 是 list-head 的**兄弟**节点、popularList 是第三个独立块、指标补 `svgIcon('eye'\|'heart'\|'quote', 13)`；SQL 改复刻上游 `_lib/popular.js` 的 range=all 综合得分（浏览×1 + 点赞×3 + 评论×5，只统计已发布未加密，评论只数 approved/NULL） |
+| 全站 | 图标表只有 11 个 | `src/ssr/icons.ts` 扩到 **49 个**，与 `app.js svgIcon()` 的 `var I = {...}` 逐条对齐 |
+
+**铁律（本轮确立）**：SSR 复刻的必须是 `app.js` **同步吐出的那一版 HTML**，
+而不是「最终态」。异步填充的部分（`#viewCount` / `#likeCount` / `#commentCount` /
+`ul#commentList` / `#featuredGrid` / `#postRelations` / `.reading-tools` 的高亮按钮）
+SSR **绝不能**提前渲染，否则会变成「有 → 无 → 有」的三段式闪烁。
+差分脚本里剩下的 15 个差异区经逐条核对**全部属于这一类**，属有意为之。
+
+新增护栏 `tests/ssr-icons.test.ts`：从 `app/public/app.js` 里把 `var I = {...}` 整表抽出来，
+按 `'<svg' + s + ' ' + c + '>'` 的拼接写法拆成 `{prefix, body}`，与我们的实现做**字节级**比对
+（5 条用例，含 size=13/14/15/20/26/34 参数化）。
+
+> 验证方式：`struct-diff.mjs`（`SD_WAIT=4000`）对 `/`、`/archive`、`/tags`、`/categories`、
+> `/about`、`/links`、`/popular` **全部 0 差异区**。
+
+### 3.5 v0.9-ad（上传下载 × 增删改查双向对称性实测）
+
+用户要求「检测所有功能的上传下载增删改查，看是不是双向都有相应」。
+判定口径不是「接口在不在」，而是**能否真的双向走通**：
+
+- **上传类** = 签发地址 → PUT 真实字节 → 列表能查到 → 能读回同一份字节 → 能删除
+- **下载类** = 先造数据 → 导出 / 下载落盘 → 内容可解析 → 能与原始数据对上
+- **CRUD** = POST 建 → GET 能查到（字段一致）→ PUT 改 → GET 确认已改 → DELETE → GET 确认没了
+
+`crud-symmetry.mjs` 覆盖 **13 组资源共 62 项**：
+
+| 分组 | 通过 | 失败 | 跳过 |
+| --- | --- | --- | --- |
+| posts | 9 | 0 | 0 |
+| comments | 8 | 0 | 0 |
+| media | 7 | 0 | 0 |
+| music | 5 | 0 | 0 |
+| og | 3 | 0 | 0 |
+| site-files | 3 | 0 | 1 |
+| backups | 5 | 0 | 0 |
+| export | 2 | 0 | 0 |
+| settings | 4 | 0 | 0 |
+| subscribers | 3 | 0 | 1 |
+| errors | 4 | 0 | 0 |
+| webmentions | 2 | 0 | 0 |
+| feeds | 5 | 0 | 0 |
+| **合计** | **62** | **0** | **2** |
+
+两项 skip 均为**上游同源限制，不擅自补**：
+
+- `site-files` 上游只实现 GET 列表/读取 + POST 写入，**没有 DELETE**（「有上传无删除」）。
+  硬加一个上游没有的能力会破坏与 Cloudflare 版的一致性。
+- `subscribe` 未配置邮件服务，上游即返回 503。
+
+本轮实测抓出并修掉的**三个真 bug**：
+
+| # | 缺陷 | 根因 | 修复 |
+| --- | --- | --- | --- |
+| 1 | `PUT /api/posts/:id` 报 400 `body.publishAt: Invalid input` | `GET /api/posts/:id` 返回 `publishAt: null`，而 schema 只写 `.optional()`（放行 undefined、**拒绝 null**）；上游 `admin.js` 保存时正是 `publishAt: post.publishAt \|\| null` | 改 `.nullable().optional()`；同字段 `publish_at`、`enc` 一并处理 |
+| 2 | 契约登记了 3 个必然 405 的方法 | 为了让文档好看，把上游没有的能力登记进了契约 | 核对上游源码后删除 `POST /api/ai/ping`（只接受 GET）、`POST /api/admin/subscribers`（只实现 GET）；`GET /api/admin/tags` → 改为 **`POST`**（批量重命名/删除标签） |
+| 3 | `site-files` 的 `PUT` / `DELETE` 从未实现、而真能用的 `POST /api/site-files/:name` 从未登记 | 同上 | 按上游 `handleSiteFiles()` 的真实支持面修正 |
+
+新增**三条护栏**：
+
+- `tests/contract-nullable.test.ts` —— 可空字段单独传 `null` 必须被接受；有值时保持校验强度；
+  **关键用例：「GET 出来的原样对象」整体回写必须能过**（这正是 `admin.js` 的真实调用方式）
+- `tests/contract-methods.test.ts` —— 逐个请求契约里登记的每一个方法，断言不会拿到 405
+  （401/403/404/400 都算「方法存在」，只有 405 才是「契约撒谎」）；跳过 DELETE 与破坏性路由
+- `tests/transfer-roundtrip.test.ts` —— 直接 import `admin/src/lib/transfer.js`，
+  测 Markdown / JSON / ZIP 三种格式的导入↔导出往返（ZIP 条目名从**中央目录** `PK\x01\x02` 解析）
+
+> **铁律（本轮确立）**：契约里不能为了让文档好看而登记上游没有的能力——
+> 「文档说有、实际 405」比「文档没写」更糟。同理，请求体 schema 必须容忍
+> `GET` 会返回的 `null`，否则「GET 出来的对象存不回去」就是双向不对称。
+
+其中导入导出往返有两个**与上游同源的已知缺口**：`author` 与 `seo` 在导入时被丢弃
+（`transferPostMarkdown()` 的 `stringKeys` 不含 `author`，`transferNormalizePost()` 也不返回 `seo`）。
+测试显式钉住这两个缺口——哪天它们「回来了」，说明我们与上游分叉了。
+
+> 验证方式：`crud-symmetry.mjs` 62 项 / `struct-diff.mjs` 0 差异区 /
+> `smoke.js` 25 项全通过 / `audit-endpoints.mjs`：上游调了而本版后台未见调用 = **0 条**。
 
 ---
 
@@ -126,13 +272,28 @@
 7. ~~**编辑器对照表最后 3 项**（相关阅读 / 单篇统计 / OG 分享图）~~（✅ 已完成，v0.9-x）
 8. ~~**原版最近 3 个提交核对**：导航补齐、导航显示开关、AI 结果不用等宽字体~~（✅ 已同步，前两项此前已在，第三项 v0.9-y 补齐）
 9. ~~**导出静态站**~~（✅ 已完成，v0.9-z：服务端渲染打包，含首页 / 全部文章页 / 六个列表与固定页 / 404 / sitemap / feed，另附限制说明）
+10. ~~**同步原版 2.10.63 → 2.10.92**~~（✅ 已完成，v0.9-aa：前台全部同步，后台补上「首页显示的标签」与导航项三态）
+11. ~~**前台 UI 与 Cloudflare 版实测对齐**~~（✅ 已完成，v0.9-ac：同路由双快照差分，修掉 SSR 少 140+ 节点、about/popular 结构差异、图标表不全，见上文 3.4 节）
+12. ~~**上传下载 × 增删改查双向对称性实测**~~（✅ 已完成，v0.9-ad：13 组 62 项全通过，修掉 3 个真 bug 并加 3 条护栏，见上文 3.5 节）
+13. **后台页面内部文案全量多语言**——实测 916 条面向用户中文字符串里只有 **34%** 能在上游词典命中
+    （我们后台是重写实现，措辞与上游不同）。全量翻译需新造约 **500 条 × 5 语**译文，
+    属「新造翻译层」而非「复用上游」，成本与风险需用户拍板。
 
 ---
 
 ## 七、以后怎么防止再落后
 
-每次同步原版后，跑一遍这三步：
+每次同步原版后，跑一遍这几步：
 
-1. `git log ad3bfb9..HEAD` 看原版新增了什么
+1. `git log 99ce57a..HEAD` 看原版新增了什么
 2. 对照本文档第四节，确认没有漏搬的页面
-3. 跑 `npm run check:contrast`、`npm --prefix admin run typecheck`、`node scripts/build-frontend.mjs`
+3. **对照 [docs/UPSTREAM.md](UPSTREAM.md) 第六节「后台配置键对照」**，确认上游新增的
+   `site_settings` 键都能在后台被写入——本轮漏掉的 `home_tags` 就是在这里发现的
+4. **对照 [docs/UPSTREAM.md](UPSTREAM.md) 第七节「契约支持面」**，确认契约登记的每一个方法
+   上游都真的实现了——「文档说有、实际 405」比「文档没写」更糟
+5. 跑 `npm run check:contrast`、`npm --prefix admin run typecheck`、`node scripts/build-frontend.mjs`
+6. 真机验证：亮 / 暗 / 移动端截图 + 320→1920 横向溢出体检
+7. **同路由双快照差分**：服务端 HTML vs `app.js` 接管后的 DOM 子树，要求差异区归零；
+   残留差异必须逐条核对是否属于「SPA 异步填充」（若是则属铁律 4 有意为之）
+8. **双向对称性**：上传类验「PUT 真实字节 + 能读回同一份字节」，下载类验「内容可解析 + 对得上原始数据」，
+   CRUD 验「建 → 查到 → 改 → 确认已改 → 删 → 确认没了」

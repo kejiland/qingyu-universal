@@ -9,12 +9,14 @@
  *   5. 静态站导出（/api/admin/export-static）
  *   6. 本地存储路由（/api/local-upload、/media/*…）
  *   7. 服务端 SEO（/ 与 /posts/:id）
- *   8. 前端配置注入（/config.js）
- *   9. 兜底：其余全部交给上游 worker.fetch()
+ *   8. 新版后台（/admin/*，构建产物缺失时让位给上游旧版后台）
+ *   9. 前端配置注入（/config.js）
+ *  10. 兜底：其余全部交给上游 worker.fetch()
  *
  * 契约路由与兜底路径共用同一份 withEdgeHeaders 实现，行为一致。
  * ============================================================ */
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { AppConfig } from './config.js';
 import type { AppDatabase } from './types.js';
 import type { LocalStorage } from './bindings/storage.js';
@@ -22,6 +24,7 @@ import type { MigrationReport } from './migrate.js';
 import type { WorkerEnv, WorkerModule } from './types.js';
 import { createHealthHandler } from './routes/health.js';
 import { createConfigJsHandler } from './routes/config-js.js';
+import { createPostsJsHandler } from './routes/posts-js.js';
 import { adminAppAvailable, createAdminAppHandler } from './routes/admin-app.js';
 import { createSeoHandlers, type SeoDeps } from './routes/seo.js';
 import { createStaticExportHandler } from './routes/static-export.js';
@@ -120,32 +123,66 @@ export function createApp(deps: AppDeps): Hono {
     }
   }
 
-  /* ---------- 服务端 SEO：文章页 / 首页 ---------- */
+  /* ---------- 服务端 SEO：文章页 / 首页 / 列表页 ----------
+   * 每个路径都注册「带尾斜杠」与「不带」两种写法。
+   * 前台导航用的是不带斜杠的形式（app.js 的 `url: '/archive'`），所以不带斜杠
+   * 是主路径；但爬虫、外部链接、以及用户在地址栏补一个 `/` 的场景同样常见，
+   * 而 Hono 默认严格区分尾斜杠——只注册无斜杠版时，`/archive/` 会落到末尾兜底，
+   * 结果是「同样的页面，有时有 SSR 首屏、有时只剩空壳」，看起来像随机不一致。
+   * `app.js` 的 currentRoute() 会归一化尾斜杠（app.js:4363），两种写法渲染同一个页面。 */
   if (deps.seo) {
     const seo = createSeoHandlers(deps.seo);
+    const both = (path: string, handler: (c: Context) => Promise<Response>): void => {
+      app.on(['GET', 'HEAD'], path, handler);
+      app.on(['GET', 'HEAD'], `${path}/`, handler);
+    };
     app.on(['GET', 'HEAD'], '/', seo.home);
-    app.on(['GET', 'HEAD'], '/posts/:id', seo.article);
-    app.on(['GET', 'HEAD'], '/posts/:id/', seo.article);
-    app.on(['GET', 'HEAD'], '/archive', seo.archive);
-    app.on(['GET', 'HEAD'], '/tags', seo.tags);
-    app.on(['GET', 'HEAD'], '/categories', seo.categories);
-    app.on(['GET', 'HEAD'], '/about', seo.about);
-    app.on(['GET', 'HEAD'], '/links', seo.links);
-    app.on(['GET', 'HEAD'], '/popular', seo.popular);
+    both('/posts/:id', seo.article);
+    both('/archive', seo.archive);
+    both('/tags', seo.tags);
+    both('/categories', seo.categories);
+    both('/about', seo.about);
+    both('/links', seo.links);
+    both('/popular', seo.popular);
   }
 
   /* ---------- 新版后台 ----------
-   * 构建产物存在才挂载；否则请求自然落到上游旧版后台，功能不中断。 */
-  if (adminAppAvailable(config.adminDistDir)) {
-    const adminApp = createAdminAppHandler(config.adminDistDir);
-    app.on(['GET', 'HEAD'], '/admin', adminApp.index);
-    app.on(['GET', 'HEAD'], '/admin/*', adminApp.asset);
-  }
+   * 构建产物存在才接管；否则请求自然落到上游旧版后台，功能不中断。
+   *
+   * 可用性按需判定（结果缓存 1s）：`npm run admin:build` 重新产出 admin/dist 后
+   * 无需重启进程即可生效，避免「改了后台却看到旧界面」这类假不一致。
+   * 一旦判定不可用就原样转发给上游 worker，与末尾兜底同一条路径。 */
+  const adminApp = createAdminAppHandler(config.adminDistDir);
+  let adminReady = adminAppAvailable(config.adminDistDir);
+  let adminCheckedAt = 0;
+  const adminGate = async (c: Context, next: () => Promise<void>): Promise<Response | void> => {
+    const now = Date.now();
+    if (now - adminCheckedAt > 1000) {
+      adminCheckedAt = now;
+      adminReady = adminAppAvailable(config.adminDistDir);
+    }
+    if (!adminReady) return deps.worker.fetch(withEdgeHeaders(c, config), deps.env);
+    await next();
+  };
+  app.use('/admin', adminGate);
+  app.use('/admin/*', adminGate);
+  app.on(['GET', 'HEAD'], '/admin', adminApp.index);
+  app.on(['GET', 'HEAD'], '/admin/*', adminApp.asset);
 
   /* ---------- 前端配置注入 ---------- */
   const configJs = createConfigJsHandler(config);
   app.get('/config.js', configJs);
   app.get('/config.min.js', configJs);
+
+  /* ---------- 前端文章注入 ----------
+   * index.html 会加载 posts.min.js 注入 window.BLOG_POSTS；上游由后台
+   * 「导出静态站点」生成，自托管版改为按 DB 实时生成，否则首页会在
+   * app.js 启动时先闪骨架屏再长出列表。 */
+  if (deps.seo) {
+    const postsJs = createPostsJsHandler(deps.seo.db);
+    app.get('/posts.js', postsJs);
+    app.get('/posts.min.js', postsJs);
+  }
 
   /* ---------- 兜底：上游应用 ---------- */
   app.all('*', (c) => deps.worker.fetch(withEdgeHeaders(c, config), deps.env));

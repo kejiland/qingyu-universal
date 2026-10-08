@@ -494,6 +494,12 @@ BLOG_AI_PUBLIC=         # 0/false/off = 仅管理员可触发生成
 
 留空则 AI 功能自动隐藏，其余功能不受影响。支持 Ollama / LocalAI / vLLM 等本地推理。
 
+> ⚠️ **网关地址与 API Key 只写进 `.env`，不要提交。**
+> `.env` / `.env.*` 已被 `.gitignore` 挡住，只有 `.env.example` 入库且值恒为空。
+> `tests/no-secrets.test.ts` 会扫所有待提交文件，一旦出现私有网关地址或
+> `sk-` 开头的真实密钥就让测试失败——**文档与注释里请用 `<你的网关地址>` 这类占位符**。
+> 自查命令：`git check-ignore -v .env`
+
 ### 邮件：SMTP 或 Resend
 
 ```env
@@ -821,6 +827,63 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
   - **路径已改相对**：页面里的站内绝对地址会按层级改成 `../`、`../../`，放进任何目录都能打开；带协议的地址（`mailto:` 等）保持原样
   - **顺带修**：站点框架原来读的是 `nav` 键，但后台保存的是 `nav_menu`，导致自定义导航在服务端渲染的页面里一直不生效，现已两个键都读
   - **测试**：新增 `tests/static-export.test.ts` 8 条（含自己解 ZIP 中央目录），测试 **159 passed / 5 skipped**
+- [x] **v0.9-aa** 同步原版 2.10.63 → 2.10.92（约 22 个提交），版本号全站统一到 **2.10.93**：
+  - **前台全部同步**：`app/public/**` 整体跟进上游，首页 / 文章页 / 列表页的展示逻辑与 Cloudflare 版一致
+  - **后台补两个配置入口**：高级设置新增「首页显示的标签」（`home_tags` 白名单）与导航项 `discover` 三态
+    （`true` 收进「发现」/`false` 留在一级导航/键不存在＝跟随内置默认）
+  - **版本号铁律**：`app.js BLOG_VERSION` / `index.html ?v=` / `sw.js CACHE_VERSION` / `llms.txt` 四处
+    由脚本取最高值统一（上游 2.10.92 时 `app.js` 还写着 2.10.83，会漏改）
+- [x] **v0.9-ab** 后台外壳对齐上游（用户口径：**保留现有 Vue 后台的功能与页面，只改外壳**）：
+  - 侧栏改深色渐变 + 252/72px 折叠（记忆到 localStorage）、品牌区站点头像 + 站名、顶栏面包屑、
+    衬线体 24px 页头、内容区 `max-width:1280px`、页脚、导航四分组（概览 / 文章管理 / 评论管理 / 内容与设置）
+  - **页头标题 / 副标题统一由外壳读路由 `meta.titleKey` / `meta.subtitleKey`**，页面内不再自带头部
+  - 顺带修：`/settings/advanced` 页头误显示成「博客设置」（侧栏匹配取最长匹配）、编辑页 2px 横向溢出
+  - `/admin` 挂载改为**按需判定 + 1s 缓存**，`admin:build` 后无需重启
+- [x] **v0.9-ac** 前台真机实测与 SSR 同构修复（同路由双快照差分：服务端 HTML vs `app.js` 渲染结果）：
+  - **SSR 文章页少 140+ 节点** → `src/ssr/post.ts` 整文件重写（96 → 约 480 行），逐块复刻 `renderPost()`
+  - `/about` 补作者卡 / 统计卡 / 版本行，`/popular` 修正 `popular-ranges` 层级与综合得分算法，图标表 11 → **49 个**
+  - **确立口径：SSR 复刻的是 `app.js` 的同步态，不是最终态**——异步填充位（浏览量 / 点赞 / 评论列表 /
+    精选 / 相关文章 / 高亮按钮）绝不提前渲染，否则真机上是「有 → 无 → 有」三段式闪烁
+  - 新增字节级护栏 `tests/ssr-icons.test.ts`；差分结果：7 个列表与固定页 **0 差异区**
+- [x] **v0.9-ad** 上传下载 × 增删改查**双向对称性**实测（13 组 **62 项**，失败 0、跳过 2）：
+  - 口径不是「接口在不在」，而是**能否真的走通**：上传要「签发 → PUT 真实字节 → 列表查到 → 读回同一份字节 → 删」，
+    下载要「造数据 → 导出落盘 → 内容可解析 → 对得上原始数据」，CRUD 要「建 → 查到 → 改 → 确认已改 → 删 → 确认没了」
+  - **修 3 个真 bug**：① `PUT /api/posts/:id` 拒绝 `publishAt: null`（GET 会返回 null、admin.js 也这么存）→
+    改 `.nullable().optional()`；② 契约登记了 3 个必然 405 的方法 → 按上游真实支持面删/改；
+    ③ `site-files` 的 PUT/DELETE 从未实现、真能用的 `POST /:name` 从未登记
+  - **新增 3 条护栏**：`contract-nullable`（GET 出来的原样对象能整体回写）/ `contract-methods`（契约方法不拿 405）
+    / `transfer-roundtrip`（Markdown / JSON / ZIP 导入导出往返，钉住与上游同源的 `author`、`seo` 丢失）
+  - 测试 **249 passed / 5 skipped**；`smoke` 25 项全通过
+- [x] **v0.9-ae** 媒体资源两个真 bug 修复（用户实测反馈）：
+  - **「能上传，刷新后预览没了」**：上传流程登记了 `thumbPublicUrl`，**却从没 PUT 缩略图字节**，
+    `thumb_url` 指向空对象——上传当次列表用原图还能显示，刷新后改读 `thumb_url` 就 404。
+    新增 `admin/src/lib/image.ts`（对齐上游 `compressImageFile`：主图 2200/0.82、缩略图 640/0.76、
+    gif/svg/ico 不压），并把缩略图**真的 PUT 上去**；只有上传成功才登记 `thumbUrl`
+  - **「复制失败，请手动选择」**：复制只用了 `navigator.clipboard.writeText`，自托管常是
+    `http://IP` 或 `http://域名`——**不是安全上下文，`navigator.clipboard` 整个不存在**，直接抛 TypeError。
+    改为上游同款两段式降级：Clipboard API → `textarea + execCommand('copy')`
+  - **顺带兜住历史数据**：早期上传的图片 `thumb_url` 已是坏值，新增 `onThumbError` 回退原图，
+    老图不必重新上传也能显示
+  - 真机双实例（8787 原生 / 8788 Linux 容器）实测：刷新后缩略图 **HTTP 200 / 50KB / 解码 640×427**；
+    复制在「正常」与「模拟无 clipboard」两种场景下都成功，剪贴板内容核对无误
+  - 新增护栏 `tests/media-upload.test.ts`（14 条）；测试 **269 passed / 5 skipped**
+- [x] **v0.9-af** 文章标题回归上游居中 + AI 功能接入第三方 OpenAI 兼容网关：
+  - **标题居中**：上游 `style.css` 的 `.post-header { text-align: center }` 被本项目
+    `polish.css` 的 `text-align: left` 覆盖了——「上游居中，我们左对齐」。改回居中，
+    字号 / 间距打磨保留；顺手修掉 `polish.css` 全文 435 处 `\r\r\r\r\n` 畸形行尾，
+    并新增 `.gitattributes` 钉死换行防复发
+  - **AI 接入**：AI 链路本就全通（绑定 / 路由 / 前台 / 双后台），只差配置——
+    新增 `.env`：`AI_BASE_URL=<你的网关 /v1 地址>` + 显式 `AI_MODEL`
+    （实测 11 个模型后选定一个：mimo 标题会卡死、kimi 标题输出乱码、gpt-free 空响应）
+    —— 网关地址与 Key 只写进未入库的 `.env`，文档里一律用占位符
+  - **修两个真问题**：① 前台 `apiFetch` 统一 8s abort，把 3-12s 的正常 AI 生成掐断，
+    用户看到「signal is aborted without reason」→ 新增 `apply-own-patches.mjs` 第 6 类补丁，
+    `apiFetch` 支持 `opts.timeoutMs` 覆盖，AI 调用点传 60s；② 适配器一次 fetch 定生死（60s 硬编码）
+    → 自带有限重试（只重试网络错误/超时/429/5xx），`AI_TIMEOUT_MS` / `AI_MAX_RETRIES` 可配
+  - 真机实测（8787 原生 + 8788 Linux 容器）：标题居中、AI 摘要按钮渲染、
+    **点击 → 实时生成 → 渲染全链路 ✅**（摘要内容与文章相符）；写作助手四动作（标题/标签/润色/翻译）
+    与评论 AI 全部实测通过
+  - 新增护栏 `tests/ai-timeout.test.ts`（9 条）；测试 **278 passed / 5 skipped**（26 files）
 - [x] **v0.3** 路径级契约覆盖完成（60 条路径；兼容接口响应字段将逐步收紧）
 - [x] **v0.3.1-a** Redis / Valkey 可选限流（配置 `REDIS_URL` 即启用）
 - [x] **v0.3.1-b** PostgreSQL 运行时适配（配置 `DATABASE_URL` 即切换）

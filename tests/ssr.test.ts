@@ -55,8 +55,18 @@ describe('公开站 SSR', () => {
     expect(html).toContain('入门系列');
   });
 
-  it('受保护文章不注入正文（内容是密文且已 noindex）', () => {
-    expect(renderPostContent({ ...POST, protected: 1, content: '' }, SITE)).toBeNull();
+  // 与上游一致：受保护文章**同样渲染标题/meta/锁屏**，只是把正文换成密码解锁界面。
+  // 早期这里 return null 让整页掉回外壳，反而与 app.js 的 renderPost 不同构——
+  // 首屏没有任何标题，app.js 接管后又冒出一个标题 + 锁屏。
+  it('受保护文章渲染锁屏、不注入任何明文正文', () => {
+    const html = renderPostContent({ ...POST, protected: 1, content: '' }, SITE)!;
+    expect(html).toBeTruthy();
+    expect(html).toContain('<div class="post-lock" id="postLock">');
+    expect(html).toContain('<article class="article" id="postArticle" style="display:none"></article>');
+    // 明文绝不出库：既没有真正的 .article 正文节点，也没有 aipost 槽位
+    expect(html).not.toContain('<strong>正文</strong>');
+    expect(html).not.toContain('ai-post-slot');
+    expect(html).not.toContain('<details class="toc">');
   });
 
   it('标题与标签经过 HTML 转义', () => {

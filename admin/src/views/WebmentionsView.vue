@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { Loader2, Trash2, Inbox } from '@lucide/vue';
+import { Loader2, Trash2, Inbox, RefreshCw } from '@lucide/vue';
 import { api, ApiError, type components } from '../lib/api';
 import { formatDateTime } from '../lib/format';
 import { toast } from '../lib/toast';
@@ -52,6 +52,11 @@ onMounted(load);
       <p class="text-[13px] text-ink-muted flex-1">
         站外文章链接到你的博客时会发送 Webmention，作者回复可在这里查看与管理。
       </p>
+      <button class="btn btn-sm btn-secondary shrink-0" :disabled="loading" @click="load">
+        <Loader2 v-if="loading" :size="14" class="animate-spin" />
+        <RefreshCw v-else :size="14" />
+        手动刷新
+      </button>
     </div>
 
     <div class="grid grid-cols-3 gap-3 mb-5">

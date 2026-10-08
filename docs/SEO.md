@@ -139,15 +139,57 @@ JSON-LD 结构（文章页）：
    配置了「站点名称」之后这个差异就消失了。
 2. **站点简介的默认值沿用 i18n**（含 Cloudflare 字样），保证服务端与前端回退一致。
    自托管站点应在后台「站点基础信息 → 站点简介」里填写自己的描述。
-3. **仅覆盖首页与文章页**。归档 / 标签 / 关于 / 留言板等页面仍返回静态 meta——
-   它们没有文章级的可变信息，收益小。等前端拆分为 SSR 时一并处理。
+3. ~~**仅覆盖首页与文章页**~~。现已覆盖首页、文章页，以及归档 / 标签 / 分类 /
+   关于 / 友链 / 热门六个列表与固定页（v0.9-ac 起，见上节）。
 4. **客户端仍会再改一次 meta**（`updateSEO()` 执行时），值基本一致，
    唯一差别是 `og:image` 前端用原始相对路径而服务端已绝对化。爬虫不执行 JS，
    拿到的是服务端版本；Google 会把相对 URL 按页面地址解析，因此无实际影响。
+5. **SSR 只复刻同步态**（见上节）。浏览量、点赞数、评论列表等异步填充字段在
+   服务端输出里是空占位，这是有意为之，不是漏渲染。
 
 ---
 
-## 七、如何验证
+## 七、SSR 复刻口径：同步态，不是最终态
+
+服务端渲染的 HTML 必须**与 `app.js` 接管前的那一版同构**，而不是与「页面最终长什么样」同构。
+
+原因：`app.js` 是两段式的——`renderPost()` 同步吐出骨架，随后若干异步请求
+（浏览量、点赞数、评论列表、精选卡片、相关文章、高亮按钮）再把内容填进去。
+如果 SSR 把最终态一并渲染，用户在真机上看到的就是「有 → 无 → 有」的三段式闪烁：
+首帧有内容 → `app.js` 接管后用同步态覆盖掉 → 异步回来再填上。
+
+**SSR 必须留空的异步填充位**（`src/ssr/post.ts`）：
+
+| 选择器 | 由谁填充 |
+| --- | --- |
+| `#viewCount` / `#likeCount` / `#commentCount` | 异步请求后写入 |
+| `ul#commentList` | `loadComments()` |
+| `#featuredGrid` | `loadFeatured()` |
+| `#postRelations` | `loadRelations()` |
+| `.reading-tools` 里的高亮 / 稍后读 / 导入导出 5 个按钮 | `initHighlight()` 事后 append |
+
+反过来，**同步态里有的东西一个都不能少**。本轮实测发现文章页 SSR 比 SPA 少 **140+ 节点**，
+已通过重写 `src/ssr/post.ts` 补齐：
+
+- `post-header`（`.meta-date` → 作者 → `N 分钟阅读` → `.meta-views` → 系列 pin → 置顶 pin）
+- `reading-tools`（只渲染字号三件套）、`ai-post-slot`、`toc`、`print-foot`、`like-bar`
+- `article-footer`（含分享菜单）、系列导航、上下篇、`relations-slot`、webmentions、评论区骨架、featured、广告位
+
+另外两处容易抄错的地方：
+
+- **目录编号**：复刻 `buildToc()` + `stampHeadingNumbers()`——标题不足 2 个时
+  `app.js` 提前 return、编号不计算，但**仍然插入空的 `.toc-num`**。
+- **受保护文章**：上游对加密文章照样渲染标题 / meta / 锁屏，
+  SSR 早期「直接返回 `null`」反而是不同构（真机上不会整页空白）。
+  现在渲染标题 + `.post-lock` + 隐藏的 `<article id="postArticle">`。
+
+> 验证方式：同路由双快照差分（服务端 HTML vs 真机 Chrome 里 `app.js` 渲染出的
+> `#app` 子树）。`/`、`/archive`、`/tags`、`/categories`、`/about`、`/links`、`/popular`
+> 要求**差异区归零**；文章页残留的差异必须逐条核对是否属于上表的异步填充位。
+
+---
+
+## 八、如何验证
 
 ```bash
 # 直接看爬虫视角（不带 JS）

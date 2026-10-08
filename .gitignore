@@ -18,10 +18,18 @@ backups/
 .qingyu-prev-ref
 .qingyu-cur-ref
 
-# 环境与密钥
+# 环境与密钥——绝不入库。
+# 只有 .env.example 是模板，且它的值必须留空或用占位符（不得填真实网关地址 / Key）。
+# 想确认某个文件会不会被提交：git check-ignore -v <文件>
 .env
 .env.*
 !.env.example
+.env.docker
+.env.local
+data/.env
+
+# 本地工作记忆（Agent 的日志与项目备忘），不是源码，不入库
+.workbuddy/
 
 # 编辑器 / 系统
 .DS_Store

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, type Component } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, type Component } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   FileText, CheckCircle2, Clock, PenLine, Pin, MessageSquare, ShieldAlert,
@@ -79,23 +79,184 @@ const commentByDay = computed(() => {
   return map;
 });
 
-const viewDays = computed(() => trend.value.map((d) => ({ date: d.date, value: Number(d.views) || 0 })));
-const commentDays = computed(() => {
+/** 统一时间轴：日期 + 访问数 + 评论数（与上游 lineChart 的 days 结构一致） */
+const chartDays = computed(() => {
   if (trend.value.length) {
-    return trend.value.map((d) => ({ date: d.date, value: commentByDay.value.get(d.date) ?? 0 }));
+    return trend.value.map((d) => ({
+      date: d.date,
+      views: Number(d.views) || 0,
+      comments: commentByDay.value.get(d.date) ?? 0
+    }));
   }
   return [...commentByDay.value.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
     .slice(-30)
-    .map(([date, value]) => ({ date, value }));
+    .map(([date, comments]) => ({ date, views: 0, comments }));
 });
-const maxViews = computed(() => Math.max(1, ...viewDays.value.map((d) => d.value)));
-const maxComments = computed(() => Math.max(1, ...commentDays.value.map((d) => d.value)));
-const totalViews = computed(() => viewDays.value.reduce((n, d) => n + d.value, 0));
-const totalCommentDays = computed(() => commentDays.value.reduce((n, d) => n + d.value, 0));
+
+const totalViews = computed(() => chartDays.value.reduce((n, d) => n + d.views, 0));
+const totalCommentDays = computed(() => chartDays.value.reduce((n, d) => n + d.comments, 0));
 
 function pct(value: number, total: number): string {
   return total > 0 ? `${Math.round((value / total) * 100)}%` : '0%';
+}
+
+/* ---------- 趋势折线图（SVG 手绘：网格 + 刻度 + 悬停浮层 + 点击固定） ---------- */
+type Metric = 'views' | 'comments';
+
+const CHART_W = 520;
+const CHART_H = 200;
+const CHART_PAD = 30;
+const CHART_PAD_TOP = 16;
+
+interface ChartGeom {
+  has: boolean;
+  pts: Array<[number, number]>;
+  line: string;
+  area: string;
+  max: number;
+  gridY: number[];
+  tickIdx: number[];
+}
+
+const EMPTY_GEOM: ChartGeom = { has: false, pts: [], line: '', area: '', max: 0, gridY: [], tickIdx: [] };
+
+/** Catmull-Rom 平滑曲线，与上游 smoothLinePath 完全一致 */
+function smoothPath(pts: Array<[number, number]>): string {
+  if (!pts.length) return '';
+  if (pts.length < 3) {
+    return pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ');
+  }
+  let d = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[i + 2] || p2;
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6;
+    const c1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6;
+    const c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    d += ` C${c1x.toFixed(1)} ${c1y.toFixed(1)},${c2x.toFixed(1)} ${c2y.toFixed(1)},${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+  }
+  return d;
+}
+
+function buildChart(metric: Metric): ChartGeom {
+  const days = chartDays.value;
+  const n = days.length;
+  if (!n) return EMPTY_GEOM;
+  const values = days.map((d) => d[metric]);
+  const max = Math.max(1, ...values);
+  const plotH = CHART_H - CHART_PAD - CHART_PAD_TOP;
+  const step = (CHART_W - CHART_PAD * 2) / Math.max(1, n - 1);
+  const pts = values.map(
+    (v, i) => [CHART_PAD + i * step, CHART_H - CHART_PAD - (v / max) * plotH] as [number, number]
+  );
+  const line = smoothPath(pts);
+  const baseline = CHART_H - CHART_PAD;
+  const area = `${line} L${pts[n - 1][0].toFixed(1)} ${baseline} L${pts[0][0].toFixed(1)} ${baseline} Z`;
+  const gridY = [0, 0.25, 0.5, 0.75, 1].map((f) => CHART_PAD_TOP + plotH * f);
+  const tickEvery = Math.max(1, Math.ceil(n / 6));
+  const tickIdx: number[] = [];
+  for (let k = 0; k < n; k += tickEvery) tickIdx.push(k);
+  if (tickIdx[tickIdx.length - 1] !== n - 1) tickIdx.push(n - 1);
+  return { has: true, pts, line, area, max, gridY, tickIdx };
+}
+
+const viewsChart = computed(() => buildChart('views'));
+const commentsChart = computed(() => buildChart('comments'));
+
+const charts = computed(() => [
+  {
+    metric: 'views' as Metric,
+    title: '近 30 天访问趋势',
+    unit: '次',
+    icon: Eye,
+    total: totalViews.value,
+    geom: viewsChart.value
+  },
+  {
+    metric: 'comments' as Metric,
+    title: '近 30 天评论趋势',
+    unit: '条',
+    icon: MessageSquare,
+    total: totalCommentDays.value,
+    geom: commentsChart.value
+  }
+]);
+
+/** 当前浮层：同时最多一张；pinned 为真表示已点击固定 */
+const tip = ref<{ metric: Metric; index: number; pinned: boolean } | null>(null);
+
+function chartGeom(metric: Metric): ChartGeom {
+  return metric === 'views' ? viewsChart.value : commentsChart.value;
+}
+
+function activeIndex(metric: Metric): number {
+  return tip.value && tip.value.metric === metric ? tip.value.index : -1;
+}
+
+/** 把指针横坐标换算成最近的数据点下标（与上游 nearest 一致） */
+function nearest(metric: Metric, e: PointerEvent | MouseEvent): number {
+  const geom = chartGeom(metric);
+  if (!geom.has) return 0;
+  const box = e.currentTarget as HTMLElement;
+  const rect = box.getBoundingClientRect();
+  const n = geom.pts.length;
+  const step = (CHART_W - CHART_PAD * 2) / Math.max(1, n - 1);
+  const vx = rect.width > 0 ? ((e.clientX - rect.left) / rect.width) * CHART_W : 0;
+  return Math.max(0, Math.min(n - 1, Math.round((vx - CHART_PAD) / step)));
+}
+
+function onMove(metric: Metric, e: PointerEvent): void {
+  const geom = chartGeom(metric);
+  if (!geom.has) return;
+  // 已固定的浮层不随悬停移动
+  if (tip.value && tip.value.metric === metric && tip.value.pinned) return;
+  tip.value = { metric, index: nearest(metric, e), pinned: false };
+}
+
+function onLeave(metric: Metric): void {
+  // 未固定的悬停浮层，离开区域即隐藏；已固定的保留
+  if (tip.value && tip.value.metric === metric && !tip.value.pinned) tip.value = null;
+}
+
+function onChartClick(metric: Metric, e: MouseEvent): void {
+  const geom = chartGeom(metric);
+  if (!geom.has) return;
+  const index = nearest(metric, e);
+  // 再次点击同一点 → 取消固定
+  if (tip.value && tip.value.metric === metric && tip.value.pinned && tip.value.index === index) {
+    tip.value = null;
+    return;
+  }
+  tip.value = { metric, index, pinned: true };
+}
+
+/** 点击图表外部时取消固定（与上游 document 监听一致） */
+function onDocClick(e: MouseEvent): void {
+  if (!tip.value || !tip.value.pinned) return;
+  const target = e.target as Element | null;
+  if (target && typeof target.closest === 'function' && target.closest('[data-chart-box]')) return;
+  tip.value = null;
+}
+
+function tipStyle(geom: ChartGeom, index: number): Record<string, string> {
+  const p = geom.pts[index];
+  const left = Math.max(9, Math.min(91, (p[0] / CHART_W) * 100));
+  const top = (p[1] / CHART_H) * 100;
+  const nearTop = p[1] < CHART_H * 0.32;
+  return {
+    left: `${left.toFixed(2)}%`,
+    top: `${top.toFixed(2)}%`,
+    transform: nearTop ? 'translate(-50%, 6px)' : 'translate(-50%, -100%)'
+  };
+}
+
+function tickLabel(index: number): string {
+  const date = chartDays.value[index]?.date ?? '';
+  return date.slice(5).replace('-', '/');
 }
 
 /* ---------- 来源分组 ---------- */
@@ -106,6 +267,27 @@ const sourceGroups = computed(() => [
   { key: 'platforms', label: '平台', icon: LayoutGrid, rows: sources.value.platforms.slice(0, 5), total: sourceTotals.value.platform },
   { key: 'vendors', label: '浏览器', icon: AppWindow, rows: sources.value.vendors.slice(0, 5), total: sourceTotals.value.vendor }
 ]);
+
+/** 两位国家码 → 国旗 emoji + 代码（如 CN → 🇨🇳 CN），与上游 countryLabel 一致 */
+function countryLabel(code: string): string {
+  const c = String(code || '').toUpperCase();
+  if (!/^[A-Z]{2}$/.test(c)) return '未知';
+  try {
+    return (
+      String.fromCodePoint(0x1f1e6 + c.charCodeAt(0) - 65) +
+      String.fromCodePoint(0x1f1e6 + c.charCodeAt(1) - 65) +
+      ' ' +
+      c
+    );
+  } catch {
+    return c;
+  }
+}
+
+function rowLabel(groupKey: string, name: string): string {
+  if (groupKey === 'countries') return countryLabel(name);
+  return name || '直接访问';
+}
 
 /* ---------- 站点资源 ---------- */
 const resources = computed(() => [
@@ -127,7 +309,30 @@ const recentPosts = computed(() =>
     .sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')))
     .slice(0, 5)
 );
-const recentComments = computed(() => comments.value.slice(0, 5));
+const recentComments = computed(() => comments.value.slice(0, 10));
+
+/* ---------- 最新评论自动滚动（内容超出容器时匀速上滚循环） ---------- */
+const feedRef = ref<HTMLElement | null>(null);
+let feedTimer: number | undefined;
+
+function stopFeedScroll(): void {
+  if (feedTimer) {
+    window.clearInterval(feedTimer);
+    feedTimer = undefined;
+  }
+}
+
+function startFeedScroll(): void {
+  stopFeedScroll();
+  const el = feedRef.value;
+  if (!el) return;
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+  if (el.scrollHeight <= el.clientHeight + 2) return;
+  feedTimer = window.setInterval(() => {
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 1) el.scrollTop = 0;
+    else el.scrollTop += 0.6;
+  }, 40);
+}
 
 /* ---------- 数据加载 ---------- */
 async function load(): Promise<void> {
@@ -185,9 +390,18 @@ async function load(): Promise<void> {
 
   if (failed.length) toast.error(`部分数据加载失败：${failed.join('、')}`);
   loading.value = false;
+  await nextTick();
+  startFeedScroll();
 }
 
-onMounted(load);
+onMounted(() => {
+  document.addEventListener('click', onDocClick);
+  void load();
+});
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocClick);
+  stopFeedScroll();
+});
 </script>
 
 <template>
@@ -209,9 +423,8 @@ onMounted(load);
   </div>
 
   <div v-else class="space-y-5">
-    <!-- 说明 + 快捷操作 -->
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <p class="text-[13px] text-ink-muted">全站数据与最新动态，一眼看全。</p>
+    <!-- 快捷操作（页面副标题由外壳统一渲染，这里不再重复） -->
+    <div class="flex flex-wrap items-center justify-end gap-3">
       <div class="flex gap-2">
         <button class="btn btn-secondary" @click="router.push('/stats')">
           <Eye :size="16" />
@@ -235,53 +448,96 @@ onMounted(load);
       </div>
     </div>
 
-    <!-- 趋势 -->
+    <!-- 趋势（折线图：悬停预览 / 点击固定 / 再点取消） -->
     <section class="grid gap-5 lg:grid-cols-2">
-      <div class="card p-5">
+      <div v-for="c in charts" :key="c.metric" class="card p-5">
         <div class="flex items-center justify-between mb-4">
           <h2 class="flex items-center gap-1.5 text-[15px] font-semibold">
-            <Eye :size="15" class="text-accent" />
-            近 30 天访问趋势
+            <component :is="c.icon" :size="15" class="text-accent" />
+            {{ c.title }}
           </h2>
-          <span class="text-[12px] text-ink-muted tabular-nums">共 {{ totalViews.toLocaleString() }} 次</span>
+          <span class="text-[12px] text-ink-muted tabular-nums">共 {{ c.total.toLocaleString() }} {{ c.unit }}</span>
         </div>
-        <div v-if="viewDays.length" class="flex items-end gap-[3px] h-36">
-          <div
-            v-for="d in viewDays"
-            :key="d.date"
-            class="flex-1 rounded-t-[3px] bg-accent/70 hover:bg-accent transition-colors min-h-[2px]"
-            :style="{ height: `${Math.max(2, (d.value / maxViews) * 100)}%` }"
-            :title="`${d.date}：${d.value} 次浏览`"
-          />
-        </div>
-        <div v-else class="h-36 grid place-items-center text-[13px] text-ink-muted">暂无访问数据</div>
-        <div v-if="viewDays.length" class="flex justify-between text-[11px] text-ink-muted mt-2">
-          <span>{{ viewDays[0].date }}</span>
-          <span>{{ viewDays[viewDays.length - 1].date }}</span>
-        </div>
-      </div>
 
-      <div class="card p-5">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="flex items-center gap-1.5 text-[15px] font-semibold">
-            <MessageSquare :size="15" class="text-accent" />
-            近 30 天评论趋势
-          </h2>
-          <span class="text-[12px] text-ink-muted tabular-nums">共 {{ totalCommentDays.toLocaleString() }} 条</span>
-        </div>
-        <div v-if="commentDays.length" class="flex items-end gap-[3px] h-36">
+        <template v-if="c.geom.has">
           <div
-            v-for="d in commentDays"
-            :key="d.date"
-            class="flex-1 rounded-t-[3px] bg-accent/70 hover:bg-accent transition-colors min-h-[2px]"
-            :style="{ height: `${Math.max(2, (d.value / maxComments) * 100)}%` }"
-            :title="`${d.date}：${d.value} 条评论`"
-          />
-        </div>
-        <div v-else class="h-36 grid place-items-center text-[13px] text-ink-muted">暂无评论数据</div>
-        <div v-if="commentDays.length" class="flex justify-between text-[11px] text-ink-muted mt-2">
-          <span>{{ commentDays[0].date }}</span>
-          <span>{{ commentDays[commentDays.length - 1].date }}</span>
+            class="chart-box"
+            data-chart-box
+            @pointermove="onMove(c.metric, $event)"
+            @pointerleave="onLeave(c.metric)"
+            @click="onChartClick(c.metric, $event)"
+          >
+            <svg class="chart-svg" :viewBox="`0 0 ${CHART_W} ${CHART_H}`" preserveAspectRatio="none" aria-hidden="true">
+              <defs>
+                <linearGradient :id="`chartGrad-${c.metric}`" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.32" />
+                  <stop offset="70%" stop-color="var(--accent)" stop-opacity="0.06" />
+                  <stop offset="100%" stop-color="var(--accent)" stop-opacity="0" />
+                </linearGradient>
+              </defs>
+              <line
+                v-for="(y, gi) in c.geom.gridY"
+                :key="`grid-${gi}`"
+                class="chart-grid"
+                :x1="CHART_PAD"
+                :y1="y"
+                :x2="CHART_W - CHART_PAD"
+                :y2="y"
+              />
+              <line
+                class="chart-axis"
+                :x1="CHART_PAD"
+                :y1="CHART_H - CHART_PAD"
+                :x2="CHART_W - CHART_PAD"
+                :y2="CHART_H - CHART_PAD"
+              />
+              <text class="chart-ylab" :x="CHART_PAD - 7" :y="CHART_PAD_TOP + 4" text-anchor="end">{{ c.geom.max }}</text>
+              <text class="chart-ylab" :x="CHART_PAD - 7" :y="CHART_H - CHART_PAD + 3" text-anchor="end">0</text>
+              <path class="chart-area" :d="c.geom.area" :fill="`url(#chartGrad-${c.metric})`" />
+              <path class="chart-line" :d="c.geom.line" />
+              <line
+                v-if="activeIndex(c.metric) >= 0"
+                class="chart-guide"
+                :x1="c.geom.pts[activeIndex(c.metric)][0]"
+                :y1="CHART_PAD_TOP"
+                :x2="c.geom.pts[activeIndex(c.metric)][0]"
+                :y2="CHART_H - CHART_PAD"
+              />
+              <circle
+                v-for="(p, pi) in c.geom.pts"
+                :key="`dot-${pi}`"
+                class="chart-dot"
+                :class="{ on: activeIndex(c.metric) === pi }"
+                :cx="p[0]"
+                :cy="p[1]"
+                :r="activeIndex(c.metric) === pi ? 4.4 : 2.6"
+              />
+            </svg>
+
+            <div class="chart-axis-row">
+              <span
+                v-for="ti in c.geom.tickIdx"
+                :key="`tick-${ti}`"
+                class="chart-tick"
+                :style="{ left: `${((c.geom.pts[ti][0] / CHART_W) * 100).toFixed(2)}%` }"
+              >
+                {{ tickLabel(ti) }}
+              </span>
+            </div>
+
+            <div
+              v-if="tip && tip.metric === c.metric"
+              class="chart-tip shadow-lg"
+              :style="tipStyle(c.geom, tip.index)"
+            >
+              <b>{{ tickLabel(tip.index) }}</b>
+              <span class="chart-tip-v">访问 {{ chartDays[tip.index]?.views ?? 0 }}</span>
+              <span class="chart-tip-c">评论 {{ chartDays[tip.index]?.comments ?? 0 }}</span>
+            </div>
+          </div>
+        </template>
+        <div v-else class="h-36 grid place-items-center text-[13px] text-ink-muted">
+          暂无{{ c.metric === 'views' ? '访问' : '评论' }}数据
         </div>
       </div>
     </section>
@@ -309,7 +565,7 @@ onMounted(load);
           <div v-else class="space-y-2">
             <div v-for="row in g.rows" :key="row.name">
               <div class="flex items-center justify-between gap-2 text-[12px]">
-                <span class="truncate text-ink-soft" :title="row.name">{{ row.name || '直接访问' }}</span>
+                <span class="truncate text-ink-soft" :title="rowLabel(g.key, row.name)">{{ rowLabel(g.key, row.name) }}</span>
                 <span class="shrink-0 text-ink-muted tabular-nums">{{ row.views }}</span>
               </div>
               <div class="mt-1 h-1 rounded-full bg-surface-3 overflow-hidden">
@@ -418,7 +674,13 @@ onMounted(load);
           <p class="text-[12px] text-ink-muted mt-1">访客的留言会出现在这里。</p>
         </div>
 
-        <div v-else class="space-y-0.5">
+        <div
+          v-else
+          ref="feedRef"
+          class="comment-feed"
+          @pointerenter="stopFeedScroll"
+          @pointerleave="startFeedScroll"
+        >
           <button
             v-for="comment in recentComments"
             :key="comment.id"
@@ -445,3 +707,95 @@ onMounted(load);
     </section>
   </div>
 </template>
+
+<style scoped>
+/* ---------- 趋势折线图 ---------- */
+.chart-box {
+  position: relative;
+  cursor: crosshair;
+  touch-action: pan-y;
+}
+.chart-svg {
+  width: 100%;
+  height: 150px;
+  display: block;
+}
+.chart-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+.chart-axis {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+.chart-guide {
+  stroke: var(--accent);
+  stroke-width: 1;
+  opacity: 0.5;
+}
+.chart-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.chart-dot {
+  fill: var(--accent);
+  opacity: 0.55;
+  transition: opacity 0.12s ease;
+}
+.chart-dot.on {
+  opacity: 1;
+}
+.chart-ylab {
+  fill: var(--ink-muted);
+  font-size: 11px;
+}
+.chart-axis-row {
+  position: relative;
+  height: 14px;
+  margin-top: 4px;
+}
+.chart-tick {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.chart-tip {
+  position: absolute;
+  z-index: 10;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.chart-tip b {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.chart-tip-v,
+.chart-tip-c {
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 最新评论：内容过长时自动滚动 ---------- */
+.comment-feed {
+  max-height: 330px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
+}
+</style>

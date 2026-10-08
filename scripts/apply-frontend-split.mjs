@@ -82,6 +82,17 @@ function nextPatchVersion(version) {
   return parts.join('.');
 }
 
+function compareVersion(a, b) {
+  const pa = String(a || '0').split('.').map(Number);
+  const pb = String(b || '0').split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0;
+    const y = pb[i] || 0;
+    if (x !== y) return x - y;
+  }
+  return 0;
+}
+
 function splitLegacy(app) {
   const lines = app.replace(/\r\n/g, '\n').split('\n');
   const start = lines.findIndex((l) => l.includes('管理后台辅助函数'));
@@ -200,27 +211,42 @@ function patchDisplayPolish(app) {
 function bumpCacheVersion(app) {
   const m = app.match(/BLOG_VERSION\s*=\s*'([^']+)'/);
   if (!m) throw new Error('未找到 BLOG_VERSION');
-  const oldVersion = m[1];
-  const newVersion = nextPatchVersion(oldVersion);
-  const nextApp = app.replace(`BLOG_VERSION = '${oldVersion}'`, `BLOG_VERSION = '${newVersion}'`);
 
-  let html = read('index.html').split(oldVersion).join(newVersion);
+  let html = read('index.html');
+  let sw = read('sw.js');
+  const llmsPath = path.join(PUB, 'llms.txt');
+  const llms = fs.existsSync(llmsPath) ? fs.readFileSync(llmsPath, 'utf8') : '';
+
+  /* 上游偶尔只递增 index.html / sw.js 而漏改 app.js（例如 2.10.92 时 app.js 仍是 2.10.83）。
+   * 这里取 app.js / index.html / sw.js / llms.txt 四者的最高版本作为基准再递增，
+   * 保证一处改、四处同步 —— 否则 ?v= 失效会让浏览器一直吃旧缓存。 */
+  const candidates = [
+    m[1],
+    (html.match(/style\.min\.css\?v=([0-9.]+)/) || [])[1],
+    (sw.match(/CACHE_VERSION\s*=\s*'([^']+)'/) || [])[1],
+    (llms.match(/\b(\d+\.\d+\.\d+)\b/) || [])[1]
+  ].filter(Boolean);
+  const base = candidates.reduce((a, b) => (compareVersion(a, b) >= 0 ? a : b));
+  const newVersion = nextPatchVersion(base);
+
+  html = html.split(base).join(newVersion);
   html = html.replace(
     /<script defer src="app\.min\.js(\?[^"]*)"><\/script>/,
     '<script defer src="boot.min.js?v=' + newVersion + '"></script>'
   );
   write('index.html', html);
 
-  let sw = read('sw.js');
   sw = sw.replace(/CACHE_VERSION = '[^']+'/, `CACHE_VERSION = '${newVersion}'`);
   write('sw.js', sw);
 
-  const llmsPath = path.join(PUB, 'llms.txt');
-  if (fs.existsSync(llmsPath)) {
-    const llms = fs.readFileSync(llmsPath, 'utf8').split(oldVersion).join(newVersion);
-    fs.writeFileSync(llmsPath, llms, 'utf8');
-  }
-  report.push(`版本 ${oldVersion} -> ${newVersion}（缓存失效）`);
+  /* llms.txt 里的版本号上游常忘了改（2.10.92 时仍写 2.10.83），
+   * 这里不做「按旧版本号查找替换」，而是把其中所有语义化版本号一律重写为当前版本。
+   * 注意不能加前置 \b —— "v2.10.83" 里 v 与数字之间没有词边界；
+   * 版本号带 v 前缀的写法要保留 v。 */
+  if (llms) fs.writeFileSync(llmsPath, llms.replace(/\bv?\d+\.\d+\.\d+\b/g, 'v' + newVersion), 'utf8');
+
+  const nextApp = app.replace(`BLOG_VERSION = '${m[1]}'`, `BLOG_VERSION = '${newVersion}'`);
+  report.push(`版本 ${base} -> ${newVersion}（app.js / index / sw / llms 全站统一）`);
   return nextApp;
 }
 
@@ -269,10 +295,11 @@ function ensurePolishShell() {
 
   let html = read('index.html');
   if (!html.includes('polish.min.css')) {
+    const nl = html.includes('\r\n') ? '\r\n' : '\n';
     const before = html;
     html = html.replace(
       /(<link id="global-style"[^>]*style\.min\.css[^>]*>\s*\r?\n)/,
-      '$1  <link rel="stylesheet" href="polish.min.css?v=' + version + '">\n'
+      '$1  <link rel="stylesheet" href="polish.min.css?v=' + version + '">' + nl
     );
     if (html === before) throw new Error('index.html 未找到 style.min.css 锚点，无法插入 polish 样式');
     write('index.html', html);

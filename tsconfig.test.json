@@ -7,5 +7,9 @@
     "allowImportingTsExtensions": true
   },
   "include": ["src/**/*.ts", "tests/**/*.ts", "generated/**/*.d.ts"],
-  "exclude": ["node_modules", "dist", "app"]
+  // `tests/transfer-roundtrip.test.ts` 直接 import admin/src/lib/transfer.ts。
+  // 那份代码归 admin 子项目管（bundler 模块解析 + DOM lib），放到本配置下会报
+  // 「相对导入缺 .js 后缀」与「找不到 document」——两套规则的产物，不是缺陷。
+  // 它仍由 `npm --prefix admin run typecheck`（vue-tsc）覆盖，这里排除以免重复报错。
+  "exclude": ["node_modules", "dist", "app", "admin", "tests/transfer-roundtrip.test.ts"]
 }

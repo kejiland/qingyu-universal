@@ -1745,6 +1745,34 @@
     }
     transferAnchorDownload(name, blob);
   }
+  /** 在「用户点击手势仍然有效」时先弹出另存为对话框，返回 Promise<FileSystemFileHandle>。
+   *  浏览器要求 showSaveFilePicker 必须在用户手势内调用；而导出过程是异步的（要抓资源、等接口），
+   *  等到打包完再调用会因丢失手势被浏览器拒绝，于是只剩下载没有「保存位置」这一步。 */
+  function transferPickSaveHandle(name) {
+    try {
+      if (typeof window.showSaveFilePicker !== 'function') return null;
+      return window.showSaveFilePicker({ suggestedName: name });
+    } catch (e) { return null; }
+  }
+  /** 把内容写入先前选定的位置；没有选过 / 被取消 / 权限不足时回退到默认下载目录。
+   *  返回 'saved' | 'cancelled' | 'downloaded' */
+  async function transferSaveAs(handlePromise, name, blob) {
+    var handle = null;
+    if (handlePromise) { try { handle = await handlePromise; } catch (e) { handle = null; } }
+    if (handle) {
+      try {
+        var writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return 'saved';
+      } catch (e) { /* 写入失败则回退到默认下载目录 */ }
+    } else if (handlePromise) {
+      // 用户主动取消「另存为」：尊重取消，不再偷偷下载
+      return 'cancelled';
+    }
+    transferAnchorDownload(name, blob);
+    return 'downloaded';
+  }
   function transferDownloadText(name, text, type) {
     transferDownload(name, new Blob([String(text || '')], { type: type || 'text/plain;charset=utf-8' }));
   }
@@ -2012,9 +2040,15 @@
   async function exportStaticSite(content, button) {
     var status = content ? content.querySelector('#abIeStatus') : null;
     var old = button ? button.innerHTML : '';
+    // 必须在用户手势内同步弹出「另存为」，否则打包结束再调会被浏览器拒绝（只剩下载、没有保存位置）
+    var suggestedName = 'qingyu-static-site-' + transferStamp() + '.zip';
+    var cached = (content && content.__iePosts) || null;
+    var lookEmpty = cached ? cached.filter(function (p) { return (p.status || 'published') === 'published'; }).length === 0 : false;
+    var saveHandle = lookEmpty ? null : transferPickSaveHandle(suggestedName);
+
     if (button) { button.disabled = true; button.innerHTML = icon('spinner', 12) + ' ' + t('admin.transfer.exporting'); }
     try {
-      var all = (content && content.__iePosts) || await listFullPosts();
+      var all = cached || await listFullPosts();
       var posts = (all || []).filter(function (p) { return (p.status || 'published') === 'published'; });
       if (!posts.length) { toast(t('admin.staticExport.empty'), 'err'); return; }
       if (status) status.textContent = t('admin.staticExport.building');
@@ -2082,8 +2116,9 @@
       try { if (window.buildSitemapClient) files.push({ name: 'sitemap.xml', text: window.buildSitemapClient() }); } catch (e) {}
       try { if (window.buildFeedXmlClient) files.push({ name: 'feed.xml', text: window.buildFeedXmlClient(data, 20) }); } catch (e) {}
       files.push({ name: 'README-静态站说明.txt', text: t('admin.staticExport.readme', { site: siteName, count: data.length }) });
-      transferDownload('qingyu-static-site-' + transferStamp() + '.zip', transferZip(files));
-      toast(t('admin.staticExport.done', { count: data.length, files: files.length }), 'ok');
+      var outcome = await transferSaveAs(saveHandle, suggestedName, transferZip(files));
+      if (outcome === 'cancelled') toast(t('admin.staticExport.cancelled'));
+      else toast(t('admin.staticExport.done', { count: data.length, files: files.length }), 'ok');
     } catch (e) {
       toast(t('admin.staticExport.fail') + (e.message || e), 'err');
     } finally {
@@ -2384,7 +2419,7 @@
     var orig = btn.innerHTML;
     btn.disabled = true;
     btn.innerHTML = icon('spinner', 13);
-    api('api/ai/assist', { method: 'POST', body: JSON.stringify({ action: action, text: text, lang: lang }) })
+    api('api/ai/assist', { method: 'POST', timeoutMs: 60000, body: JSON.stringify({ action: action, text: text, lang: lang }) })
       .then(function (d) {
         btn.disabled = false;
         btn.innerHTML = orig;
@@ -2466,7 +2501,7 @@
         var btn = this;
         btn.disabled = true;
         btn.innerHTML = icon('spinner', 13) + ' ' + esc(t('site.loading'));
-        api('api/ai/comments', { method: 'POST', body: JSON.stringify({ action: 'summarize' }) })
+        api('api/ai/comments', { method: 'POST', timeoutMs: 60000, body: JSON.stringify({ action: 'summarize' }) })
           .then(function (d) {
             slot.innerHTML = abAiCommentsHTML((d && d.summary) || '', !!(d && d.empty), !!(d && d.cached));
             bindAiScreen(slot);
@@ -2497,7 +2532,7 @@
       if (!text.trim()) return;
       var out = slot.querySelector('#abAiScreenOut');
       if (out) out.innerHTML = '<span class="ab-muted">' + esc(t('site.loading')) + '…</span>';
-      api('api/ai/comments', { method: 'POST', body: JSON.stringify({ action: 'screen', text: text }) })
+      api('api/ai/comments', { method: 'POST', timeoutMs: 60000, body: JSON.stringify({ action: 'screen', text: text }) })
         .then(function (d) {
           if (out) out.innerHTML = d && d.spam
             ? '<span style="color:#d9534f;font-weight:600">' + esc(t('ai.comments.spam')) + (d.reason ? '：' + esc(d.reason) : '') + '</span>'
@@ -2957,9 +2992,21 @@
     if (!list) return;
     var posts = [];
     try { posts = await listPosts(); } catch (e) {}
-    var seen = {};
-    posts.forEach(function (x) { if (x && x.category) seen[x.category] = 1; });
-    list.innerHTML = Object.keys(seen).sort().map(function (c) { return '<option value="' + esc(c) + '"></option>'; }).join('');
+    var seen = {}; var names = [];
+    // 先放后台「分类」导航里自定义的分类（软件 / 系统 / 服务器…），再补历史已用分类，保证都能选
+    var navCfg = parseArr(settingsCache && settingsCache.nav_menu, []);
+    navCfg.forEach(function (it) {
+      if (!it || String(it.url || '').replace(/\/+$/, '') !== '/categories') return;
+      (it.children || []).forEach(function (c) {
+        var name = c && String(c.text || '').trim();
+        if (name && !seen[name]) { seen[name] = 1; names.push(name); }
+      });
+    });
+    posts.forEach(function (x) {
+      var c2 = x && x.category ? String(x.category).trim() : '';
+      if (c2 && !seen[c2]) { seen[c2] = 1; names.push(c2); }
+    });
+    list.innerHTML = names.map(function (c) { return '<option value="' + esc(c) + '"></option>'; }).join('');
   }
   /** 作者候选：来自已有文章的作者 + 站点个人资料昵称 */
   async function fillAuthorOptions(content) {
@@ -4511,21 +4558,37 @@
       (cloudOn() ? '' : '<div class="ab-card"><div class="ab-empty"><div class="ab-empty-ico">⚙️</div><p>' + t('admin.settings.cloudOnly') + '</p></div></div>');
     if (!cloudOn()) return;
     content.innerHTML += '<div class="ab-tabs">' +
-      '<div class="ab-tab active" data-tab="site">' + t('admin.settings.siteInfo') + '</div>' +
+      '<div class="ab-tab" data-tab="site">' + t('admin.settings.siteInfo') + '</div>' +
       '<div class="ab-tab" data-tab="features">' + t('admin.settings.features') + '</div>' +
       '<div class="ab-tab" data-tab="profile">' + t('admin.settings.profile') + '</div>' +
       '<div class="ab-tab" data-tab="nav">' + t('admin.settings.navMenu') + '</div>' +
       '<div class="ab-tab" data-tab="footerNav">' + t('admin.settings.footerNav') + '</div>' +
       '<div class="ab-tab" data-tab="friends">' + t('admin.settings.friendLinks') + '</div>' +
       '</div><div id="abSettingsBody"></div>';
-    content.querySelectorAll('.ab-tab').forEach(function (t) { t.addEventListener('click', function () { saveTabToDraft(content); content.querySelectorAll('.ab-tab').forEach(function (x) { x.classList.remove('active'); }); t.classList.add('active'); renderSettingsTab(content, t.getAttribute('data-tab')); }); });
-    renderSettingsTab(content, 'site');
+    content.querySelectorAll('.ab-tab').forEach(function (t) { t.addEventListener('click', function () { saveTabToDraft(content); content.querySelectorAll('.ab-tab').forEach(function (x) { x.classList.remove('active'); }); t.classList.add('active'); var key = t.getAttribute('data-tab'); rememberSettingsTab(key); renderSettingsTab(content, key); }); });
+    // 恢复上次停留的标签页；记录里的标签已不存在（如后台改版增删了 tab）则回落到第一个
+    var tabsEl = content.querySelectorAll('.ab-tab');
+    var last = readSettingsTab();
+    var restored = null;
+    tabsEl.forEach(function (x) { if (x.getAttribute('data-tab') === last) restored = x; });
+    if (!restored) restored = tabsEl[0];
+    if (restored) restored.classList.add('active');
+    renderSettingsTab(content, restored ? restored.getAttribute('data-tab') : 'site');
     content.querySelector('#abSaveSettings').addEventListener('click', function () { saveSettings(content); });
     loadSettings(content);
   }
   var settingsCache = {};
   // 内存草稿：各 tab 未保存的输入在此暂存，切换 tab 不丢失数据
   var settingsDraft = { site: {}, features: { pageSize: 8, ads: {} }, profile: {}, nav: [], footerNav: [], links: [] };
+  // 记住「博客设置」上次停留的标签页，刷新页面后不再跳回「站点基础信息」
+  function settingsTabKey() { return 'qingyu.settingsTab'; }
+  function readSettingsTab() {
+    try { return String(localStorage.getItem(settingsTabKey()) || ''); } catch (e) { return ''; }
+  }
+  function rememberSettingsTab(tab) {
+    if (!tab) return;
+    try { localStorage.setItem(settingsTabKey(), String(tab)); } catch (e) {}
+  }
   async function loadSettings(content) {
     try { var d = await api('api/settings'); settingsCache = (d && d.settings) || {}; } catch (e) { settingsCache = {}; }
     // 同步到前台全局变量，确保前台渲染时读取到最新的站点设置
@@ -4561,9 +4624,12 @@
     var navItems = parseArr(s.nav_menu, defaultNavItems());
     if (Number(s.nav_defaults_version || 0) < NAV_DEFAULTS_VERSION) navItems = mergeDefaultNavItems(navItems);
     settingsDraft.nav = navItems;
+    settingsServerLoaded = true;
+    navUserEdited = false;
     settingsDraft.blocklist = String(s.comment_blocklist || '');
 
     settingsDraft.footerNav = parseArr(s.footer_nav, defaultFooterNav());
+    settingsDraft.homeTags = parseArr(s.home_tags, []).map(function (x) { return String(x).trim(); }).filter(Boolean);
     settingsDraft.links = parseArr(s.friend_links, defaultFriendLinks());
   }
   /** 默认顶部导航（与前台渲染兜底一致）：站点未自定义导航时作为基础项 */
@@ -4682,37 +4748,49 @@
         navExtras: content.querySelector('#abFeatNavExtras') ? content.querySelector('#abFeatNavExtras').checked : true
       };
     }
+    if (content.querySelector('#abHomeTags')) collectHomeTagsFromDom(content);
     if (content.querySelector('#abNavVisual')) collectNavFromDom(content);
     if (content.querySelector('#abFooterNavVisual')) collectLinksFromDom(content, 'footerNav', '#abFooterNavVisual');
     if (content.querySelector('#abFriendsVisual')) collectLinksFromDom(content, 'links', '#abFriendsVisual');
   }
-  /** 从顶部导航可视化 DOM 收集当前编辑结果到 settingsDraft.nav 并持久化草稿 */
+  /** 从顶部导航可视化 DOM 收集当前编辑结果到 settingsDraft.nav 并持久化草稿。
+   *  保留每项的 i18n / path / discover 等元信息，只覆盖用户可见的文案与链接。 */
   function collectNavFromDom(content) {
     var wrap = content.querySelector('#abNavVisual');
     if (!wrap) return;
     var newItems = [];
-    wrap.querySelectorAll('.ab-nav-row').forEach(function (row) {
-      if (row.classList.contains('child')) return; // 子项在父项中处理
-      var idx = parseInt(row.querySelector('[data-idx]').getAttribute('data-idx'), 10);
+    wrap.querySelectorAll('.ab-nav-row:not(.child)').forEach(function (row) {
+      var idx = parseInt(row.getAttribute('data-idx'), 10);
       var text = (row.querySelector('.ab-nav-text') || {}).value || '';
       var url = (row.querySelector('.ab-nav-url') || {}).value || '';
-      var children = [];
-      wrap.querySelectorAll('.ab-nav-row.child[data-idx="' + idx + '"]').forEach(function (cr) {
-        children.push({ text: (cr.querySelector('.ab-nav-text') || {}).value || '', url: (cr.querySelector('.ab-nav-url') || {}).value || '' });
-      });
       var old = settingsDraft.nav[idx] || {};
       var item = { text: text, url: url };
-      if (old.i18n) item.i18n = old.i18n;
-      if (children.length) {
-        item.children = children.map(function (c, ci) {
-          var childOld = (old.children && old.children[ci]) || {};
-          if (childOld.i18n) c.i18n = childOld.i18n;
-          return c;
+      ['i18n', 'path', 'discover'].forEach(function (k) {
+        if (old[k] !== undefined && old[k] !== null && old[k] !== '') item[k] = old[k];
+      });
+      var rowDiscover = row.getAttribute('data-discover');
+      if (rowDiscover === '1') item.discover = true;
+      else if (rowDiscover === '0') item.discover = false;
+      var childRows = wrap.querySelectorAll('.ab-nav-row.child[data-idx="' + idx + '"]');
+      if (childRows.length) {
+        item.children = [];
+        childRows.forEach(function (cr, ci) {
+          var c = {
+            text: (cr.querySelector('.ab-nav-text') || {}).value || '',
+            url: (cr.querySelector('.ab-nav-url') || {}).value || ''
+          };
+          var cOld = (old.children && old.children[ci]) || {};
+          if (cOld.i18n) c.i18n = cOld.i18n;
+          item.children.push(c);
         });
+      } else if (old.children && old.children.length) {
+        // DOM 里没有子行不等于用户要删子菜单，保留原值防止二级菜单被静默抹掉
+        item.children = old.children;
       }
       newItems.push(item);
     });
     settingsDraft.nav = newItems;
+    navUserEdited = true;
     try { localStorage.setItem(navDraftKey(), JSON.stringify(settingsDraft.nav)); } catch (e) {}
   }
   /** 从底部导航/友情链接的可视化 DOM 收集当前编辑结果到草稿 */
@@ -4762,8 +4840,103 @@
     if (content.querySelector('#abProfileBio')) content.querySelector('#abProfileBio').value = prof.bio || '';
     if (content.querySelector('#abProfileAvatar')) content.querySelector('#abProfileAvatar').value = prof.avatar || '';
     if (content.querySelector('#abProfileEmail')) content.querySelector('#abProfileEmail').value = prof.email || '';
+    // 服务端数据回来后重画一次导航编辑器，补上二级菜单与自定义项（用户已手动改过则不覆盖）
+    if (content.querySelector('#abNavVisual') && !navUserEdited) renderNavVisual(content);
   }
   function safeJson(v) { if (!v) return {}; if (typeof v === 'object') return v; try { return JSON.parse(v); } catch (e) { return {}; } }
+  /* ---------- 首页标签显示管理 ----------
+   * 文章一多，标签会越堆越多，首页标签条会被拉得很长。这里让站长自己勾选
+   * 「首页要显示哪些标签」：白名单存site_settings.home_tags（JSON 数组），
+   * 为空 = 保持原样全部显示；前台 renderHomeTagRow 只渲染白名单内的标签。
+   * 支持手动补一个「暂时还没有文章使用」的标签，避免必须先发文章才能选它。 */
+  function homeTagCounts() {
+    // 优先用前台已渲染的标签统计（页面刚打开时同步可用），否则退回已加载的文章列表
+    var counts = {};
+    try {
+      var chips = document.querySelectorAll('.home-tag-text');
+      for (var i = 0; i < chips.length; i++) {
+        var n = String(chips[i].textContent || '').trim();
+        if (n) counts[n] = 0;
+      }
+    } catch (e) {}
+    return counts;
+  }
+  function mergeTagCounts(counts, list) {
+    (list || []).forEach(function (p) {
+      (p && p.tags ? p.tags : []).forEach(function (t) {
+        var k = String(t).trim(); if (k) counts[k] = (counts[k] || 0) + 1;
+      });
+    });
+    return counts;
+  }
+  function renderHomeTagPicker(content) {
+    var box = content.querySelector('#abHomeTags');
+    if (!box) return;
+    var counts = homeTagCounts();
+    var chosen = (settingsDraft.homeTags || []).slice();
+    box.innerHTML = '<span class="ab-hint">' + t('admin.settings.featHomeTagsLoading') + '</span>';
+    listFullPosts().then(function (list) {
+      mergeTagCounts(counts, list);
+      draw();
+    }).catch(function () { draw(); });
+    function draw() {
+      var names = Object.keys(counts).sort(function (a, b) {
+        var d = (counts[b] || 0) - (counts[a] || 0);
+        return d !== 0 ? d : a.localeCompare(b);
+      });
+      // 已选但当前没有文章的标签也要显示出来，否则选了就看不见、也删不掉
+      chosen.forEach(function (n) { if (names.indexOf(n) < 0) names.push(n); });
+      var html = '';
+      if (!names.length) {
+        html = '<span class="ab-hint">' + t('admin.settings.featHomeTagsEmpty') + '</span>';
+      } else {
+        html = names.map(function (n) {
+          var on = chosen.indexOf(n) >= 0;
+          var c = counts[n] || 0;
+          return '<button type="button" class="ab-tagchip' + (on ? ' on' : '') + '" data-tagpick="' + esc(n) + '">'
+            + esc(n) + (c ? '<span class="ab-tagchip-n">' + c + '</span>' : '') + '</button>';
+        }).join('');
+      }
+      box.innerHTML = html;
+      box.querySelectorAll('[data-tagpick]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var n = btn.getAttribute('data-tagpick');
+          var i = chosen.indexOf(n);
+          if (i >= 0) chosen.splice(i, 1); else chosen.push(n);
+          settingsDraft.homeTags = chosen.slice();
+          draw();
+        });
+      });
+    }
+    function addTag() {
+      var inp = content.querySelector('#abHomeTagInput');
+      var n = String((inp && inp.value) || '').trim();
+      if (!n) return;
+      if (chosen.indexOf(n) < 0) chosen.push(n);
+      counts[n] = counts[n] || 0;
+      settingsDraft.homeTags = chosen.slice();
+      if (inp) inp.value = '';
+      draw();
+    }
+    var addBtn = content.querySelector('#abHomeTagAdd');
+    if (addBtn) addBtn.addEventListener('click', addTag);
+    var clrBtn = content.querySelector('#abHomeTagClear');
+    if (clrBtn) clrBtn.addEventListener('click', function () {
+      chosen = []; settingsDraft.homeTags = []; draw();
+    });
+    var inp = content.querySelector('#abHomeTagInput');
+    if (inp) inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); addTag(); } });
+    draw();
+  }
+  function collectHomeTagsFromDom(content) {
+    var box = content.querySelector('#abHomeTags');
+    if (!box) return;
+    var out = [];
+    box.querySelectorAll('[data-tagpick]').forEach(function (btn) {
+      if (btn.classList.contains('on')) out.push(btn.getAttribute('data-tagpick'));
+    });
+    settingsDraft.homeTags = out;
+  }
   function renderSettingsTab(content, tab) {
     var body = content.querySelector('#abSettingsBody');
     if (tab === 'site') {
@@ -4796,6 +4969,13 @@
         '<div class="ab-field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input type="checkbox" id="abFeatErrReport"> ' + t('admin.settings.featErrReport') + '</label><label class="ab-hint">' + t('admin.settings.featErrReportHint') + '</label></div>' +
         '<div class="ab-section-title" style="margin-top:16px">' + icon('quote', 15) + ' ' + t('admin.settings.featAntiSpam') + '</div>' +
         '<div class="ab-field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input type="checkbox" id="abFeatCommentGuard"> ' + t('admin.settings.featCommentGuard') + '</label><label class="ab-hint">' + t('admin.settings.featCommentGuardHint') + '</label></div>' +
+        '<div class="ab-section-title" style="margin-top:16px">' + icon('tag', 15) + ' ' + t('admin.settings.featHomeTags') + '</div>' +
+        '<div class="ab-field"><label class="ab-hint">' + t('admin.settings.featHomeTagsHint') + '</label>' +
+        '<div id="abHomeTags" class="ab-tagpick"></div>' +
+        '<div class="ab-row" style="gap:8px;margin-top:10px;flex-wrap:wrap">' +
+        '<input class="ab-input" id="abHomeTagInput" style="flex:1;min-width:160px" placeholder="' + t('admin.settings.featHomeTagAdd') + '">' +
+        '<button class="ab-btn" id="abHomeTagAdd">' + icon('plus', 14) + ' ' + t('admin.settings.featHomeTagAddBtn') + '</button>' +
+        '<button class="ab-btn" id="abHomeTagClear">' + t('admin.settings.featHomeTagClear') + '</button></div></div>' +
         '<div class="ab-section-title" style="margin-top:16px">' + icon('spark', 15) + ' ' + t('admin.settings.featAds') + '</div>' +
         '<div class="ab-field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input type="checkbox" id="abAdsEnabled"> ' + t('admin.settings.featAdsEnable') + '</label><label class="ab-hint">' + t('admin.settings.featAdsEnableHint') + '</label></div>' +
         '<div class="ab-field"><label class="ab-label">' + t('admin.settings.featAdsClient') + '</label><input class="ab-input" id="abAdsClient" placeholder="ca-pub-xxxxxxxxxxxxxxxx"></div>' +
@@ -4805,6 +4985,7 @@
         '<div class="ab-field"><label class="ab-label">' + t('admin.settings.featAdsContent') + '</label><textarea class="ab-textarea" id="abAdsContent" style="min-height:80px"></textarea></div>' +
         '<label class="ab-hint">' + t('admin.settings.featAdsCodeHint') + '</label>' +
         '</div>';
+      renderHomeTagPicker(content);
     } else if (tab === 'profile') {
       body.innerHTML = '<div class="ab-card" style="max-width:620px">' +
         '<div class="ab-avatar-edit"><img class="ab-avatar-prev" id="abProfPrev" src=""><div><div class="ab-label" style="margin:0">' + t('admin.settings.profileAvatar') + '</div><div class="ab-hint">' + t('admin.settings.avatarUrl') + '</div></div></div>' +
@@ -4892,6 +5073,7 @@
       },
       nav_menu: JSON.stringify(Array.isArray(settingsDraft.nav) ? settingsDraft.nav : []),
       nav_defaults_version: String(NAV_DEFAULTS_VERSION),
+      home_tags: JSON.stringify(Array.isArray(settingsDraft.homeTags) ? settingsDraft.homeTags : []),
       footer_nav: JSON.stringify(Array.isArray(settingsDraft.footerNav) ? settingsDraft.footerNav : []),
       friend_links: JSON.stringify(Array.isArray(settingsDraft.links) ? settingsDraft.links : []),
       moderate_comments: site.moderate ? '1' : '0',
@@ -4912,6 +5094,7 @@
         site_info: JSON.stringify(payload.site_info), profile: JSON.stringify(payload.profile),
         nav_menu: payload.nav_menu, footer_nav: payload.footer_nav, friend_links: payload.friend_links,
         nav_defaults_version: payload.nav_defaults_version,
+        home_tags: payload.home_tags,
         moderate_comments: payload.moderate_comments, features: payload.features
       });
       // 同步到前台全局变量，使站点名称/导航/页脚/友链等设置立即生效（无需刷新整页）
@@ -4925,57 +5108,137 @@
   /* ---------- 可视化导航编辑器 ----------
    * 直接读写内存 settingsDraft.nav 数组，无需 JSON 中转，保存时由 saveSettings 统一取用。
    * 保留 localStorage 临时草稿，刷新/切页不丢失未保存的导航编辑。 */
+  var settingsServerLoaded = false;
+  var navUserEdited = false;
   function navDraftKey() { return 'qingyu.settingsNavDraft'; }
   function loadNavDraft() {
     try { var v = JSON.parse(localStorage.getItem(navDraftKey()) || 'null'); if (Array.isArray(v)) return v; } catch (e) {}
     return null;
   }
+  /* 内置「发现」二级入口（按路径识别，兼容旧数据）：这几个默认出现在「发现」下拉里；「分类」已独立为一级导航，不在此列表。 */
+  var NAV_DISCOVER_PATHS = { '/tags': 1, '/history': 1, '/series': 1, '/popular': 1 };
+  function navKeyOf(u) {
+    var v = String(u == null ? '/' : u).replace(/^#/, '');
+    if (v.charAt(0) !== '/') return v;
+    return v.replace(/\/+$/, '') || '/';
+  }
+  /** 合并导航草稿：以服务端 nav_menu 为底，草稿只覆盖文案/地址/发现开关与新增项；
+   *  二级菜单 children 以服务端为准（服务端没有时才用草稿里的），
+   *  避免一份过期草稿把整个二级菜单抹掉、或草稿新增的自定义项丢失。 */
+  function mergeNavDraft(base, draft) {
+    var b = Array.isArray(base) ? base : [];
+    var d = Array.isArray(draft) ? draft : null;
+    if (!d || !d.length) return b;
+    var out = b.map(function (it) {
+      var hit = null;
+      d.forEach(function (di) { if (!hit && navUrlKey(di) === navUrlKey(it)) hit = di; });
+      var merged = {};
+      Object.keys(it || {}).forEach(function (k) { merged[k] = it[k]; });
+      if (hit) {
+        if (hit.text !== undefined) merged.text = hit.text;
+        if (hit.url !== undefined) merged.url = hit.url;
+        if (hit.discover !== undefined) merged.discover = hit.discover;
+      }
+      var kids = (it && it.children && it.children.length) ? it.children : (hit && hit.children);
+      if (kids && kids.length) merged.children = kids;
+      else delete merged.children;
+      return merged;
+    });
+    d.forEach(function (di) {
+      var k = navUrlKey(di);
+      if (out.some(function (o) { return navUrlKey(o) === k; })) return;
+      var copy = {};
+      Object.keys(di || {}).forEach(function (key) { copy[key] = di[key]; });
+      out.push(copy);
+    });
+    return out;
+  }
+  /** 编辑器当前该显示哪份导航：服务端数据未回来之前不读草稿（否则默认值会被当成用户数据
+   *  写进草稿并永久遮蔽真实导航）；数据回来后以服务端为底合并本地草稿。 */
+  function resolveNavItems() {
+    var saved = settingsServerLoaded ? loadNavDraft() : null;
+    return mergeNavDraft(settingsDraft.nav, saved);
+  }
+  function isDiscoverNav(it) {
+    if (!it) return false;
+    // 与前台保持一致：discover === false 表示用户明确移出「发现」，内置入口也不例外
+    if (it.discover === false) return false;
+    return !!NAV_DISCOVER_PATHS[navKeyOf(it.url)] || !!it.discover;
+  }
+
   function renderNavVisual(content) {
     var wrap = content.querySelector('#abNavVisual');
     if (!wrap) return;
-    var saved = loadNavDraft();
-    var items = saved ? saved : settingsDraft.nav;
+    var items = resolveNavItems();
     if (!Array.isArray(items) || !items.length) items = defaultNavItems();
     settingsDraft.nav = items;
 
-    wrap.innerHTML = (items.length ? '<div class="ab-nav-list">' + items.map(function (it, i) {
-      var children = (it.children || []).map(function (ch, ci) {
-        return '<div class="ab-nav-row child">' +
-          '<span class="ab-nav-ico">└</span>' +
+    var dragSrc = null;
+
+    function persist() { if (!settingsServerLoaded) return; try { localStorage.setItem(navDraftKey(), JSON.stringify(settingsDraft.nav)); } catch (e) {} }
+    function refresh() { persist(); renderNavVisual(content); }
+
+    function childRowsHtml(it, i) {
+      return (it.children || []).map(function (ch, ci) {
+        return '<div class="ab-nav-row child" data-idx="' + i + '" data-cidx="' + ci + '">' +
+          '<span class="ab-nav-drag" draggable="true" data-idx="' + i + '" data-cidx="' + ci + '" title="' + t('admin.settings.navDragHandle') + '">' + icon('grip', 14) + '</span>' +
           '<input class="ab-input ab-nav-text" data-idx="' + i + '" data-cidx="' + ci + '" value="' + esc(ch.text || '') + '" placeholder="' + t('admin.settings.subMenu') + '">' +
           '<input class="ab-input ab-nav-url" data-idx="' + i + '" data-cidx="' + ci + '" value="' + esc(ch.url || '') + '" placeholder="/path">' +
+          '<span class="ab-nav-slot"></span><span class="ab-nav-slot"></span>' +
           '<button class="ab-btn-icon danger" data-rmchild="' + i + '-' + ci + '" title="' + t('admin.comments.delete') + '">' + icon('trash', 14) + '</button>' +
         '</div>';
       }).join('');
-      return '<div class="ab-nav-row">' +
-        '<span class="ab-nav-ico">' + icon('list', 14) + '</span>' +
-        '<input class="ab-input ab-nav-text" data-idx="' + i + '" value="' + esc(it.text || '') + '" placeholder="' + t('admin.settings.newMenu') + '">' +
-        '<input class="ab-input ab-nav-url" data-idx="' + i + '" value="' + esc(it.url || '') + '" placeholder="/path">' +
-        '<button class="ab-btn-icon" data-addchild="' + i + '" title="' + t('admin.settings.subMenu') + '">' + icon('plus', 14) + '</button>' +
-        '<button class="ab-btn-icon danger" data-rmitem="' + i + '" title="' + t('admin.comments.delete') + '">' + icon('trash', 14) + '</button>' +
-      '</div>' + children;
-    }).join('') + '</div>' : '<div class="ab-hint">' + t('admin.settings.navEmpty') + '</div>');
+    }
+
+    wrap.innerHTML = '<div class="ab-nav-tip">' + icon('grip', 13) + ' ' + t('admin.settings.navDragHint') + '</div>' +
+      (items.length ? '<div class="ab-nav-list">' + items.map(function (it, i) {
+        var builtin = !!NAV_DISCOVER_PATHS[navKeyOf(it.url)];
+        var inDiscover = isDiscoverNav(it);
+        // 三态：'1' 明确放入 / '0' 明确移出（含内置入口）/ null 未设置（内置项保持默认在「发现」里）
+        var state = it.discover === true ? '1' : (it.discover === false ? '0' : null);
+        var badge = (builtin && inDiscover) ? '<span class="ab-nav-badge">' + t('admin.settings.navDiscoverBadge') + '</span>' : '';
+        var toggle = badge + '<button class="ab-btn-icon' + (inDiscover ? ' is-on' : '') + '" data-toggle-discover="' + i + '"'
+          + ' title="' + t(inDiscover ? 'admin.settings.navDiscoverRemove' : 'admin.settings.navDiscoverToggle') + '">' + icon('layers', 14) + '</button>';
+        return '<div class="ab-nav-group"><div class="ab-nav-row' + (inDiscover ? ' is-discover' : '') + '" data-idx="' + i + '"'
+          + (state === null ? '' : ' data-discover="' + state + '"') + '>' +
+          '<span class="ab-nav-drag" draggable="true" data-idx="' + i + '" title="' + t('admin.settings.navDragHandle') + '">' + icon('grip', 14) + '</span>' +
+          '<input class="ab-input ab-nav-text" data-idx="' + i + '" value="' + esc(it.text || '') + '" placeholder="' + t('admin.settings.newMenu') + '">' +
+          '<input class="ab-input ab-nav-url" data-idx="' + i + '" value="' + esc(it.url || '') + '" placeholder="/path">' +
+          '<span class="ab-nav-discover">' + toggle + '</span>' +
+          '<button class="ab-btn-icon" data-addchild="' + i + '" title="' + t('admin.settings.subMenu') + '">' + icon('plus', 14) + '</button>' +
+          '<button class="ab-btn-icon danger" data-rmitem="' + i + '" title="' + t('admin.comments.delete') + '">' + icon('trash', 14) + '</button>' +
+        '</div>' + childRowsHtml(it, i) + '</div>';
+      }).join('') + '</div>' : '<div class="ab-hint">' + t('admin.settings.navEmpty') + '</div>');
 
     wrap.innerHTML += '<div class="ab-nav-actions" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">' +
       '<button class="ab-btn sm" id="abNavAddItem">' + icon('plus', 13) + ' ' + t('admin.settings.addMenuItem') + '</button>' +
       '<button class="ab-btn sm ghost" id="abNavReset">' + icon('refresh', 13) + ' ' + t('admin.settings.resetDefault') + '</button>' +
     '</div>';
 
-    function persist() { try { localStorage.setItem(navDraftKey(), JSON.stringify(settingsDraft.nav)); } catch (e) {} }
-
-    wrap.querySelectorAll('input').forEach(function (inp) { inp.addEventListener('input', debounce(function () { collectNavFromDom(content); }, 250)); });
+    wrap.querySelectorAll('input').forEach(function (inp) {
+      inp.addEventListener('input', debounce(function () { collectNavFromDom(content); }, 250));
+    });
 
     wrap.querySelector('#abNavAddItem').addEventListener('click', function () {
       settingsDraft.nav.push({ text: t('admin.settings.newMenu'), url: '/' });
-      persist();
-      renderNavVisual(content);
+      refresh();
     });
 
     var resetBtn = wrap.querySelector('#abNavReset');
     if (resetBtn) resetBtn.addEventListener('click', function () {
       settingsDraft.nav = defaultNavItems();
-      persist();
-      renderNavVisual(content);
+      refresh();
+    });
+
+    wrap.querySelectorAll('[data-toggle-discover]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var idx = parseInt(btn.getAttribute('data-toggle-discover'), 10);
+        var it = settingsDraft.nav[idx];
+        if (!it) return;
+        // 再次点击即取消：内置入口（标签/历史/系列/热门）也能移出「发现」，回到一级导航
+        it.discover = isDiscoverNav(it) ? false : true;
+        refresh();
+      });
     });
 
     wrap.querySelectorAll('[data-addchild]').forEach(function (btn) {
@@ -4984,8 +5247,7 @@
         if (!settingsDraft.nav[idx]) return;
         if (!settingsDraft.nav[idx].children) settingsDraft.nav[idx].children = [];
         settingsDraft.nav[idx].children.push({ text: t('admin.settings.subMenu'), url: '/' });
-        persist();
-        renderNavVisual(content);
+        refresh();
       });
     });
 
@@ -4993,8 +5255,7 @@
       btn.addEventListener('click', function () {
         var idx = parseInt(btn.getAttribute('data-rmitem'), 10);
         settingsDraft.nav.splice(idx, 1);
-        persist();
-        renderNavVisual(content);
+        refresh();
       });
     });
 
@@ -5003,13 +5264,126 @@
         var parts = btn.getAttribute('data-rmchild').split('-');
         var idx = parseInt(parts[0], 10), cidx = parseInt(parts[1], 10);
         if (settingsDraft.nav[idx] && settingsDraft.nav[idx].children) settingsDraft.nav[idx].children.splice(cidx, 1);
-        persist();
-        renderNavVisual(content);
+        refresh();
+      });
+    });
+
+    /* ---------- 拖拽排序：一级项之间、一级与二级之间、二级之间都可拖动 ---------- */
+    function clearMarks() {
+      wrap.querySelectorAll('.ab-nav-row, .ab-nav-group').forEach(function (r) {
+        r.classList.remove('drop-before', 'drop-after', 'drop-into');
+      });
+    }
+    function applyDrop(src, row) {
+      if (!src || !row) return false;
+      var isChild = row.classList.contains('child');
+      // 父级行的落点标记画在整个分组（父级+子级）上，所以读标记要看分组
+      var mark = (!isChild && row.parentNode && row.parentNode.classList.contains('ab-nav-group')) ? row.parentNode : row;
+      if (src.kind === 'item' && isChild && parseInt(row.getAttribute('data-idx'), 10) === src.idx) return false; // 不能拖成自己的子级
+      var ridx = parseInt(row.getAttribute('data-idx'), 10);
+      if (src.kind === 'child') {
+        var parent = settingsDraft.nav[src.idx];
+        if (!parent || !parent.children || !parent.children[src.cidx]) return false;
+        var moving = parent.children.splice(src.cidx, 1)[0];
+        if (isChild && ridx === src.idx) {
+          var kids = settingsDraft.nav[src.idx].children;
+          var tc = parseInt(row.getAttribute('data-cidx'), 10);
+          var pos = tc + (mark.classList.contains('drop-after') ? 1 : 0);
+          if (mark.classList.contains('drop-into')) pos = kids.length;
+          kids.splice(Math.max(0, Math.min(pos, kids.length)), 0, moving);
+        } else if (isChild) {
+          var target = settingsDraft.nav[ridx];
+          if (!target) { parent.children.splice(src.cidx, 0, moving); return false; }
+          if (!target.children) target.children = [];
+          target.children.push(moving);
+        } else {
+          // 拖回一级：插到该行前面
+          var arr = settingsDraft.nav;
+          var pos2 = ridx + (mark.classList.contains('drop-after') ? 1 : 0);
+          if (pos2 > arr.length) pos2 = arr.length;
+          arr.splice(pos2, 0, moving);
+        }
+        return true;
+      }
+      var list = settingsDraft.nav;
+      if (!list[src.idx]) return false;
+      var item = list.splice(src.idx, 1)[0];
+      if (isChild) {
+        var host = settingsDraft.nav[ridx];
+        if (!host) { list.splice(Math.min(src.idx, list.length), 0, item); return false; }
+        if (!host.children) host.children = [];
+        var cpos = host.children.length;
+        if (mark.classList.contains('drop-after')) {
+          cpos = parseInt(row.getAttribute('data-cidx'), 10) + 1;
+        }
+        if (cpos > host.children.length) cpos = host.children.length;
+        host.children.splice(cpos, 0, item);
+      } else {
+        var pos = ridx + (mark.classList.contains('drop-after') ? 1 : 0);
+        if (pos > list.length) pos = list.length;
+        list.splice(pos, 0, item);
+      }
+      return true;
+    }
+
+    wrap.querySelectorAll('.ab-nav-drag').forEach(function (h) {
+      h.addEventListener('dragstart', function (e) {
+        var idx = parseInt(h.getAttribute('data-idx'), 10);
+        var cidx = h.getAttribute('data-cidx');
+        dragSrc = cidx === null ? { kind: 'item', idx: idx } : { kind: 'child', idx: idx, cidx: parseInt(cidx, 10) };
+        var row = h.closest ? h.closest('.ab-nav-row') : null;
+        if (row) row.classList.add('dragging');
+        // 父级：整组（父级 + 二级子级）一起高亮，让「成组拖拽」看得见
+        if (dragSrc.kind === 'item') {
+          var grp = h.closest ? h.closest('.ab-nav-group') : null;
+          if (grp) grp.classList.add('dragging');
+        }
+        try {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', String(idx));
+        } catch (err) {}
+      });
+      h.addEventListener('dragend', function () {
+        dragSrc = null;
+        clearMarks();
+        wrap.querySelectorAll('.ab-nav-row').forEach(function (r) { r.classList.remove('dragging'); });
+        wrap.querySelectorAll('.ab-nav-group').forEach(function (g) { g.classList.remove('dragging'); });
+      });
+    });
+
+    wrap.querySelectorAll('.ab-nav-row').forEach(function (row) {
+      row.addEventListener('dragover', function (e) {
+        if (!dragSrc) return;
+        e.preventDefault();
+        try { e.dataTransfer.dropEffect = 'move'; } catch (err) {}
+        clearMarks();
+        var r = row.getBoundingClientRect();
+        var ratio = (e.clientY - r.top) / (r.height || 1);
+        if (row.classList.contains('child')) {
+          // 子项行：靠上/靠中拖进该子项的父级，靠下插到它后面
+          if (ratio < 0.34) { row.classList.add('drop-into'); row.classList.remove('drop-after'); }
+          else { row.classList.add('drop-after'); row.classList.remove('drop-into'); }
+        } else {
+          // 父级：落点标记画在整个分组上（父级 + 所有子级一起移动）
+          var grp2 = row.parentNode && row.parentNode.classList.contains('ab-nav-group') ? row.parentNode : row;
+          grp2.classList.add(ratio < 0.5 ? 'drop-before' : 'drop-after');
+        }
+      });
+      row.addEventListener('dragleave', function () {
+        row.classList.remove('drop-before', 'drop-after', 'drop-into');
+        var gl = row.parentNode;
+        if (gl && gl.classList && gl.classList.contains('ab-nav-group')) gl.classList.remove('drop-before', 'drop-after');
+      });
+      row.addEventListener('drop', function (e) {
+        if (!dragSrc) return;
+        e.preventDefault();
+        e.stopPropagation();
+        clearMarks();
+        if (applyDrop(dragSrc, row)) { dragSrc = null; refresh(); }
+        else { dragSrc = null; }
       });
     });
   }
-
-
   /* ====================== 修改密码 ====================== */
   function openPasswordModal(onSuccess) {
     var mask = document.createElement('div');
@@ -5053,6 +5427,8 @@
     },
     _offline: { read: readOfflineQueue, queue: queueOfflinePost, flush: flushOfflineQueue, isNetworkFailure: isNetworkFailure },
     _list: { paginatePosts: paginatePosts },
+    _settingsTab: { key: settingsTabKey, read: readSettingsTab, remember: rememberSettingsTab, page: pageSettings },
+    _navDraft: { key: navDraftKey, load: loadNavDraft, merge: mergeNavDraft, resolve: resolveNavItems, setServerLoaded: function (v) { settingsServerLoaded = !!v; }, setDraft: function (items) { settingsDraft.nav = items; }, state: function () { return { serverLoaded: settingsServerLoaded, edited: navUserEdited }; } },
     _staticExport: { rebase: staticRebase, page: staticPageFromTemplate, postDir: staticPostDir },
     _editor: {
       draft: { key: editorDraftKey, read: readEditorDraft, write: writeEditorDraft, clear: clearEditorDraft },
