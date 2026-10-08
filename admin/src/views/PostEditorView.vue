@@ -15,6 +15,7 @@ import {
 } from '../lib/api';
 import { debounce, slugify, formatDateTime } from '../lib/format';
 import { toast } from '../lib/toast';
+import CollapsibleSection from '../components/ui/CollapsibleSection.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -1254,25 +1255,6 @@ onUnmounted(() => {
           placeholder="文章标题"
         />
 
-        <div class="card overflow-hidden">
-        <!-- 本地草稿提示（崩溃 / 误关后可恢复） -->
-        <div
-          v-if="draftFound"
-          class="flex items-center gap-2 flex-wrap border-b border-line bg-surface-2 px-3 py-2.5"
-        >
-          <span class="flex items-center gap-1.5 text-[13px] text-ink-soft">
-            <Save :size="14" />
-            发现 {{ formatDateTime(draftFound.savedAt) }} 自动保存的本地草稿
-          </span>
-          <div class="ml-auto flex items-center gap-1.5">
-            <button class="btn btn-sm btn-secondary" @click="restoreDraft">
-              <Undo2 :size="14" />
-              恢复草稿
-            </button>
-            <button class="btn btn-sm btn-ghost" @click="discardDraft">丢弃草稿</button>
-          </div>
-        </div>
-
         <!-- AI 写作助手：服务端未配置 AI 时整块隐藏 -->
         <div v-if="aiAvailable" class="card p-3.5 space-y-3">
           <div class="flex items-center gap-2 flex-wrap">
@@ -1304,7 +1286,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <p class="hint -mt-1">标题与标签基于当前填写内容，润色、翻译作用于正文。</p>
+          <p v-if="aiResult" class="hint -mt-1">标题与标签基于当前填写内容，润色、翻译作用于正文。</p>
 
           <p v-if="aiError" class="text-[12.5px] text-danger">{{ aiError }}</p>
 
@@ -1333,8 +1315,27 @@ onUnmounted(() => {
           </div>
         </div>
 
-          <!-- 编辑模式切换 -->
-          <div class="flex items-center gap-1 px-2 py-1.5 border-b border-line bg-surface-2">
+        <div class="card overflow-hidden">
+        <!-- 本地草稿提示（崩溃 / 误关后可恢复） -->
+        <div
+          v-if="draftFound"
+          class="flex items-center gap-2 flex-wrap border-b border-line bg-surface-2 px-3 py-2.5"
+        >
+          <span class="flex items-center gap-1.5 text-[13px] text-ink-soft">
+            <Save :size="14" />
+            发现 {{ formatDateTime(draftFound.savedAt) }} 自动保存的本地草稿
+          </span>
+          <div class="ml-auto flex items-center gap-1.5">
+            <button class="btn btn-sm btn-secondary" @click="restoreDraft">
+              <Undo2 :size="14" />
+              恢复草稿
+            </button>
+            <button class="btn btn-sm btn-ghost" @click="discardDraft">丢弃草稿</button>
+          </div>
+        </div>
+
+          <!-- 模式切换 + Markdown 工具：合成一条操作条（原来是上下两条横条） -->
+          <div class="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1.5 border-b border-line bg-surface-2">
             <button
               v-for="tab in ([
                 ['write', '编辑', Pencil],
@@ -1349,12 +1350,9 @@ onUnmounted(() => {
               <component :is="tab[2]" :size="14" />
               <span class="hidden sm:inline">{{ tab[1] }}</span>
             </button>
-          </div>
-
-          <div class="grid" :class="mode === 'split' ? 'md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-line' : ''">
-            <!-- 写作区：Markdown 工具栏 + textarea + 统计 -->
-            <div v-if="mode !== 'preview'" class="flex min-w-0 flex-col">
-              <div class="flex flex-wrap items-center gap-0.5 border-b border-line bg-surface-2 px-2 py-1.5">
+            <template v-if="mode !== 'preview'">
+              <span class="h-4 w-px shrink-0 bg-line" aria-hidden="true" />
+              <div class="flex min-w-0 flex-wrap items-center gap-1">
                 <button class="btn btn-sm btn-ghost !px-1.5" title="加粗" @mousedown.prevent="insertMd('bold')">
                   <Bold :size="15" />
                 </button>
@@ -1416,7 +1414,12 @@ onUnmounted(() => {
                   <Smile :size="15" />
                 </button>
               </div>
+            </template>
+          </div>
 
+          <div class="grid" :class="mode === 'split' ? 'md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-line' : ''">
+            <!-- 写作区：Markdown 工具栏 + textarea + 统计 -->
+            <div v-if="mode !== 'preview'" class="flex min-w-0 flex-col">
               <!-- 表情面板：内联展开，避免被卡片的 overflow-hidden 裁切 -->
               <div
                 v-if="emojiOpen"
@@ -1461,9 +1464,20 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div class="flex items-center gap-2 border-t border-line px-3 py-2 text-[12px] text-ink-muted">
-            <span v-if="draftSavedAt">本地草稿已自动保存：{{ formatDateTime(draftSavedAt) }}</span>
-            <span v-else>编辑中每 10 秒自动保存本地草稿（加密文章不保存），崩溃后可恢复。</span>
+          <!-- 统计 + 草稿状态合成一条（原来底部还有单独一条提示横条） -->
+          <div
+            class="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line px-3 py-1.5
+                   text-[12px] text-ink-muted tabular-nums"
+          >
+            <span>
+              {{ editorStats.lines }} 行 · {{ editorStats.chars }} 字符 ·
+              {{ editorStats.words }} 词 · 约 {{ editorStats.minutes }} 分钟
+            </span>
+            <span v-if="pasting" class="text-[var(--accent)]">图片上传中…</span>
+            <span class="ml-auto truncate">
+              {{ draftSavedAt ? '草稿已保存 ' + formatDateTime(draftSavedAt) : '每 10 秒自动保存草稿' }}
+            </span>
+            <span class="hidden sm:inline" title="Ctrl/⌘+B 加粗 · I 斜体 · K 链接 · S 保存">快捷键</span>
           </div>
         </div>
       </div>
@@ -1588,10 +1602,11 @@ onUnmounted(() => {
             </button>
           </div>
 
-          <!-- 分享图（OG） -->
-          <div class="space-y-3 border-t border-line pt-3">
+        </section>
+
+        <!-- 分享图（OG）：低频项，默认折叠，避免和封面挤在一起 -->
+        <CollapsibleSection title="分享图（OG）" :default-open="false" storage-key="og">
             <div class="flex items-center justify-between gap-2">
-              <h3 class="text-[13px] font-semibold text-ink-soft">分享图（OG）</h3>
               <label class="flex cursor-pointer items-center gap-1.5 text-[12px] text-ink-soft">
                 <input v-model="ogAuto" type="checkbox" class="accent-[var(--accent)]" />
                 保存时自动生成
@@ -1626,8 +1641,7 @@ onUnmounted(() => {
               </button>
             </div>
             <p class="hint">画布 1200×630，按标题 / 日期 / 标签 / 系列自动生成；勾选上方选项后，保存文章时内容变了会自动重画。</p>
-          </div>
-        </section>
+        </CollapsibleSection>
 
         <!-- 属性 -->
         <section class="card p-4 space-y-3.5">
@@ -1690,8 +1704,7 @@ onUnmounted(() => {
         </section>
 
         <!-- SEO -->
-        <section class="card p-4 space-y-3.5">
-          <h2 class="text-[13px] font-semibold text-ink-soft">SEO 覆盖</h2>
+        <CollapsibleSection title="SEO 覆盖" :default-open="false" storage-key="seo">
           <p class="text-[12px] text-ink-muted -mt-1">留空则自动生成标题、描述与 canonical。</p>
 
           <div>
@@ -1710,7 +1723,7 @@ onUnmounted(() => {
             <input v-model="form.seo.noindex" type="checkbox" class="accent-[var(--accent)] size-4" />
             不被搜索引擎索引
           </label>
-        </section>
+        </CollapsibleSection>
       </aside>
     </div>
 
