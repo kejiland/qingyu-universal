@@ -8,7 +8,7 @@
  * ============================================================ */
 'use strict';
 
-var CACHE_VERSION = '2.10.93';
+var CACHE_VERSION = '2.10.94';
 var SHELL_CACHE = 'qingyu-shell-' + CACHE_VERSION;
 var RUNTIME_CACHE = 'qingyu-runtime-' + CACHE_VERSION;
 // 只预缓存「首屏必需」资源：后台编辑器 / 音乐播放器 / 背景动画体积大且用不到，
@@ -127,6 +127,13 @@ self.addEventListener('fetch', function (event) {
   if (!isSameOrigin(url) || url.pathname === '/sw.js' || request.headers.has('Range')) return;
 
   if (request.mode === 'navigate') {
+    /* 后台（/admin）是在线应用，永远走网络、不进 Service Worker：
+     * 离线回退返回的是公开站外壳，而 boot.js 检测到 /admin 路径会加载
+     * admin-legacy 旧后台 —— 网络一旦瞬断（容器重启/代理抖动），同一个
+     * /admin 地址就会渲染成旧版后台，刷新后又变回来，表现为
+     * 「第一次打开一个样、刷新后另一个样」。直接放行让浏览器走网络，
+     * 服务端在 admin/dist 存在时恒定返回新后台。 */
+    if (url.pathname === '/admin' || url.pathname.indexOf('/admin/') === 0) return;
     event.respondWith(networkFirstNavigation(request));
   } else if (isReadableApi(url)) {
     event.respondWith(networkFirstApi(request));
