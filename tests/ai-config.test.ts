@@ -1,16 +1,20 @@
 /* ============================================================
  * 护栏：后台 AI 配置（自托管版专有能力）
  * ------------------------------------------------------------
- * 钉死三件最容易悄悄坏掉的事：
+ * 钉死四件最容易悄悄坏掉的事：
  *
- * 1）合并规则：字段留空 → 沿用 .env；字段有值 → 覆盖。
- *    坏掉的典型后果是「后台只改模型名，结果地址或 Key 被写空」。
+ * 1）**唯一真源是数据库**。曾经还有一层 .env 兜底（留空 = 沿用 .env），
+ *    同一项两个真源让「到底哪份在生效」变成猜谜，且 .env 改完还得重启。
+ *    现在未设置的字段一律用代码里的默认值常量，config.ts 不读任何 AI_*。
  *
- * 2）三态语义：undefined 不修改 / null 清空 / 值覆盖。
- *    这个真出过 bug：早先版本把 null 也当成「不修改」，于是后台的
- *    「恢复 .env 配置」按钮点了没反应，overridden 一直是 true。
+ * 2）PUT 的三态语义：undefined 不修改 / null 清空 / 具体值覆盖。
+ *    这个真出过 bug：早先版本把 null 也当成「不修改」，于是「清空配置」
+ *    按钮点了没反应。
  *
  * 3）API Key 不出现在任何对外响应里（只给掩码）。
+ *
+ * 4）/models 的返回形状各家不一样，归一化必须认得全（OpenAI 的 data、
+ *    Ollama 的 models、裸数组），否则后台「拉取模型」永远拉到空列表。
  *
  * 另外确认迁移会建表——否则老库升级后接口会直接 500。
  * ============================================================ */
@@ -21,23 +25,14 @@ import path from 'node:path';
 import { createD1 } from '../src/bindings/d1.js';
 import { runMigrations } from '../src/migrate.js';
 import { MIGRATIONS_DIR } from '../src/config.js';
-import { readAiSettingsRow, resolveAiConfig, type AiSettingsRow } from '../src/ai-settings.js';
-import type { AppConfig } from '../src/config.js';
-
-/** 只取 resolveAiConfig 用到的字段，避免为了构造完整 AppConfig 而拖进整个配置层。 */
-function fakeConfig(over: Partial<AppConfig['ai']> & Partial<AppConfig['flags']> = {}): AppConfig {
-  return {
-    ai: {
-      baseUrl: 'https://env.example/v1',
-      apiKey: 'sk-env-secret-key',
-      model: 'env-model',
-      timeoutMs: 60000,
-      maxRetries: 1,
-      ...over
-    },
-    flags: { aiEnabled: '', aiPublic: '', ...over }
-  } as unknown as AppConfig;
-}
+import {
+  DEFAULT_AI_MAX_RETRIES,
+  DEFAULT_AI_TIMEOUT_MS,
+  readAiSettingsRow,
+  resolveAiConfig,
+  type AiSettingsRow
+} from '../src/ai-settings.js';
+import { normalizeModels } from '../src/routes/ai-config.js';
 
 const row = (over: Partial<AiSettingsRow> = {}): AiSettingsRow => ({
   id: 1,
@@ -52,43 +47,58 @@ const row = (over: Partial<AiSettingsRow> = {}): AiSettingsRow => ({
   ...over
 });
 
-describe('AI 配置：合并规则', () => {
-  it('库里没有记录时完全沿用 .env', () => {
-    const r = resolveAiConfig(null, fakeConfig());
-    expect(r.baseUrl).toBe('https://env.example/v1');
-    expect(r.apiKey).toBe('sk-env-secret-key');
-    expect(r.model).toBe('env-model');
-    expect(r.timeoutMs).toBe(60000);
-    expect(r.maxRetries).toBe(1);
+describe('AI 配置：库是唯一真源（没有 .env 兜底）', () => {
+  it('没有任何记录时：地址为空、开关按默认开、超时重试取代码默认值', () => {
+    const r = resolveAiConfig(null);
+    expect(r.baseUrl).toBe('');
+    expect(r.apiKey).toBe('');
+    expect(r.model).toBe('');
+    expect(r.timeoutMs).toBe(DEFAULT_AI_TIMEOUT_MS);
+    expect(r.maxRetries).toBe(DEFAULT_AI_MAX_RETRIES);
     expect(r.enabled).toBe(true);
-    expect(r.fromDb).toBe(false);
+    expect(r.publicEnabled).toBe(true);
+    expect(r.configured).toBe(false);
   });
 
-  it('留空的字段沿用 .env，填了的字段覆盖——只改模型不会动地址和 Key', () => {
-    const r = resolveAiConfig(row({ model: 'db-model' }), fakeConfig());
-    expect(r.model).toBe('db-model');      // 覆盖
-    expect(r.baseUrl).toBe('https://env.example/v1'); // 沿用
-    expect(r.apiKey).toBe('sk-env-secret-key');       // 沿用
-    expect(r.fromDb).toBe(true);
-  });
-
-  it('库里的开关优先于 .env；.env 关着而库里开着也能开', () => {
-    const off = resolveAiConfig(row({ enabled: 0 }), fakeConfig({ aiEnabled: '' }));
-    expect(off.enabled).toBe(false);
-    const on = resolveAiConfig(row({ enabled: 1 }), fakeConfig({ aiEnabled: '0' }));
-    expect(on.enabled).toBe(true);
+  it('库里有值就原样生效（不掺任何 env 兜底）', () => {
+    const r = resolveAiConfig(
+      row({ base_url: 'https://db.example/v1', api_key: 'sk-db', model: 'db-model', timeout_ms: 30000, max_retries: 2 })
+    );
+    expect(r.baseUrl).toBe('https://db.example/v1');
+    expect(r.apiKey).toBe('sk-db');
+    expect(r.model).toBe('db-model');
+    expect(r.timeoutMs).toBe(30000);
+    expect(r.maxRetries).toBe(2);
+    expect(r.configured).toBe(true);
   });
 
   it('哨兵值区分「0 次重试」与「未设置」', () => {
-    expect(resolveAiConfig(row({ max_retries: 0 }), fakeConfig({ maxRetries: 3 })).maxRetries).toBe(0);
-    expect(resolveAiConfig(row({ max_retries: -1 }), fakeConfig({ maxRetries: 3 })).maxRetries).toBe(3);
+    expect(resolveAiConfig(row({ max_retries: 0 })).maxRetries).toBe(0);
+    expect(resolveAiConfig(row({ max_retries: -1 })).maxRetries).toBe(DEFAULT_AI_MAX_RETRIES);
   });
 
-  it('.env 的关闭语义：0 / false / off 才算关', () => {
-    for (const v of ['0', 'false', 'off']) {
-      expect(resolveAiConfig(null, fakeConfig({ aiEnabled: v })).enabled).toBe(false);
+  it('库里的开关说了算：0 = 关，1 = 开，-1 = 默认开', () => {
+    expect(resolveAiConfig(row({ enabled: 0 })).enabled).toBe(false);
+    expect(resolveAiConfig(row({ enabled: 1 })).enabled).toBe(true);
+    expect(resolveAiConfig(row({ enabled: -1 })).enabled).toBe(true);
+  });
+
+  it('config.ts 不再读取任何 AI_* 环境变量（防 .env 兜底复活）', () => {
+    const src = fs.readFileSync(path.resolve('src/config.ts'), 'utf8');
+    for (const key of ['AI_BASE_URL', 'AI_API_KEY', 'AI_MODEL', 'AI_TIMEOUT_MS', 'AI_MAX_RETRIES']) {
+      expect(src, `config.ts 不该再出现 ${key}`).not.toContain(key);
     }
-    expect(resolveAiConfig(null, fakeConfig({ aiEnabled: '' })).enabled).toBe(true);
+  });
+
+  it('.env.example 里不再列 AI 变量，并说明要去后台配', () => {
+    // 注意：这里**不能**连写「AI_某键 + 等号」，tests/no-secrets.test.ts 会
+    // 把这种形状当成「env 里填了值」扫出来报假阳性（专门防密钥入库的守卫）。
+    const example = fs.readFileSync(path.resolve('.env.example'), 'utf8');
+    expect(example).not.toMatch(/^AI_BASE_URL\s*=/m);
+    expect(example).not.toMatch(/^AI_API_KEY\s*=/m);
+    expect(example).not.toMatch(/^AI_MODEL\s*=/m);
+    // 但要留下指路说明，免得老用户以为 AI 没了
+    expect(example).toMatch(/AI/);
   });
 });
 
@@ -125,8 +135,8 @@ describe('AI 配置：写入的三态语义', () => {
     expect(next.timeout_ms).toBe(30000);
   });
 
-  it('null = 清空（回退到 .env）', () => {
-    // 全字段置 null —— 界面上的「恢复 .env 配置」就是这么调的
+  it('null = 清空（回到「未配置」）', () => {
+    // 界面上的「清空配置」就是这么调的：全字段置 null
     const next = merge(cur, {
       base_url: null,
       api_key: null,
@@ -142,17 +152,49 @@ describe('AI 配置：写入的三态语义', () => {
     expect(next.timeout_ms).toBe(0);
     expect(next.max_retries).toBe(-1);
     expect(next.enabled).toBe(-1);
-    // 清空后 resolve 出来的应当是「未覆盖」状态（overridden = false）
-    const r = resolveAiConfig(row(next as Partial<AiSettingsRow>), fakeConfig());
-    expect(r.fromDb).toBe(false);
-    expect(r.baseUrl).toBe('https://env.example/v1');
-    expect(r.apiKey).toBe('sk-env-secret-key');
+    // 清空后必须是「未配置」，而不是还留着旧值
+    const r = resolveAiConfig(row(next as Partial<AiSettingsRow>));
+    expect(r.configured).toBe(false);
+    expect(r.baseUrl).toBe('');
+    expect(r.apiKey).toBe('');
   });
 
   it('具体值 = 覆盖', () => {
     const next = merge(cur, { enabled: 0, max_retries: 0 });
     expect(next.enabled).toBe(0);
     expect(next.max_retries).toBe(0);
+  });
+});
+
+describe('AI 模型列表：各家 /models 形状的归一化', () => {
+  it('OpenAI 形状 { data: [{ id }] }', () => {
+    expect(normalizeModels({ object: 'list', data: [{ id: 'gpt-4o-mini' }, { id: 'gpt-4o' }] })).toEqual([
+      { id: 'gpt-4o-mini', name: 'gpt-4o-mini' },
+      { id: 'gpt-4o', name: 'gpt-4o' }
+    ]);
+  });
+
+  it('Ollama / 部分中转的 { models: [{ name, model }] }', () => {
+    expect(normalizeModels({ models: [{ name: 'llama3.2:latest', model: 'llama3.2:latest' }] })).toEqual([
+      { id: 'llama3.2:latest', name: 'llama3.2:latest' }
+    ]);
+  });
+
+  it('裸数组也能认', () => {
+    expect(normalizeModels(['a', 'b'])).toEqual([
+      { id: 'a', name: 'a' },
+      { id: 'b', name: 'b' }
+    ]);
+  });
+
+  it('去重、跳过空 id，且不认识的形状返回空数组（而不是抛错）', () => {
+    expect(normalizeModels({ data: [{ id: 'x' }, { id: 'x' }, { id: '' }, {}] })).toEqual([{ id: 'x', name: 'x' }]);
+    expect(normalizeModels({ foo: 1 })).toEqual([]);
+    expect(normalizeModels(null)).toEqual([]);
+  });
+
+  it('有 display_name 时用它做展示名，id 仍用 id', () => {
+    expect(normalizeModels({ data: [{ id: 'm1', display_name: '模型一' }] })).toEqual([{ id: 'm1', name: '模型一' }]);
   });
 });
 
@@ -179,7 +221,7 @@ describe('AI 配置：迁移与读取', () => {
       // Key 里的单引号不能破坏写入（参数化绑定的验证点）
       expect(got?.api_key).toBe("sk-with'quote");
       expect(got?.base_url).toBe('https://db.example/v1');
-      expect(resolveAiConfig(got, fakeConfig()).baseUrl).toBe('https://db.example/v1');
+      expect(resolveAiConfig(got).baseUrl).toBe('https://db.example/v1');
     } finally {
       db.close();
       fs.rmSync(dir, { recursive: true, force: true });

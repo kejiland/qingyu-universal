@@ -484,36 +484,27 @@ S3_BACKUP_BUCKET=qingyu-backup
 
 ### AI：任意 OpenAI 兼容接口
 
-```env
-AI_BASE_URL=https://api.deepseek.com/v1     # 或 OpenAI / Groq / SiliconFlow / Ollama…
-AI_API_KEY=sk-...
-AI_MODEL=deepseek-chat
-BLOG_AI_ENABLED=        # 空 = 开启；0/false/off = 关闭
-BLOG_AI_PUBLIC=         # 0/false/off = 仅管理员可触发生成
-```
+AI **不在 `.env` 里配置**：网关地址、API Key、模型名、超时、重试与总开关都在
+后台「**AI 模型**」页填写，存进数据库（表 `ai_settings`），**保存后立即生效、无需重启**。
 
-留空则 AI 功能自动隐藏，其余功能不受影响。支持 Ollama / LocalAI / vLLM 等本地推理。
-
-#### 后台随时改模型（自托管版专有）
-
-上面的 `.env` 是**部署时的兜底值**。日常换模型不必改 `.env`、也不用重启：
-后台 →「**AI 模型**」页可配置网关地址、API Key、模型名、超时、重试次数与总开关，
-**保存后立即生效**。
-
-- **留空 = 沿用 `.env`**：只改模型名不会把地址和 Key 清空。
-- 每个字段右侧有「恢复 `.env` 配置」，点了就回退到部署时写的值。
+- **模型可以点「拉取模型」从网关获取**：填好接口地址与 API Key 后点一下，
+  后台会向网关的 `/models` 拉一次列表，选中即可填入，不用手打模型名。
+  支持 OpenAI 系、Ollama 系与各种中转站（返回形状不同，服务端统一归一化）。
 - 页面上的「测试连接」会用当前生效配置真实调一次模型，返回耗时与回复内容，
   用来确认新模型能不能通。
 - API Key 默认掩码显示（前 3 后 4），未改动时不会被重新提交；
   GET 接口也只返回掩码，不返回明文。
+- 未配置时 AI 功能自动隐藏，其余功能不受影响。支持 Ollama / LocalAI / vLLM 等本地推理。
 
-优先级：**后台库 > `.env`**（逐字段）。库里没记录时完全走 `.env`。
+> 早期版本还留了一层 `.env` 兜底（`AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`…），
+> 已移除：同一项两个真源会让「到底哪份在生效」变成猜谜，且改完还得重启。
+> 未设置的字段现在使用系统默认值（超时 60s、额外重试 1 次），
+> 这些默认值会直接显示在输入框的 placeholder 里。
 
-> ⚠️ **网关地址与 API Key 只写进 `.env`，不要提交。**
-> `.env` / `.env.*` 已被 `.gitignore` 挡住，只有 `.env.example` 入库且值恒为空。
+> ⚠️ **网关地址与 API Key 只写进后台，不要提交到仓库。**
+> 它们存在数据库里，不进代码库；`.env` / `.env.*` 已被 `.gitignore` 挡住。
 > `tests/no-secrets.test.ts` 会扫所有待提交文件，一旦出现私有网关地址或
 > `sk-` 开头的真实密钥就让测试失败——**文档与注释里请用 `<你的网关地址>` 这类占位符**。
-> 自查命令：`git check-ignore -v .env`
 
 ### 邮件：SMTP 或 Resend
 

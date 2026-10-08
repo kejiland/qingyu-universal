@@ -151,10 +151,11 @@
 ### AI（`src/bindings/ai.ts`）
 - 把 `env.AI.run(model, { messages })` 适配为 OpenAI `/chat/completions`
 - 把 `choices[0].message.content` 包装回上游期望的 `{ response }` 形状
-- **`AI_MODEL` 必须显式配置**：适配器在未配置时兜底成 `gpt-4o-mini`，而构造函数里
+- **模型名必须显式配置**：适配器在未配置时兜底成 `gpt-4o-mini`，而构造函数里
   `this.model` 永不为空，所以上游传来的 `@cf/...` 模型名**永远到不了请求体**；
   第三方网关多半没有 `gpt-4o-mini`，漏配的现象是「ping 通了、UI 出来了、一点摘要就 502」
-- 支持 `AI_TIMEOUT_MS`（默认 60s）与 `AI_MAX_RETRIES`（默认 1，即最多请求 2 次）：
+- 超时（默认 60s）与重试次数（默认 1，即最多请求 2 次）由 `ai_settings` 表配置，
+  未设置时用 `src/ai-settings.ts` 里的 `DEFAULT_AI_TIMEOUT_MS` / `DEFAULT_AI_MAX_RETRIES`：
   第三方网关会间歇性 `fetch failed` / 慢到几十秒，只重试网络错误、超时、429 与 5xx，
   其余 4xx 重试也没有意义
 
@@ -167,10 +168,21 @@
 | 层 | 文件 | 职责 |
 | --- | --- | --- |
 | 存储 | `app/migrations/0036_ai_settings.sql` | 单记录表（`id=1` 带 `CHECK`），新增在 `site_settings` 之外 |
-| 读取合并 | `src/ai-settings.ts` | `resolveAiConfig()` 做**字段级**合并；`createAiSettingsProvider()` 带 1s 缓存 |
-| 接口 | `src/routes/ai-config.ts` | GET / PUT / POST test，三个都自己鉴权 |
+| 读取 | `src/ai-settings.ts` | `resolveAiConfig()` 读库；`createAiSettingsProvider()` 带 1s 缓存 |
+| 接口 | `src/routes/ai-config.ts` | GET / PUT / POST test / POST `/api/admin/ai-models`，四个都自己鉴权 |
 | 绑定 | `src/bindings/ai.ts` 的 `createDynamicAI()` | `run()` 时才解析配置，所以改完不用重启 |
 | 界面 | `admin/src/views/AiSettingsView.vue` | 路由 `/ai`，侧栏「AI 模型」 |
+
+**配置只有数据库一个真源，没有 `.env` 兜底。** 早期版本是「库里留空则沿用 `.env`
+的 `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`」，实际用下来三个问题：
+
+1. 同一项两个真源，排障时永远要先问「这个值是 `.env` 的还是库里的」；
+2. `.env` 改完必须重启，与「后台改完立即生效」的预期直接打架；
+3. Key 分散在两处，权限收紧容易漏掉一个。
+
+现在 `.env` 里**没有任何 AI 变量**（`tests/ai-config.test.ts` 钉住 `config.ts`
+不再读取 `AI_*`），未设置的字段一律用 `src/ai-settings.ts` 里的代码常量，
+界面上把默认值直接写进 placeholder。
 
 为什么另建表而不是塞进 `site_settings`：`site_settings` 的合法键有精确断言
 （`tests/ssr-settings-keys.test.ts` 会核对键集合），多一个键就是红。而且 AI 配置
@@ -178,13 +190,19 @@
 
 三条容易踩空的规则（都有测试钉住）：
 
-1. **字段留空 = 沿用 `.env`**，只有填了的字段才覆盖。
+1. **写入是三态**：`undefined` 不修改 / `null` 清空（回到「未配置」）/ 具体值覆盖。
    否则「后台只改模型名」会把地址和 Key 一起写空，AI 直接失效。
-2. **写入是三态**：`undefined` 不修改 / `null` 清空（回退 `.env`）/ 具体值覆盖。
-   早先版本把 `null` 也当成「不修改」，结果「恢复 .env 配置」按钮点了没反应，
-   `overridden` 一直是 `true` —— 这个 bug 已经修掉。
-3. **数字字段用 0 / -1 当哨兵**而不是 `NULL`：`max_retries = 0` 是「不重试」这种
+   早先版本把 `null` 也当成「不修改」，结果「清空配置」按钮点了没反应 —— 已修。
+2. **数字字段用 0 / -1 当哨兵**而不是 `NULL`：`max_retries = 0` 是「不重试」这种
    有意义的配置，不能和「未设置」共用同一个值。
+3. **`/models` 的返回形状各家不一样**：`normalizeModels()` 必须同时认得
+   `{ data: [{ id }] }`（OpenAI 系）、`{ models: [{ name }] }`（Ollama 系）和裸数组，
+   还要能处理字符串数组、去重、跳过空 id。只认一种形状的话，
+   后台「拉取模型」在别家网关上永远拉到空列表 —— `tests/ai-config.test.ts` 逐种钉住。
+
+模型列表接口 `POST /api/admin/ai-models` 允许在请求体里带**临时**的 `base_url` /
+`api_key`：典型流程是「填地址 → 填 Key → 点拉取 → 选一个 → 保存」，
+这时候库里还什么都没有，只拿库里的值会拉不到。
 
 API Key 只对管理员可见，且**只给掩码**（前 3 后 4，形如 `sk-••••7f3a`）；
 GET 响应里不含明文，`tests/ai-config.test.ts` 与 `tests/no-secrets.test.ts` 两头都钉。

@@ -165,12 +165,15 @@ describe('隐私不入库：AI 网关地址与 API Key', () => {
     expect(bad, `疑似真实密钥字符串：\n${bad.join('\n')}`).toEqual([]);
   });
 
-  it('.env.example 里 AI 两项必须留空', () => {
+  /* AI 配置已经不读 .env 了（唯一真源是后台写入的 ai_settings 表），
+   * 所以 .env.example 里**不该再有**这两个键 —— 留着反而会让人以为
+   * 填了有用。这里把断言反过来：有这个键就是回归。 */
+  it('.env.example 里不再有 AI 网关 / 密钥变量', () => {
     const txt = fs.readFileSync(path.join(ROOT, '.env.example'), 'utf8');
     for (const key of ['AI_BASE_URL', 'AI_API_KEY']) {
-      const m = txt.match(new RegExp(`^${key}=(.*)$`, 'm'));
-      expect(m, `.env.example 缺少 ${key} 键`).toBeTruthy();
-      expect(m![1].trim(), `.env.example 的 ${key} 应该是空模板，不是真实值`).toBe('');
+      expect(txt, `.env.example 不该再出现 ${key}（AI 只走后台配置）`).not.toMatch(
+        new RegExp(`^${key}\\s*=`, 'm')
+      );
     }
   });
 

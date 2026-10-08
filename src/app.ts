@@ -142,6 +142,7 @@ export function createApp(deps: AppDeps): Hono {
   app.get('/api/admin/ai-config', aiConfig.get);
   app.put('/api/admin/ai-config', aiConfig.put);
   app.post('/api/admin/ai-config/test', aiConfig.test);
+  app.post('/api/admin/ai-models', aiConfig.models);
 
   /* ---------- 本地存储（仅在未配置对象存储时挂载） ---------- */
   if (deps.storage) {

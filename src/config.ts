@@ -97,19 +97,21 @@ const EnvSchema = z.object({
   BLOG_MAIL_FROM: z.string().trim().default(''),
   BLOG_MAIL_REPLY_TO: z.string().trim().default(''),
 
-  /* AI */
-  AI_BASE_URL: z.string().trim().default(''),
-  AI_API_KEY: z.string().trim().default(''),
-  AI_MODEL: z.string().trim().default(''),
-  BLOG_AI_ENABLED: z.string().trim().default(''),
-  BLOG_AI_PUBLIC: z.string().trim().default(''),
-  /* 单次模型请求超时（毫秒）。上游 Workers AI 没有这个概念；
-   * 自托管接第三方网关时，慢网关会撞上适配器默认的 60s 上限而报 502，
-   * 所以这里开放配置。 */
-  AI_TIMEOUT_MS: z.coerce.number().int().positive().max(600_000).default(60_000),
-  /* 失败后的额外重试次数（不含首次）。第三方网关会间歇性失败，
-   * 重试一次就能救回大部分；0 = 不重试。 */
-  AI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(1),
+  /* AI
+   * ------------------------------------------------------------------
+   * 这里**故意一个 AI 变量都不读**：网关地址 / Key / 模型 / 超时 / 重试
+   * 全部改由后台「AI 模型」页写进 `ai_settings` 表（见 src/ai-settings.ts）。
+   *
+   * 曾经的两层来源（.env 兜底 + 库覆盖）带来三个问题：
+   *   1. 同一项有两个真源，界面只能显示「留空 = 沿用 .env」，
+   *      排查时永远要先问「这个值是 .env 的还是库里的」；
+   *   2. .env 改完必须重启，与「后台改完立即生效」的预期打架；
+   *   3. Key 可能被写进未入库文件，也可能被写进 .env 而没人记得收紧权限。
+   * 现在只有一个真源（库），超时/重试的默认值是代码常量而不是环境变量。
+   *
+   * 注意 BLOG_AI_ENABLED / BLOG_AI_PUBLIC **不是**这里的配置项：它们是上游
+   * app/functions/_lib/ai.js 读取的 env 字段名，由 src/app.ts 的中间件
+   * 在每个请求前按库里的开关刷新（见 AppConfig.flags 的注释）。 */
 
   /* 其它 */
   COMMENT_BLOCKLIST: z.string().default(''),
@@ -170,8 +172,14 @@ export interface AppConfig {
     readonly from: string;
     readonly replyTo: string;
   };
-  readonly ai: { baseUrl: string; apiKey: string; model: string; timeoutMs: number; maxRetries: number };
   readonly admin: { setupKey: string; writeToken: string; email: string };
+  /**
+   * 上游 env 契约字段（BLOG_AI_ENABLED / BLOG_AI_PUBLIC）的**初始值**，
+   * 不是用户配置项：src/app.ts 的中间件会在每个请求前按 `ai_settings`
+   * 表里的开关把它们改写一遍，所以后台改完立即生效、无需重启。
+   * 初值取 '0'（关闭）是刻意的 fail-closed —— 万一读库失败，
+   * 宁可让 AI 不可用，也不要让 env 停留在「看起来可用」的旧值上。
+   */
   readonly flags: { aiEnabled: string; aiPublic: string };
   readonly extra: { commentBlocklist: string };
 }
@@ -274,19 +282,13 @@ export function loadConfig(): AppConfig {
       from: env.BLOG_MAIL_FROM,
       replyTo: env.BLOG_MAIL_REPLY_TO
     },
-    ai: {
-      baseUrl: normalizeBaseUrl(env.AI_BASE_URL),
-      apiKey: env.AI_API_KEY,
-      model: env.AI_MODEL,
-      timeoutMs: env.AI_TIMEOUT_MS,
-      maxRetries: env.AI_MAX_RETRIES
-    },
     admin: {
       setupKey: env.BLOG_ADMIN_SETUP_KEY,
       writeToken: env.BLOG_WRITE_TOKEN,
       email: env.BLOG_ADMIN_EMAIL
     },
-    flags: { aiEnabled: env.BLOG_AI_ENABLED, aiPublic: env.BLOG_AI_PUBLIC },
+    /* AI 不读 .env：真源是库（ai_settings）。这里的初值由 app.ts 每请求刷新。 */
+    flags: { aiEnabled: '0', aiPublic: '1' },
     extra: { commentBlocklist: env.COMMENT_BLOCKLIST }
   });
 }
@@ -300,7 +302,8 @@ export function describeConfig(config: AppConfig): Array<[string, string]> {
     ['存储方式', config.storageMode === 's3' ? `S3 兼容对象存储（${config.s3.endpoint}）` : `本地磁盘 ${config.uploadDir}`],
     ['Redis/Valkey', config.redisUrl ? '已配置（限流/去重走 Redis）' : '未配置（使用 SQLite KV）'],
 
-    ['AI 助手', config.ai.baseUrl ? `已启用（${config.ai.model || '默认模型'}）` : '未配置'],
+    /* AI 的真源在库里（后台「AI 模型」页），配置层已无从得知，这里只指路 */
+    ['AI 助手', '由后台「AI 模型」页配置（网关 / Key / 模型存库，改完立即生效）'],
     ['邮件通知', config.mail.smtp.host ? 'SMTP' : config.mail.resendApiKey ? 'Resend' : '未配置'],
     ['管理员密钥', config.admin.setupKey ? '已设置' : '未设置（首次初始化无保护，建议补上）']
   ];

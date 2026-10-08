@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import {
-  Sparkles, Save, Loader2, RefreshCw, Eye, EyeOff, CircleAlert, CircleCheck, Trash2, Zap
+  Sparkles, Save, Loader2, RefreshCw, Eye, EyeOff, CircleAlert, CircleCheck, Trash2, Zap, Download
 } from '@lucide/vue';
 import { api, ApiError, type AiConfigPatch, type AiConfigView } from '../lib/api';
 import { t } from '../lib/i18n';
@@ -13,17 +13,21 @@ import { toast } from '../lib/toast';
  * 上游（Cloudflare 版）的 AI 是平台绑定 env.AI，没有「网关地址 / Key /
  * 模型」这些概念，所以这一页在原版不存在，是自托管版自己加的。
  *
+ * 配置**只有数据库一个真源**：早期版本还有一层 .env 兜底（留空 = 沿用
+ * .env），实际用下来弊大于利——同一项两个真源，排障要先问「哪份生效」，
+ * 且 .env 改完还得重启。现在超时 / 重试未设置时用代码默认值，
+ * 界面上直接把默认值写在 placeholder 里。
+ *
  * 表单有两个容易做错的地方，这里刻意处理了：
  *
- * 1）「留空 = 沿用 .env」。输入框的 placeholder 显示 .env 里的当前值，
- *    用户只改模型名时其余字段保持空 = 不动，服务端也就不会把地址或 Key
- *    写空（早期版本「保存一个字段把其余字段清空」是典型事故）。
+ * 1）未提交的字段服务端保持原样。用户只改模型名时，地址与 Key 不会被写空
+ *    （早期版本「保存一个字段把其余字段清空」是典型事故）。
  *
  * 2）API Key 永不回显明文。GET 只给掩码（前 3 后 4），输入框里保持占位；
  *    只有用户真的输入了新值才提交该字段。
  * ------------------------------------------------------------ */
 
-/** 常见模型，只是快捷入口——任何模型名都可以手动输入。 */
+/** 还没从网关拉到列表时的兜底快捷项；拉到之后一律以网关返回的为准。 */
 const PRESET_MODELS = [
   'deepseek-v4-flash',
   'deepseek-chat',
@@ -38,12 +42,16 @@ const PRESET_MODELS = [
 const loading = ref(true);
 const saving = ref(false);
 const testing = ref(false);
+const fetching = ref(false);
 const failed = ref(false);
 
 const view = ref<AiConfigView | null>(null);
 const updatedAt = ref('');
 
-/* 表单值。空串 = 沿用 .env；-1 = 未设置（沿用 .env）。 */
+/** 从网关 /models 拉到的模型（为空表示还没拉过）。 */
+const modelOptions = ref<Array<{ id: string; name: string }>>([]);
+
+/* 表单值。空串 = 未设置；-1 = 未设置（用代码默认值 / 默认开启）。 */
 const form = ref({
   base_url: '',
   model: '',
@@ -57,13 +65,20 @@ const form = ref({
 const showKey = ref(false);
 const keyTouched = ref(false);
 
-/** 是否已用后台值覆盖了 .env */
-const overridden = computed(() => view.value?.overridden ?? false);
+/** 后台是否已在库里存过配置 */
+const configured = computed(() => view.value?.configured ?? false);
+/** 真正可用 = 已启用且填了网关地址 */
+const usable = computed(() => view.value?.usable ?? false);
 const hasStoredKey = computed(() => view.value?.api_key_set ?? false);
 
-/** 输入框占位符：显示 .env 的当前值，并提示「留空则沿用」。 */
-function envHint(fallback: string | number): string {
-  return `${String(fallback || t('admin.ai.notSet'))} · ${t('admin.ai.envHint')}`;
+/** 供输入联想用的模型名：优先网关拉取结果，没拉过才用内置快捷项。 */
+const modelSuggestions = computed(() =>
+  modelOptions.value.length ? modelOptions.value.map((m) => m.id) : PRESET_MODELS
+);
+
+/** 未设置时实际生效的默认值（写在 placeholder 里，免得去猜）。 */
+function defaultHint(value: number): string {
+  return `${value} · ${t('admin.ai.defaultHint')}`;
 }
 
 async function load(): Promise<void> {
@@ -120,6 +135,36 @@ async function save(): Promise<void> {
   }
 }
 
+/**
+ * 从网关拉模型列表。
+ * 用**表单里当前填的**地址 / Key（而不是只拿库里的）：典型流程是
+ * 「填地址 → 填 Key → 点拉取 → 选一个 → 保存」，这时候库里还什么都没有。
+ */
+async function fetchModels(): Promise<void> {
+  fetching.value = true;
+  try {
+    const override: Pick<AiConfigPatch, 'base_url' | 'api_key'> = {};
+    if (form.value.base_url.trim()) override.base_url = form.value.base_url.trim();
+    if (keyTouched.value && form.value.api_key) override.api_key = form.value.api_key;
+
+    const result = await api.fetchAiModels(override);
+    if (!result.ok) {
+      toast.error(result.error || t('admin.ai.fetchFail'));
+      return;
+    }
+    modelOptions.value = result.models ?? [];
+    // 还没填模型名时自动落一个，省掉「拉完还要手打一遍」
+    if (!form.value.model.trim() && modelOptions.value.length) {
+      form.value.model = modelOptions.value[0].id;
+    }
+    toast.success(`${t('admin.ai.fetchOk')} · ${result.count ?? modelOptions.value.length}`);
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : t('admin.ai.fetchFail'));
+  } finally {
+    fetching.value = false;
+  }
+}
+
 async function test(): Promise<void> {
   testing.value = true;
   try {
@@ -136,7 +181,7 @@ async function test(): Promise<void> {
   }
 }
 
-/** 清空库里的覆盖，全部回退到 .env */
+/** 清空库里的 AI 配置（回到「未配置」状态） */
 async function reset(): Promise<void> {
   saving.value = true;
   try {
@@ -170,7 +215,7 @@ async function reset(): Promise<void> {
 }
 
 function toggle(flag: 'enabled' | 'public_enabled'): void {
-  // 三态：未设置(-1) → 开(1) → 关(0) → 未设置
+  // 三态：未设置(-1，按默认开) → 开(1) → 关(0) → 未设置
   const cur = form.value[flag];
   form.value[flag] = cur === -1 ? 1 : cur === 1 ? 0 : -1;
 }
@@ -178,7 +223,7 @@ function toggle(flag: 'enabled' | 'public_enabled'): void {
 function flagLabel(v: number): string {
   if (v === 1) return t('admin.ai.on');
   if (v === 0) return t('admin.ai.off');
-  return t('admin.ai.followEnv');
+  return t('admin.ai.defaultFlag');
 }
 
 onMounted(load);
@@ -226,13 +271,13 @@ onMounted(load);
     <div v-else class="space-y-4">
       <!-- 状态提示 -->
       <div class="card p-4 flex items-start gap-3">
-        <CircleCheck v-if="overridden" :size="16" class="text-success mt-0.5 shrink-0" />
+        <CircleCheck v-if="usable" :size="16" class="text-success mt-0.5 shrink-0" />
         <CircleAlert v-else :size="16" class="text-ink-muted mt-0.5 shrink-0" />
         <div class="text-[13px] leading-relaxed">
           <p class="font-medium">
-            {{ overridden ? t('admin.ai.overridden') : t('admin.ai.followingEnv') }}
+            {{ usable ? t('admin.ai.usable') : configured ? t('admin.ai.configured') : t('admin.ai.notConfigured') }}
           </p>
-          <p class="text-ink-muted mt-0.5">{{ t('admin.ai.followHint') }}</p>
+          <p class="text-ink-muted mt-0.5">{{ t('admin.ai.configHint') }}</p>
         </div>
       </div>
 
@@ -249,7 +294,7 @@ onMounted(load);
             <input
               v-model="form.base_url"
               class="input mt-1.5"
-              :placeholder="envHint(view?.env?.base_url || '')"
+              :placeholder="t('admin.ai.baseUrlPh')"
               autocomplete="off"
             />
             <span class="text-[12px] text-ink-muted mt-1 block">{{ t('admin.ai.baseUrlHint') }}</span>
@@ -283,16 +328,42 @@ onMounted(load);
 
           <label class="block">
             <span class="text-[12.5px] font-medium">{{ t('admin.ai.model') }}</span>
-            <input
-              v-model="form.model"
-              class="input mt-1.5"
-              :placeholder="envHint(view?.env?.model || '')"
-              list="ai-preset-models"
-              autocomplete="off"
-            />
-            <datalist id="ai-preset-models">
-              <option v-for="m in PRESET_MODELS" :key="m" :value="m" />
+            <div class="flex items-center gap-2 mt-1.5">
+              <input
+                v-model="form.model"
+                class="input flex-1"
+                :placeholder="t('admin.ai.modelPh')"
+                list="ai-model-options"
+                autocomplete="off"
+              />
+              <button
+                type="button"
+                class="btn btn-secondary shrink-0"
+                :disabled="fetching || !form.base_url.trim()"
+                :title="t('admin.ai.fetchModelsHint')"
+                @click="fetchModels"
+              >
+                <Loader2 v-if="fetching" :size="15" class="animate-spin" />
+                <Download v-else :size="15" />
+                <span class="whitespace-nowrap">{{ fetching ? t('admin.ai.fetching') : t('admin.ai.fetchModels') }}</span>
+              </button>
+            </div>
+            <datalist id="ai-model-options">
+              <option v-for="m in modelSuggestions" :key="m" :value="m" />
             </datalist>
+
+            <!-- 拉取结果：直接点一下就能选中，不用再手打一遍 -->
+            <div v-if="modelOptions.length" class="mt-2">
+              <select
+                class="input"
+                :value="form.model"
+                @change="form.model = ($event.target as HTMLSelectElement).value"
+              >
+                <option value="">{{ t('admin.ai.modelPick') }}（{{ modelOptions.length }}）</option>
+                <option v-for="m in modelOptions" :key="m.id" :value="m.id">{{ m.id }}</option>
+              </select>
+            </div>
+
             <span class="text-[12px] text-ink-muted mt-1 block">{{ t('admin.ai.modelHint') }}</span>
           </label>
         </div>
@@ -314,7 +385,7 @@ onMounted(load);
               min="1000"
               step="1000"
               class="input w-32 shrink-0"
-              :placeholder="String(view?.env?.timeout_ms ?? 60000)"
+              :placeholder="defaultHint(view?.defaults?.timeout_ms ?? 60000)"
             />
           </div>
 
@@ -329,7 +400,7 @@ onMounted(load);
               min="-1"
               max="5"
               class="input w-32 shrink-0"
-              :placeholder="String(view?.env?.max_retries ?? 1)"
+              :placeholder="defaultHint(view?.defaults?.max_retries ?? 1)"
             />
           </div>
 
@@ -357,8 +428,8 @@ onMounted(load);
 
       <!-- 危险操作 -->
       <section class="card p-5 border-warning/40">
-        <h3 class="text-[14px] font-semibold mb-2">{{ t('admin.ai.resetTitle') }}</h3>
-        <p class="text-[12.5px] text-ink-muted mb-4">{{ t('admin.ai.resetHint') }}</p>
+        <h3 class="text-[14px] font-semibold mb-2">{{ t('admin.ai.clearTitle') }}</h3>
+        <p class="text-[12.5px] text-ink-muted mb-4">{{ t('admin.ai.clearHint') }}</p>
         <button class="btn btn-secondary" :disabled="saving" @click="reset">
           <Trash2 :size="16" />
           {{ t('admin.ai.reset') }}

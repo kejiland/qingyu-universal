@@ -34,6 +34,7 @@ const ADMIN_MIN = read('app/public/admin.min.js');
 const PATCH_SCRIPT = read('scripts/apply-own-patches.mjs');
 const AI_BINDING = read('src/bindings/ai.ts');
 const CONFIG_TS = read('src/config.ts');
+const AI_SETTINGS = read('src/ai-settings.ts');
 const ENV_EXAMPLE = read('.env.example');
 
 describe('前端超时覆盖 · 补丁在源文件与压缩产物里都生效', () => {
@@ -74,15 +75,19 @@ describe('AI 绑定 · 超时与重试可配', () => {
     expect(AI_BINDING).toMatch(/HTTP 5\\d\\d|HTTP 5\{2\}|5\\d\\d/);
   });
 
-  it('config 暴露 AI_TIMEOUT_MS / AI_MAX_RETRIES', () => {
-    expect(CONFIG_TS).toContain('AI_TIMEOUT_MS');
-    expect(CONFIG_TS).toContain('AI_MAX_RETRIES');
-    expect(CONFIG_TS).toMatch(/maxRetries: env\.AI_MAX_RETRIES/);
+  it('超时与重试的默认值是 ai-settings.ts 里的常量（不是 .env）', () => {
+    // AI 配置只有一个真源：数据库。未设置时用代码默认值，
+    // .env 里已经没有 AI_* 变量了（两个真源会让排障变成猜谜）。
+    expect(AI_SETTINGS).toContain('DEFAULT_AI_TIMEOUT_MS');
+    expect(AI_SETTINGS).toContain('DEFAULT_AI_MAX_RETRIES');
+    expect(CONFIG_TS).not.toContain('AI_TIMEOUT_MS');
+    expect(CONFIG_TS).not.toContain('AI_MAX_RETRIES');
   });
 
-  it('.env.example 有对应说明（新用户照着填就能通）', () => {
-    expect(ENV_EXAMPLE).toContain('AI_TIMEOUT_MS=');
-    expect(ENV_EXAMPLE).toContain('AI_MAX_RETRIES=');
+  it('.env.example 说明 AI 改在后台配（不再列 AI_* 变量）', () => {
+    expect(ENV_EXAMPLE).not.toMatch(/^AI_TIMEOUT_MS=/m);
+    expect(ENV_EXAMPLE).not.toMatch(/^AI_MAX_RETRIES=/m);
+    expect(ENV_EXAMPLE).toMatch(/AI/); // 但要留下指路说明
   });
 
   it('AI_MODEL 未配置时的兜底行为有注释说明（否则会 502）', () => {

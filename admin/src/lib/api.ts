@@ -105,7 +105,7 @@ export interface AiConfigPatch {
 
 export interface AiConfigView {
   ok: true;
-  /** 库里已存的覆盖值（空串 / -1 / 0 表示「沿用 .env」）。 */
+  /** 库里已存的值（空串 / -1 / 0 表示「未设置」，用 defaults 里的默认值）。 */
   stored: {
     base_url: string;
     model: string;
@@ -114,18 +114,18 @@ export interface AiConfigView {
     enabled: number;
     public_enabled: number;
   };
-  /** .env 里的兜底值，用作输入框占位符，让「留空 = 沿用」看得见。 */
-  env: {
-    base_url: string;
-    model: string;
+  /** 未设置时实际生效的默认值（代码常量，不是 .env —— AI 配置只有库一个真源）。 */
+  defaults: {
     timeout_ms: number;
     max_retries: number;
-    api_key_set: boolean;
   };
   api_key_set: boolean;
   /** 只给前 3 位 + 后 4 位，够认出是哪个 key，不足以拿去用。 */
   api_key_masked: string;
-  overridden: boolean;
+  /** 后台是否已在库里存过配置。 */
+  configured: boolean;
+  /** 真正可用 = 已启用且填了网关地址。 */
+  usable: boolean;
   updated_at: string;
 }
 
@@ -134,6 +134,15 @@ export interface AiTestResult {
   ms: number;
   model?: string;
   reply?: string;
+  error?: string;
+}
+
+/** 网关 /models 拉取结果。models 为空时 ok=false 且带 error。 */
+export interface AiModelsResult {
+  ok: boolean;
+  ms: number;
+  count?: number;
+  models?: Array<{ id: string; name: string }>;
   error?: string;
 }
 
@@ -349,6 +358,9 @@ export const api = {
     request<AiConfigView>('/api/admin/ai-config', { method: 'PUT', ...json(patch) }),
   testAiConfig: (override?: AiConfigPatch) =>
     request<AiTestResult>('/api/admin/ai-config/test', { method: 'POST', ...json(override ?? {}) }),
+  /** 从网关拉模型列表；带 override 时可以用还没保存的地址 / Key 先试。 */
+  fetchAiModels: (override?: Pick<AiConfigPatch, 'base_url' | 'api_key'>) =>
+    request<AiModelsResult>('/api/admin/ai-models', { method: 'POST', ...json(override ?? {}) }),
 
   /* 音乐 */
   listMusic: () => request<{ ok: true; music: MusicTrack[] }>('/api/music'),

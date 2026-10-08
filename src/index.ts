@@ -43,7 +43,7 @@ const storage =
 /* AI：后台可改网关 / 模型 / Key，所以绑定必须是「用时才解析配置」的动态版。
  * env.AI 恒存在（与 Cloudflare 平台绑定的形状一致），「到底启没启用」
  * 由 BLOG_AI_ENABLED 表达，而它会在每个请求前按库里的开关刷新。 */
-const aiSettings = createAiSettingsProvider(db, config);
+const aiSettings = createAiSettingsProvider(db);
 const ai = createDynamicAI(aiSettings);
 
 const smtp: SmtpSender | undefined = config.mail.smtp.host
