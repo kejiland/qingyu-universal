@@ -170,7 +170,7 @@ export interface AppConfig {
     readonly from: string;
     readonly replyTo: string;
   };
-  readonly ai: { baseUrl: string; apiKey: string; model: string; timeoutMs: number };
+  readonly ai: { baseUrl: string; apiKey: string; model: string; timeoutMs: number; maxRetries: number };
   readonly admin: { setupKey: string; writeToken: string; email: string };
   readonly flags: { aiEnabled: string; aiPublic: string };
   readonly extra: { commentBlocklist: string };

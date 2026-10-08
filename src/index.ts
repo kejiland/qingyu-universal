@@ -13,7 +13,8 @@ import { createDatabase } from './bindings/database.js';
 import { createKV } from './bindings/kv.js';
 import { createAssets } from './bindings/assets.js';
 import { createLocalStorage, normalizeLocalObjectUrls } from './bindings/storage.js';
-import { createAI } from './bindings/ai.js';
+import { createDynamicAI } from './bindings/ai.js';
+import { createAiSettingsProvider } from './ai-settings.js';
 import { createSmtpSender, type SmtpSender } from './bindings/mail.js';
 import { buildWorkerEnv } from './bindings/worker-env.js';
 import { runMigrations } from './migrate.js';
@@ -39,7 +40,11 @@ const storage =
     ? createLocalStorage({ uploadDir: config.uploadDir, secret: config.secret, baseUrl: `http://127.0.0.1:${config.port}` })
     : undefined;
 
-const ai = config.ai.baseUrl ? createAI(config.ai) : undefined;
+/* AI：后台可改网关 / 模型 / Key，所以绑定必须是「用时才解析配置」的动态版。
+ * env.AI 恒存在（与 Cloudflare 平台绑定的形状一致），「到底启没启用」
+ * 由 BLOG_AI_ENABLED 表达，而它会在每个请求前按库里的开关刷新。 */
+const aiSettings = createAiSettingsProvider(db, config);
+const ai = createDynamicAI(aiSettings);
 
 const smtp: SmtpSender | undefined = config.mail.smtp.host
   ? createSmtpSender({
@@ -57,7 +62,7 @@ const bindings: Bindings = {
   db,
   kv,
   assets,
-  ...(ai ? { ai } : {}),
+  ai,
   ...(storage ? { storage } : {}),
   ...(smtp ? { mailSender: smtp.send } : {})
 };
@@ -109,6 +114,7 @@ const app = createApp({
   migration,
   storage,
   seo: { config, db, securityHeaders },
+  aiSettings,
   validateResponses: config.validateResponses,
   logger: { warn: (message) => logger.warn(message), error: (message) => logger.error(message) },
   startTime: startedAt,

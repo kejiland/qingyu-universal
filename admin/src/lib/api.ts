@@ -90,6 +90,53 @@ export interface HealthResponse {
   checkedAt: number;
 }
 
+/* ---------- AI 配置（自托管版专有，上游 Cloudflare 版是平台绑定 env.AI，没有这些） ---------- */
+
+/** 可提交的字段。值为 null 或 '' 表示「清空，回退到 .env」；不传表示「不改」。 */
+export interface AiConfigPatch {
+  base_url?: string | null;
+  api_key?: string | null;
+  model?: string | null;
+  timeout_ms?: number | null;
+  max_retries?: number | null;
+  enabled?: boolean | number | null;
+  public_enabled?: boolean | number | null;
+}
+
+export interface AiConfigView {
+  ok: true;
+  /** 库里已存的覆盖值（空串 / -1 / 0 表示「沿用 .env」）。 */
+  stored: {
+    base_url: string;
+    model: string;
+    timeout_ms: number;
+    max_retries: number;
+    enabled: number;
+    public_enabled: number;
+  };
+  /** .env 里的兜底值，用作输入框占位符，让「留空 = 沿用」看得见。 */
+  env: {
+    base_url: string;
+    model: string;
+    timeout_ms: number;
+    max_retries: number;
+    api_key_set: boolean;
+  };
+  api_key_set: boolean;
+  /** 只给前 3 位 + 后 4 位，够认出是哪个 key，不足以拿去用。 */
+  api_key_masked: string;
+  overridden: boolean;
+  updated_at: string;
+}
+
+export interface AiTestResult {
+  ok: boolean;
+  ms: number;
+  model?: string;
+  reply?: string;
+  error?: string;
+}
+
 
 /** 文章修订历史条目（列表不含正文；兼容接口，schema 尚未登记）。 */
 export interface PostRevisionMeta {
@@ -296,6 +343,13 @@ export const api = {
   registerMedia: (item: { url: string; name?: string; type?: string; size?: number; thumbUrl?: string }) =>
     request<{ ok: true; media: MediaCreated }>('/api/media', { method: 'POST', ...json(item) }),
   deleteMedia: (id: string) => request<{ ok: true }>(`/api/media/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /* AI 配置（自托管版专有，未进契约注册表） */
+  getAiConfig: () => request<AiConfigView>('/api/admin/ai-config'),
+  saveAiConfig: (patch: AiConfigPatch) =>
+    request<AiConfigView>('/api/admin/ai-config', { method: 'PUT', ...json(patch) }),
+  testAiConfig: (override?: AiConfigPatch) =>
+    request<AiTestResult>('/api/admin/ai-config/test', { method: 'POST', ...json(override ?? {}) }),
+
   /* 音乐 */
   listMusic: () => request<{ ok: true; music: MusicTrack[] }>('/api/music'),
   musicUploadTicket: (filename: string, size: number) =>

@@ -28,6 +28,7 @@ import { createPostsJsHandler } from './routes/posts-js.js';
 import { adminAppAvailable, createAdminAppHandler } from './routes/admin-app.js';
 import { createSeoHandlers, type SeoDeps } from './routes/seo.js';
 import { createStaticExportHandler } from './routes/static-export.js';
+import { createAiConfigHandlers } from './routes/ai-config.js';
 import {
   createLocalDownloadHandler,
   createLocalUploadHandler,
@@ -56,6 +57,12 @@ export interface AppDeps {
   logger?: { warn: (message: string) => void; error: (message: string) => void };
   /** 请求日志注入点，便于测试时静音。 */
   onRequest?: (info: { method: string; path: string; status: number; ms: number; quiet?: boolean }) => void;
+  /**
+   * AI 配置的实时读取器（自托管版专有）。
+   * 有它时，每个请求开始前会按库里的开关刷新 env 的 BLOG_AI_ENABLED /
+   * BLOG_AI_PUBLIC，后台改完立即生效，不必重启。
+   */
+  aiSettings?: () => Promise<{ enabled: boolean; publicEnabled: boolean; baseUrl: string }>;
 }
 
 export function createApp(deps: AppDeps): Hono {
@@ -64,6 +71,24 @@ export function createApp(deps: AppDeps): Hono {
   const logger = deps.logger ?? { warn: console.warn, error: console.error };
 
   app.use('*', async (c, next) => {
+    /* AI 开关按库里的值刷新（有 1s 缓存，开销可忽略）。
+     * 必须在这里做而不是启动时做一次：env 是进程级单例，
+     * 上游 ai.js 的 aiEnabled() 读的是 env.BLOG_AI_ENABLED，
+     * 不刷新的话后台改了开关要重启才生效。
+     * 「配了但没填网关地址」也按未启用处理——否则 ping 会谎报可用，
+     * 前端渲染出 AI 按钮，点下去才报 502。 */
+    if (deps.aiSettings) {
+      try {
+        const ai = await deps.aiSettings();
+        const usable = ai.enabled && !!ai.baseUrl;
+        const target = deps.env as Record<string, unknown>;
+        target.BLOG_AI_ENABLED = usable ? '1' : '0';
+        target.BLOG_AI_PUBLIC = ai.publicEnabled ? '1' : '0';
+      } catch {
+        /* 读库失败就保持 env 原值，不影响请求 */
+      }
+    }
+
     const started = performance.now();
     await next();
     const ms = Math.round((performance.now() - started) * 10) / 10;
@@ -109,6 +134,14 @@ export function createApp(deps: AppDeps): Hono {
 
   /* ---------- 静态站导出（本地实现，不进契约） ---------- */
   app.get('/api/admin/export-static', createStaticExportHandler({ config, db: deps.db }));
+
+  /* ---------- AI 配置（自托管版专有：后台改网关 / 模型 / Key，立即生效） ----------
+   * 上游没有这套配置（Cloudflare 版是平台绑定的 env.AI），所以不进契约注册表，
+   * 本地实现、自己鉴权。 */
+  const aiConfig = createAiConfigHandlers({ config, db: deps.db });
+  app.get('/api/admin/ai-config', aiConfig.get);
+  app.put('/api/admin/ai-config', aiConfig.put);
+  app.post('/api/admin/ai-config/test', aiConfig.test);
 
   /* ---------- 本地存储（仅在未配置对象存储时挂载） ---------- */
   if (deps.storage) {

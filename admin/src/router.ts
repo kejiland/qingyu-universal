@@ -115,6 +115,14 @@ const routes: RouteRecordRaw[] = [
   },
   // 旧路径（本项目早期版本用的 /logs）保留为跳转，避免书签失效
   { path: '/logs', redirect: { name: 'audit' } },
+  /* AI 模型配置：自托管版专有。上游 Cloudflare 版直接用平台绑定 env.AI，
+   * 没有网关 / Key / 模型这些概念，所以这一页在原版不存在。 */
+  {
+    path: '/ai',
+    name: 'ai',
+    component: () => import('./views/AiSettingsView.vue'),
+    meta: { titleKey: 'admin.ai.title', subtitleKey: 'admin.ai.subtitle' }
+  },
   {
     path: '/subscribers',
     name: 'subscribers',

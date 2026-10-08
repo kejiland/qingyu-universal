@@ -158,6 +158,37 @@
   第三方网关会间歇性 `fetch failed` / 慢到几十秒，只重试网络错误、超时、429 与 5xx，
   其余 4xx 重试也没有意义
 
+### 后台 AI 模型配置（**自托管版专有**，上游无对应能力）
+
+上游的 AI 是平台绑定（`env.AI`），换模型要改 `wrangler.toml` 重新部署，后台里
+**没有**任何网关 / Key / 模型设置项。自托管版把这套配置搬到数据库，后台「AI 模型」
+页可随时改、改完立即生效：
+
+| 层 | 文件 | 职责 |
+| --- | --- | --- |
+| 存储 | `app/migrations/0036_ai_settings.sql` | 单记录表（`id=1` 带 `CHECK`），新增在 `site_settings` 之外 |
+| 读取合并 | `src/ai-settings.ts` | `resolveAiConfig()` 做**字段级**合并；`createAiSettingsProvider()` 带 1s 缓存 |
+| 接口 | `src/routes/ai-config.ts` | GET / PUT / POST test，三个都自己鉴权 |
+| 绑定 | `src/bindings/ai.ts` 的 `createDynamicAI()` | `run()` 时才解析配置，所以改完不用重启 |
+| 界面 | `admin/src/views/AiSettingsView.vue` | 路由 `/ai`，侧栏「AI 模型」 |
+
+为什么另建表而不是塞进 `site_settings`：`site_settings` 的合法键有精确断言
+（`tests/ssr-settings-keys.test.ts` 会核对键集合），多一个键就是红。而且 AI 配置
+含密钥语义，和面向前台渲染的站点设置混在一起不合适。
+
+三条容易踩空的规则（都有测试钉住）：
+
+1. **字段留空 = 沿用 `.env`**，只有填了的字段才覆盖。
+   否则「后台只改模型名」会把地址和 Key 一起写空，AI 直接失效。
+2. **写入是三态**：`undefined` 不修改 / `null` 清空（回退 `.env`）/ 具体值覆盖。
+   早先版本把 `null` 也当成「不修改」，结果「恢复 .env 配置」按钮点了没反应，
+   `overridden` 一直是 `true` —— 这个 bug 已经修掉。
+3. **数字字段用 0 / -1 当哨兵**而不是 `NULL`：`max_retries = 0` 是「不重试」这种
+   有意义的配置，不能和「未设置」共用同一个值。
+
+API Key 只对管理员可见，且**只给掩码**（前 3 后 4，形如 `sk-••••7f3a`）；
+GET 响应里不含明文，`tests/ai-config.test.ts` 与 `tests/no-secrets.test.ts` 两头都钉。
+
 ---
 
 ## 四、从上游同步的流程

@@ -117,3 +117,46 @@ export class AIBinding implements AIBindingLike {
 export function createAI(options: AIOptions): AIBinding {
   return new AIBinding(options);
 }
+
+/* ------------------------------------------------------------
+ * 动态绑定：每次调用时才去解析配置
+ * ------------------------------------------------------------
+ * 上面的 AIBinding 在启动时把 baseUrl / Key / 模型固定下来，后台改了
+ * 配置只能重启才生效。自托管版允许在后台改 AI 配置，所以这里再包一层：
+ * `run()` 时才向 provider 要最新配置，再现场构造一个 AIBinding 用掉。
+ *
+ * 顺带解决一个反直觉的点：Cloudflare 版里 `env.AI` 是平台绑定，**恒存在**，
+ * 上游 ai.js 的 `aiEnabled()` 靠它做第一道判断。以前自托管版是
+ * 「没配 baseUrl 就不给 env.AI」，和上游形状不一致；现在改成恒存在，
+ * 真正的「配没配」交给 BLOG_AI_ENABLED 表达（见 app.ts 的请求中间件）。
+ * ------------------------------------------------------------ */
+export interface DynamicAiOptions {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  timeoutMs: number;
+  maxRetries: number;
+}
+
+export function createDynamicAI(
+  resolve: () => Promise<DynamicAiOptions>
+): AIBindingLike & { readonly baseUrl: string; readonly model: string } {
+  return {
+    // 契约要求有这两个只读属性（健康检查会读），动态绑定给空串即可——
+    // 真实值只有 run() 时才确定。
+    baseUrl: '',
+    model: '',
+    async run(model: string, inputs: Record<string, unknown>) {
+      const cfg = await resolve();
+      if (!cfg.baseUrl) throw new Error('AI 未配置网关地址（后台「AI 模型」或 AI_BASE_URL）');
+      const binding = new AIBinding({
+        baseUrl: cfg.baseUrl,
+        apiKey: cfg.apiKey,
+        model: cfg.model || model,
+        timeoutMs: cfg.timeoutMs,
+        maxRetries: cfg.maxRetries
+      });
+      return binding.run(model, inputs);
+    }
+  };
+}

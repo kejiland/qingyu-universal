@@ -76,6 +76,9 @@ const navGroups: NavGroup[] = [
       { to: '/errors', labelKey: 'admin.sidebar.errors', icon: Bug, match: /^\/errors/ },
       { to: '/backups', labelKey: 'admin.sidebar.backups', icon: DatabaseBackup, match: /^\/backups/ },
       { to: '/import-export', labelKey: 'admin.sidebar.importExport', icon: Download, match: /^\/import-export/ },
+      /* AI 模型：自托管版专有（上游是平台绑定 env.AI，没有这一项）。
+       * 放在设置前面——它属于「站点能力配置」，比导入导出更常被改。 */
+      { to: '/ai', labelKey: 'admin.sidebar.ai', icon: Sparkles, match: /^\/ai/ },
       { to: '/settings', labelKey: 'admin.sidebar.settings', icon: Settings, match: /^\/settings/ }
     ]
   }
