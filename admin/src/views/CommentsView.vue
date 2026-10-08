@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import {
   Check, Clock, Trash2, MessageSquare, Loader2, Inbox, Pin, Star, Heart, Search, Sparkles
 } from '@lucide/vue';
@@ -9,6 +9,7 @@ import { formatDateTime } from '../lib/format';
 import { toast } from '../lib/toast';
 
 const route = useRoute();
+const router = useRouter();
 
 const items = ref<CommentAdminItem[]>([]);
 const loading = ref(true);
@@ -162,14 +163,35 @@ async function screenComment(): Promise<void> {
   }
 }
 
-/* 直达 /comments/pending 时默认落在待审筛选 */
+/* 路由 ↔ 状态筛选双向同步
+ * ------------------------------------------------------------------
+ * /comments 与 /comments/pending 共用本组件，Vue Router 会复用同一个实例
+ * （onMounted 只在首次挂载跑一次），所以两个入口之间来回切必须靠 watch。
+ * 只写单向（进入 pending 时置 pending）会留下「回不去」的坑：
+ * 点侧栏「全部评论」，URL 和页头都变了，列表却仍停在待审核筛选上。
+ *
+ * 「已通过」没有独立路由（上游导航只给全部 / 待审核两个入口），
+ * 因此反向同步只在当前是 pending 时才拉回 all，不覆盖「已通过」。 */
 watch(
   () => route.name,
-  (name) => { if (name === 'comments-pending') status.value = 'pending'; }
+  (name) => {
+    if (name === 'comments-pending') {
+      status.value = 'pending';
+    } else if (name === 'comments' && status.value === 'pending') {
+      status.value = 'all';
+    }
+  },
+  { immediate: true }
 );
 
+/** 点页签：状态立刻切，URL 跟着走，避免侧栏高亮与页签高亮各说各话 */
+async function selectTab(next: 'all' | 'pending' | 'approved'): Promise<void> {
+  status.value = next;
+  const want = next === 'pending' ? 'comments-pending' : 'comments';
+  if (route.name !== want) await router.push({ name: want });
+}
+
 onMounted(() => {
-  if (route.name === 'comments-pending') status.value = 'pending';
   void load();
   /* 探测 AI 是否可用：服务端未配置时 404，自动隐藏 AI 区块 */
   void api
@@ -192,7 +214,7 @@ onMounted(() => {
           :key="tab[0]"
           class="h-7 px-3 rounded-[8px] text-[13px] font-medium transition-all whitespace-nowrap"
           :class="status === tab[0] ? 'bg-surface text-ink shadow-xs' : 'text-ink-muted hover:text-ink'"
-          @click="status = tab[0]"
+          @click="selectTab(tab[0])"
         >
           {{ tab[1] }} <span class="ml-1 tabular-nums text-ink-muted">{{ tab[2] }}</span>
         </button>
