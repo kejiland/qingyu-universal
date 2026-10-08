@@ -8,7 +8,7 @@
  * ============================================================ */
 'use strict';
 
-var CACHE_VERSION = '2.10.94';
+var CACHE_VERSION = '2.10.95';
 var SHELL_CACHE = 'qingyu-shell-' + CACHE_VERSION;
 var RUNTIME_CACHE = 'qingyu-runtime-' + CACHE_VERSION;
 // 只预缓存「首屏必需」资源：后台编辑器 / 音乐播放器 / 背景动画体积大且用不到，
@@ -126,14 +126,21 @@ self.addEventListener('fetch', function (event) {
   try { url = new URL(request.url); } catch (e) { return; }
   if (!isSameOrigin(url) || url.pathname === '/sw.js' || request.headers.has('Range')) return;
 
+  /* 后台（/admin）是在线应用，任何请求都不进 Service Worker —— 注意这里
+   * 必须放在 request.mode 分支之前，覆盖包括脚本/样式在内的所有请求类型。
+   *
+   * 只放行 navigate 是不够的（2026-10-08 二次事故）：
+   *   1. /admin/assets/*.js 是脚本请求，会落到 staleWhileRevalidate，
+   *      而「先喂缓存、后台再更新」天然就是「第一次打开旧版、刷新才新版」；
+   *   2. 旧版本 SW 要等下一次导航才会被新版本接管，两者叠加就整整差一拍，
+   *      表现为「新打开是旧后台、刷新后才是新后台」。
+   * 另一条老路同样要堵：导航失败时 networkFirstNavigation 会回退缓存的
+   * 公开站外壳，boot.js 检测到 /admin 就加载 admin-legacy 旧后台，
+   * 容器重启/网络抖动的瞬间同一个地址会换一副面孔。
+   * 直接放行让浏览器走网络，服务端在 admin/dist 存在时恒定返回新后台。 */
+  if (url.pathname === '/admin' || url.pathname.indexOf('/admin/') === 0) return;
+
   if (request.mode === 'navigate') {
-    /* 后台（/admin）是在线应用，永远走网络、不进 Service Worker：
-     * 离线回退返回的是公开站外壳，而 boot.js 检测到 /admin 路径会加载
-     * admin-legacy 旧后台 —— 网络一旦瞬断（容器重启/代理抖动），同一个
-     * /admin 地址就会渲染成旧版后台，刷新后又变回来，表现为
-     * 「第一次打开一个样、刷新后另一个样」。直接放行让浏览器走网络，
-     * 服务端在 admin/dist 存在时恒定返回新后台。 */
-    if (url.pathname === '/admin' || url.pathname.indexOf('/admin/') === 0) return;
     event.respondWith(networkFirstNavigation(request));
   } else if (isReadableApi(url)) {
     event.respondWith(networkFirstApi(request));
