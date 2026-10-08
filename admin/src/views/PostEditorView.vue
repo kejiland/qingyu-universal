@@ -1644,9 +1644,7 @@ onUnmounted(() => {
         </CollapsibleSection>
 
         <!-- 属性 -->
-        <section class="card p-4 space-y-3.5">
-          <h2 class="text-[13px] font-semibold text-ink-soft">属性</h2>
-
+        <CollapsibleSection title="属性" :default-open="false" storage-key="attrs">
           <div>
             <label class="label">
               <CalendarClock :size="13" class="inline -mt-0.5 mr-1" />日期
@@ -1701,7 +1699,7 @@ onUnmounted(() => {
             </div>
             <p class="hint">同一系列内按序号从 0 升序排列。</p>
           </div>
-        </section>
+        </CollapsibleSection>
 
         <!-- SEO -->
         <CollapsibleSection title="SEO 覆盖" :default-open="false" storage-key="seo">
