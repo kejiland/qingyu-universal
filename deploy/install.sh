@@ -37,6 +37,33 @@ AUTOBACKUP_OFF=0
 # migrate：把整站打成一个 tar.gz（含 .env + 数据卷），用于换服务器
 BUNDLE_OUT=""
 PURGE=0
+# ---- 安装向导 / 配置档 / 演练 / 断点续跑 ----
+DRY_RUN=0            # --dry-run：只打印将要做什么，不实际改动系统
+WIZARD_FORCE=0       # --wizard：即使已有参数也强制走一次问答向导
+NO_WIZARD=0          # --no-wizard：全新安装也不提问，全用默认值
+SKIP_PREFLIGHT=0     # --skip-preflight：跳过起飞前检查
+SKIP_DOCTOR=0        # --no-doctor：安装后不做自动体检
+RESET_STATE=0        # --reset：清除断点续跑进度，从头执行
+CONFIG_FILE=""       # --config <文件>：从配置档读取选项
+SAVE_CONFIG=""       # --save-config <文件>：把本次选择写成配置档
+TIMEZONE=""          # --timezone <Asia/Shanghai>：设定系统时区（定时备份按它走）
+SMTP_HOST_OPT=""     # --smtp-*：邮件通知（留空 = 不配置，之后可在后台「设置 → 邮件」里填）
+SMTP_PORT_OPT=""
+SMTP_USER_OPT=""
+SMTP_PASS_OPT=""
+SMTP_FROM_OPT=""
+NO_AUTOBACKUP=0      # --no-autobackup：不安装定时备份
+WIZ_BACKUP=0         # 向导里选了「要自动备份」
+WIZARD_DONE=0        # 本次已经走过向导（用于让 interact_* 不再重复提问）
+# 向导 / 版本对比的中间状态（脚本开了 set -u，先用空值占位）
+WIZ_MODE=""          # domain | port
+WIZ_ACT="next"       # 向导每步执行后的去向：next / back / jump:N
+WIZ_IP=""            # 探测到的公网 IP
+WIZ_PORTS=1          # 80/443 是否空闲（1=空闲）
+WIZ_DISTRO=""        # 系统名称
+WIZ_ARCH=""          # CPU 架构
+WIZ_DISK=""          # 可用磁盘 MB
+UPGRADE_FROM=""      # 升级前的版本（用于升级后对比）
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
@@ -102,6 +129,12 @@ on_error() {
   esac
   echo
   warn "配置和数据都还在（不会因为这次失败被清空），修好后重新执行同一条命令即可"
+  if [ "$COMMAND" = "install" ]; then
+    echo
+    echo "  不用从头再来 —— 已完成并记录下来的步骤会自动跳过"
+    echo "  （最慢的两步：装 Docker、构建镜像，重跑时都不会重复做）"
+    echo "  想强制从头执行： $0 install --reset"
+  fi
   echo
   exit "$code"
 }
@@ -181,6 +214,8 @@ COMMAND_SET=0
 ARGS=()
 # 用户是否显式传了 --ref（REF 本身有默认值，不记一笔区分不出来）
 REF_SET="${REF_SET:-0}"
+# 用户是否显式传了 --dir（决定配置档里的 DIR 能不能覆盖默认值）
+DIR_SET=0
 # 数据库选择（脚本开了 set -u，未设置的变量必须先给默认值）
 DB_KIND="${DB_KIND:-}"
 DATABASE_URL_OPT="${DATABASE_URL_OPT:-}"
@@ -191,7 +226,7 @@ while [ $# -gt 0 ]; do
     autobackup|migrate)     COMMAND="$1"; COMMAND_SET=1 ;;
     --domain)   DOMAIN="${2:-}"; shift ;;
     --email)    EMAIL="${2:-}"; shift ;;
-    --dir)      INSTALL_DIR="${2:-}"; shift ;;
+    --dir)      INSTALL_DIR="${2:-}"; DIR_SET=1; shift ;;
     --ref)      REF="${2:-}"; REF_SET=1; shift ;;
     --repo)     REPO="${2:-}"; shift ;;
     --port)     APP_PORT="${2:-}"; shift ;;
@@ -208,11 +243,75 @@ while [ $# -gt 0 ]; do
     --off)      AUTOBACKUP_OFF=1 ;;
     --out)      BUNDLE_OUT="${2:-}"; shift ;;
     --purge)    PURGE=1 ;;
+    # ---- 向导 / 配置档 / 演练 / 断点续跑 ----
+    --config)        CONFIG_FILE="${2:-}"; shift ;;
+    --save-config)   SAVE_CONFIG="${2:-}"; shift ;;
+    --timezone)      TIMEZONE="${2:-}"; shift ;;
+    --smtp-host)     SMTP_HOST_OPT="${2:-}"; shift ;;
+    --smtp-port)     SMTP_PORT_OPT="${2:-}"; shift ;;
+    --smtp-user)     SMTP_USER_OPT="${2:-}"; shift ;;
+    --smtp-pass)     SMTP_PASS_OPT="${2:-}"; shift ;;
+    --smtp-from)     SMTP_FROM_OPT="${2:-}"; shift ;;
+    --wizard)        WIZARD_FORCE=1 ;;
+    --no-wizard)     NO_WIZARD=1 ;;
+    --dry-run)       DRY_RUN=1 ;;
+    --skip-preflight) SKIP_PREFLIGHT=1 ;;
+    --no-doctor)     SKIP_DOCTOR=1 ;;
+    --reset|--fresh) RESET_STATE=1 ;;
+    --no-autobackup) NO_AUTOBACKUP=1 ;;
     -h|--help)  COMMAND="help" ;;
     *)          ARGS+=("$1") ;;
   esac
   shift
 done
+
+# ------------------------------------------------------------
+# 配置档：把一次安装的选择存成文件，之后照着它一键复现
+# ------------------------------------------------------------
+# 优先级：命令行参数 > 配置档 > 环境变量/内置默认值。
+# 所以配置档只补「命令行没给」的项，不会覆盖你手敲的参数。
+# 这里定义得早、调用得早，是因为它要在任何函数被调用之前生效。
+load_config_file() {
+  local f="$1"
+  [ -f "$f" ] || die "找不到配置档：$f（--config 后面要跟一个真实存在的文件）"
+  log "读取配置档：$f"
+  local line key val
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in ''|'#'*) continue ;; esac
+    key="${line%%=*}"
+    [ "$key" = "$line" ] && continue
+    val="${line#*=}"
+    key="$(printf '%s' "$key" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]')"
+    # 全部写成 `… || VAR=val`：左侧成功则短路（返回 0），失败才赋值，
+    # 整条语句永远返回 0 —— 在 set -e 下不会把脚本打断。
+    case "$key" in
+      DOMAIN)       [ -n "$DOMAIN" ]        || DOMAIN="$val" ;;
+      PORT)         [ -n "$APP_PORT" ]      || APP_PORT="$val" ;;
+      DB)           [ -n "$DB_KIND" ]       || DB_KIND="$val" ;;
+      DATABASE_URL) [ -n "$DATABASE_URL_OPT" ] || DATABASE_URL_OPT="$val" ;;
+      DIR)          [ "$DIR_SET" = "1" ]    || INSTALL_DIR="$val" ;;
+      REF)          [ "$REF_SET" = "1" ]    || REF="$val" ;;
+      REPO)         REPO="$val" ;;
+      EMAIL)        [ -n "$EMAIL" ]         || EMAIL="$val" ;;
+      IP)           [ -n "$IP_ADDR" ]       || IP_ADDR="$val" ;;
+      TIMEZONE)     [ -n "$TIMEZONE" ]      || TIMEZONE="$val" ;;
+      SMTP_HOST)    [ -n "$SMTP_HOST_OPT" ] || SMTP_HOST_OPT="$val" ;;
+      SMTP_PORT)    [ -n "$SMTP_PORT_OPT" ] || SMTP_PORT_OPT="$val" ;;
+      SMTP_USER)    [ -n "$SMTP_USER_OPT" ] || SMTP_USER_OPT="$val" ;;
+      SMTP_PASS)    [ -n "$SMTP_PASS_OPT" ] || SMTP_PASS_OPT="$val" ;;
+      SMTP_FROM)    [ -n "$SMTP_FROM_OPT" ] || SMTP_FROM_OPT="$val" ;;
+      MIRROR)       if [ "$val" = "1" ]; then MIRROR=1; fi ;;
+      KEEP)         [ -z "$val" ] || KEEP_N="$val" ;;
+      AT)           [ -z "$val" ] || AT_TIME="$val" ;;
+      AUTOBACKUP)
+        if [ "$val" = "1" ]; then WIZ_BACKUP=1; fi
+        if [ "$val" = "0" ]; then NO_AUTOBACKUP=1; fi
+        ;;
+    esac
+  done < "$f"
+}
+[ -n "$CONFIG_FILE" ] && load_config_file "$CONFIG_FILE"
 
 usage() {
   cat <<'EOF'
@@ -250,7 +349,9 @@ usage() {
   --email  <邮箱>         ACME 证书通知邮箱（可选）
   --dir    <目录>         安装目录，默认 /opt/qingyu-universal
   --ref    <分支/标签>     下载的代码版本，默认 main
+  --repo   <owner/repo>    从哪个 GitHub 仓库取代码，默认 kejiland/qingyu-universal
   --image  <镜像>         使用预构建镜像而不是本地构建
+  --no-mirror             关闭国内加速（升级时想改回官方源用）
   --mirror            国内网络加速：GitHub 代码、Docker 镜像、npm 依赖都走国内源
                       （国内服务器 / 网络卡时加它；选择会记进 .env，下次升级自动沿用）
   --github-proxy <前缀> 指定自己的 GitHub 加速前缀，例如 https://ghfast.top
@@ -259,6 +360,36 @@ usage() {
   --off                  关闭定时备份
   --out    <文件>        migrate 生成的 tar.gz 保存路径
   --purge                uninstall 时连数据卷一起删干净
+
+新手向导 / 可配置：
+  （全新安装且没给任何参数时，默认会先走一遍问答向导；加 -y 则全程不提问）
+  --wizard              强制走一遍问答向导（即使已经给了参数）
+  --no-wizard           不提问，全部用默认值
+  --config <配置档>      从文件读取选项，照着它装（见 --save-config）
+  --save-config <文件>   把本次的选择写成配置档，之后可 --config 复现
+  --dry-run             只打印「将要做什么」，不装 Docker、不写 .env、不启容器
+  --timezone <时区>      设置系统时区，例如 Asia/Shanghai（定时备份按它执行）
+  --smtp-host <地址>     邮件通知（都留空 = 不配置，之后可在后台「设置 → 邮件」里补）
+  --smtp-port <端口>
+  --smtp-user <用户名>
+  --smtp-pass <密码>
+  --smtp-from <发件人>
+  --no-autobackup       安装后不装定时备份
+  --skip-preflight      跳过起飞前检查（端口 / 域名 / 防火墙）
+  --no-doctor           安装后不做自动体检
+  --reset, --fresh       清除「安装进度记录」，从头执行（断点续跑用）
+  -h, --help             查看全部参数
+
+  配置档示例（KEY=VALUE，# 开头是注释）：
+      DOMAIN=blog.example.com
+      DB=sqlite
+      TIMEZONE=Asia/Shanghai
+      AUTOBACKUP=1
+      AT=03:30
+      KEEP=7
+
+  断点续跑：安装中途失败不用重来，原样再跑一次同一条命令即可，
+            已完成并记录的步骤会自动跳过（想从头来就加 --reset）。
 EOF
 }
 
@@ -936,14 +1067,14 @@ S3_MUSIC_BUCKET=
 S3_MUSIC_PUBLIC_BASE=
 S3_BACKUP_BUCKET=
 
-# 邮件（留空 = 关闭订阅通知）
-SMTP_HOST=
-SMTP_PORT=587
-SMTP_USER=
-SMTP_PASS=
+# 邮件（留空 = 关闭订阅通知；也可安装后在后台「设置 → 邮件」里填）
+SMTP_HOST=${SMTP_HOST_OPT}
+SMTP_PORT=${SMTP_PORT_OPT:-587}
+SMTP_USER=${SMTP_USER_OPT}
+SMTP_PASS=${SMTP_PASS_OPT}
 SMTP_SECURE=0
 RESEND_API_KEY=
-BLOG_MAIL_FROM=
+BLOG_MAIL_FROM=${SMTP_FROM_OPT}
 
 # AI（留空 = 关闭）
 AI_BASE_URL=
@@ -953,6 +1084,8 @@ AI_MODEL=
 QINGYU_MIRROR=$mirror_flag
 # 构建镜像时 npm 使用的源，留空 = 官方源
 NPM_REGISTRY=$npm_registry
+# 系统时区（--timezone 设置；影响定时备份的执行时间）
+TZ=${TIMEZONE}
 EOF
   chmod 600 "$env_file"
   SETUP_KEY_SHOWN="$setup_key"
@@ -1054,6 +1187,8 @@ port_in_use_pair() {
 
 interact_mode() {
   # 参数已指定 / 非升级场景已在 resolve_mode 里处理，这里只在「全新安装且未给参数」时提问
+  # 走过安装向导后所有选项都已定下来，不再重复问一遍
+  [ "$WIZARD_DONE" = "1" ] && return 0
   [ -n "$DOMAIN" ] && return 0
   [ -n "$APP_PORT" ] && return 0
   [ -f "$INSTALL_DIR/.env" ] && return 0
@@ -1136,7 +1271,8 @@ interact_mode() {
 # 数据库选择：默认 SQLite，但把选择权显式交出来。
 # 和部署模式一样，curl|bash 时 stdin 是脚本本身，必须从 /dev/tty 读。
 interact_database() {
-  # 已用参数指定 → 尊重参数；已部署过 → 不打扰现有配置
+  # 已用参数指定 → 尊重参数；已部署过 → 不打扰现有配置；走过向导 → 已经问过了
+  [ "$WIZARD_DONE" = "1" ] && return 0
   [ -n "$DB_KIND" ] && return 0
   [ -n "$DATABASE_URL_OPT" ] && return 0
   [ -f "$INSTALL_DIR/.env" ] && return 0
@@ -1174,6 +1310,434 @@ interact_database() {
       log "将使用 SQLite（数据文件在数据目录里，单文件备份最省心）"
       ;;
   esac
+}
+
+# ============================================================
+# 安装进度记录（断点续跑）
+# ============================================================
+# 中途失败（网络断、Docker 装到一半、构建超时）是最常见的挫败点。
+# 之前重跑等于从头再来一次，最慢的两步（装 Docker、构建镜像）要重做。
+# 这里把「已经做完的步骤」记进安装目录里的小文件，重跑时自动跳过。
+state_file()  { printf '%s/.qingyu-install-state' "$INSTALL_DIR"; }
+state_has()   { [ -f "$(state_file)" ] && grep -qx "$1" "$(state_file)" 2>/dev/null; }
+state_mark()  {
+  local f; f="$(state_file)"
+  mkdir -p "$(dirname "$f")" 2>/dev/null || true
+  if ! grep -qx "$1" "$f" 2>/dev/null; then printf '%s\n' "$1" >> "$f"; fi
+}
+state_clear() { rm -f "$(state_file)" 2>/dev/null || true; }
+
+# 按步骤执行：$1=步骤代号 $2=步骤名称 其余=要执行的命令
+# 已完成 → 只打印「跳过」，不重复做。
+run_step() {
+  local key="$1" desc="$2"; shift 2
+  step_begin "$desc"
+  if state_has "$key"; then
+    log "这一步上次已经完成，直接跳过（想从头执行请加 --reset）"
+    step_end
+    return 0
+  fi
+  "$@"
+  state_mark "$key"
+  step_end
+}
+
+# ============================================================
+# 安装向导：一次问答走完全流程
+# ============================================================
+# 面向第一次用的人：先探测环境，再用大白话问几个问题，每个都给好推荐答案，
+# 直接回车就是推荐方案；输入 b 回到上一题，输入 q 放弃。
+# 所有问题只在「全新安装 + 能交互」时出现，CI / curl|bash / -y 一律不打扰。
+WIZ_STEPS=(access domain db backup mail confirm)
+
+wizard_probe() {
+  WIZ_DISTRO="$(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-未知}")" || WIZ_DISTRO="未知"
+  WIZ_ARCH="$(uname -m 2>/dev/null || echo '未知')"
+  WIZ_IP="$(detect_ip 2>/dev/null || true)"
+  [ -n "$WIZ_IP" ] || WIZ_IP="未探测到（不影响安装）"
+  WIZ_DISK="$(df -Pk / 2>/dev/null | awk 'NR==2 {printf "%d", $4/1024}')"
+  [ -n "$WIZ_DISK" ] || WIZ_DISK="?"
+  if port_in_use 80 || port_in_use 443; then WIZ_PORTS=0; else WIZ_PORTS=1; fi
+}
+
+is_valid_domain() {
+  local d="$1"
+  [ -n "$d" ] || return 1
+  [ "${#d}" -le 253 ] || return 1
+  case "$d" in
+    *[!A-Za-z0-9.-]*) return 1 ;;
+    .*|*.|-*|*-|*..*) return 1 ;;
+    *.*) ;;
+    *) return 1 ;;
+  esac
+  # 最后一段必须是字母（排除 1.2.3.4 这种纯数字写法）
+  case "${d##*.}" in ''|*[!A-Za-z]*) return 1 ;; esac
+  return 0
+}
+
+wiz_access() {
+  # 命令行已经给了 --domain 或 --port → 不再问
+  if [ -n "$DOMAIN" ] || [ -n "$APP_PORT" ]; then WIZ_ACT=next; return 0; fi
+  echo
+  echo "  ── 第 1 问：别人怎么访问你的博客？"
+  if [ "$WIZ_PORTS" = "1" ]; then
+    echo "    1) 域名 + 自动 HTTPS  【推荐】"
+    echo "       需要一个已经解析到本机的域名；证书脚本自动申请、自动续期。"
+    echo "    2) IP + 端口"
+    echo "       不用域名，地址形如 http://${WIZ_IP}:8080；登录密码明文传输。"
+    ask "选 1 还是 2" "1"
+    case "$REPLY" in
+      2) WIZ_MODE="port" ;;
+      *) WIZ_MODE="domain" ;;
+    esac
+  else
+    echo "    检测到本机 80/443 已被占用 —— Let's Encrypt 验证固定走这两个端口，"
+    echo "    （这是协议限制，不是本项目的限制），所以只能用自定义端口。"
+    echo "    1) 仍然填域名（你有自己的反代、或稍后会腾出端口）"
+    echo "    2) 自定义端口访问  【推荐】"
+    ask "选 1 还是 2" "2"
+    case "$REPLY" in
+      1) WIZ_MODE="domain" ;;
+      *) WIZ_MODE="port" ;;
+    esac
+  fi
+}
+
+wiz_domain() {
+  [ "$WIZ_MODE" = "domain" ] || { WIZ_ACT=next; return 0; }
+  [ -n "$DOMAIN" ] && { WIZ_ACT=next; return 0; }
+  echo
+  echo "  ── 第 2 问：域名是什么？"
+  echo "    只写域名本身，不要带 http://，例如 blog.example.com"
+  echo "    请确认它已解析到 ${WIZ_IP}（还没解析也可以先填，之后补上即可）"
+  local tries=0 d
+  while [ $tries -lt 3 ]; do
+    ask "域名（留空改用 IP + 端口）" ""
+    d="$(printf '%s' "${REPLY:-}" | tr -d '[:space:]' | sed -E 's#^https?://##; s#/.*$##')"
+    if [ -z "$d" ]; then
+      WIZ_MODE="port"; log "已改用 IP + 端口"
+      WIZ_ACT=next; return 0
+    fi
+    if is_valid_domain "$d"; then
+      DOMAIN="$d"; WIZ_ACT=next; return 0
+    fi
+    warn "「${d}」不像一个合法域名（示例：blog.example.com）"
+    tries=$((tries + 1))
+  done
+  warn "三次都没填对，先按 IP + 端口 装（之后可随时 upgrade --domain 你的域名 切换）"
+  WIZ_MODE="port"
+  WIZ_ACT=next
+}
+
+wiz_db() {
+  if [ -n "$DB_KIND" ] || [ -n "$DATABASE_URL_OPT" ]; then WIZ_ACT=next; return 0; fi
+  echo
+  echo "  ── 第 3 问：数据存哪里？"
+  echo "    1) SQLite  【推荐】"
+  echo "       零配置，整个博客就是一个文件，备份最省心，个人博客完全够用。"
+  echo "    2) PostgreSQL · 内置容器"
+  echo "       脚本自动装好，多进程 / 高并发更稳，多占约 100MB 内存。"
+  echo "    3) PostgreSQL · 我自己的库"
+  echo "       填连接串（云数据库 / Supabase / 已有的 PostgreSQL）。"
+  ask "选 1 / 2 / 3" "1"
+  case "$REPLY" in
+    2)
+      DB_KIND="postgres"
+      log "将内置 PostgreSQL 容器（端口只在容器网络内开放，不占宿主机 5432）"
+      ;;
+    3)
+      ask "连接串（postgres://用户:密码@主机:5432/库名）" ""
+      if [ -z "${REPLY:-}" ]; then
+        warn "没填连接串，改用 SQLite"
+        DB_KIND="sqlite"
+      else
+        DATABASE_URL_OPT="$REPLY"
+        DB_KIND="external"
+        log "将连接你自己的 PostgreSQL"
+      fi
+      ;;
+    *)
+      DB_KIND="sqlite"
+      log "将使用 SQLite（数据文件在数据目录里，单文件备份最省心）"
+      ;;
+  esac
+  WIZ_ACT=next
+}
+
+wiz_backup() {
+  [ "$NO_AUTOBACKUP" = "1" ] && { WIZ_ACT=next; return 0; }
+  echo
+  echo "  ── 第 4 问：要不要每天自动备份？"
+  echo "    1) 要  【推荐】每天自动快照，只保留最近几份，服务器坏了能救回来。"
+  echo "    2) 不要，我自己手动备份"
+  ask "选 1 还是 2" "1"
+  case "$REPLY" in
+    2) WIZ_BACKUP=0; WIZ_ACT=next; return 0 ;;
+    *) WIZ_BACKUP=1 ;;
+  esac
+  ask "每天几点备份（HH:MM）" "$AT_TIME"
+  if printf '%s' "${REPLY:-}" | grep -qE '^[0-9]{1,2}:[0-9]{2}$'; then
+    AT_TIME="$(printf '%02d:%s' "$(printf '%s' "${REPLY%%:*}")" "${REPLY##*:}")"
+  else
+    warn "时间格式不对，沿用 ${AT_TIME}"
+  fi
+  ask "保留最近几份" "$KEEP_N"
+  if printf '%s' "${REPLY:-}" | grep -qE '^[0-9]+$' && [ "${REPLY:-0}" -ge 1 ]; then
+    KEEP_N="$REPLY"
+  else
+    warn "份数不对，沿用 ${KEEP_N}"
+  fi
+  WIZ_ACT=next
+}
+
+wiz_mail() {
+  [ -n "$SMTP_HOST_OPT" ] && { WIZ_ACT=next; return 0; }
+  echo
+  echo "  ── 第 5 问：配置邮件通知吗？（文章订阅 / 评论提醒）"
+  echo "    直接回车跳过 —— 之后随时可以在后台「设置 → 邮件」里配。"
+  ask "SMTP 服务器地址（留空跳过）" ""
+  [ -z "${REPLY:-}" ] && { WIZ_ACT=next; return 0; }
+  SMTP_HOST_OPT="$REPLY"
+  ask "SMTP 端口" "587";                            SMTP_PORT_OPT="${REPLY:-587}"
+  ask "SMTP 用户名（通常是邮箱地址）" "";             SMTP_USER_OPT="${REPLY:-}"
+  ask "SMTP 密码 / 授权码" "";                        SMTP_PASS_OPT="${REPLY:-}"
+  ask "发件人地址（如 noreply@example.com）" "$SMTP_USER_OPT"; SMTP_FROM_OPT="${REPLY:-}"
+  WIZ_ACT=next
+}
+
+# 复核页：把「已经定下来的东西」摆出来，给反悔的机会
+wizard_summary() {
+  local mode db backup mail
+  if [ -n "$DOMAIN" ] && [ -z "$APP_PORT" ]; then
+    mode="https://${DOMAIN}（自动 HTTPS 证书）"
+  elif [ -n "$DOMAIN" ]; then
+    mode="http://${DOMAIN}:${APP_PORT}"
+  else
+    mode="http://${IP_ADDR:-<自动探测 IP>}:${APP_PORT:-8080}（纯 HTTP）"
+  fi
+  case "$DB_KIND" in
+    postgres) db="PostgreSQL（内置容器）" ;;
+    external) db="PostgreSQL（外部：$(printf '%s' "$DATABASE_URL_OPT" | sed -E 's#^[^:]+://[^@]*@##')）" ;;
+    *)        db="SQLite（单文件，备份最省心）" ;;
+  esac
+  if [ "$WIZ_BACKUP" = "1" ]; then
+    backup="每天 ${AT_TIME}，保留最近 ${KEEP_N} 份"
+  else
+    backup="未启用（可随时 $0 autobackup 开启）"
+  fi
+  if [ -n "$SMTP_HOST_OPT" ]; then mail="${SMTP_HOST_OPT}:${SMTP_PORT_OPT}（发件人 ${SMTP_FROM_OPT:-未填}）"
+  else mail="未配置（之后可在后台「设置 → 邮件」里补）"; fi
+  echo
+  echo "    访问方式    ${mode}"
+  echo "    数据库      ${db}"
+  echo "    定时备份    ${backup}"
+  echo "    邮件通知    ${mail}"
+  echo "    安装目录    ${INSTALL_DIR}"
+  echo "    代码版本    ${REPO}@${REF}"
+  [ -n "$TIMEZONE" ] && echo "    系统时区    ${TIMEZONE}"
+  # 必须以 0 结束：上面那行是 `[ ... ] && ...`，条件为假时整条语句返回 1，
+  # 函数返回值就变成 1 —— 在 set -e 下会把调用方直接打断（向导走到复核页就静默退出）。
+  return 0
+}
+
+wiz_confirm() {
+  echo
+  echo "  ── 最后一步：确认一下"
+  wizard_summary
+  echo
+  echo "    回车 = 开始安装      b = 改上一题"
+  echo "    1 = 改访问方式   2 = 改数据库   3 = 改备份   4 = 改邮件     q = 放弃"
+  ask "你的选择" ""
+  case "${REPLY:-}" in
+    q|Q)      die "已放弃安装（随时可以重新运行本脚本）" ;;
+    b|B)      WIZ_ACT=back ;;
+    1)        WIZ_ACT="jump:0" ;;
+    2)        WIZ_ACT="jump:2" ;;
+    3)        WIZ_ACT="jump:3" ;;
+    4)        WIZ_ACT="jump:4" ;;
+    *)        WIZ_ACT=next ;;
+  esac
+}
+
+run_wizard() {
+  wizard_probe
+  {
+    echo
+    echo "  ┌──────────────────────────────────────────────────────────┐"
+    echo "  │  轻语博客 · 安装向导                                      │"
+    echo "  └──────────────────────────────────────────────────────────┘"
+    echo
+    echo "    这台机器：${WIZ_DISTRO} / ${WIZ_ARCH}   可用磁盘 ${WIZ_DISK} MB"
+    echo "    公网 IP ：${WIZ_IP}"
+    echo
+    echo "    接下来几个问题，每个都给好了推荐答案 —— 直接回车就是推荐方案。"
+    echo "    输入 b 回到上一题，输入 q 放弃安装。"
+  } > /dev/tty 2>/dev/null || true
+
+  local i=0 n=${#WIZ_STEPS[@]}
+  WIZ_MODE=""
+  while [ "$i" -lt "$n" ]; do
+    WIZ_ACT=next
+    "wiz_${WIZ_STEPS[$i]}"
+    case "$WIZ_ACT" in
+      back)   i=$((i - 1)); [ "$i" -lt 0 ] && i=0 ;;
+      jump:*) i="${WIZ_ACT#jump:}" ;;
+      *)      i=$((i + 1)) ;;
+    esac
+  done
+  WIZARD_DONE=1
+  # 「IP + 端口」模式：挑一个空闲端口，别让用户自己猜
+  if [ "$WIZ_MODE" = "port" ] && [ -z "$APP_PORT" ]; then
+    APP_PORT="$(pick_free_port)"
+    log "已选择端口 ${APP_PORT}"
+  fi
+  [ -n "$IP_ADDR" ] || IP_ADDR="$(detect_ip)"
+  log "配置确认完毕，开始安装"
+}
+
+# 是否该走向导：全新安装 + 有终端 + 没被显式关掉
+wizard_maybe() {
+  [ "$NO_WIZARD" = "1" ] && { WIZARD_DONE=0; return 0; }
+  can_ask || return 0
+  [ -f "$INSTALL_DIR/.env" ] && return 0
+  run_wizard
+}
+
+# ============================================================
+# 演练模式 / 时区 / 配置档导出
+# ============================================================
+dry_run_report() {
+  echo
+  echo "  ┌──────────────────────────────────────────────────────────┐"
+  echo "  │  演练模式（--dry-run）：只打印将要做什么，不实际执行       │"
+  echo "  └──────────────────────────────────────────────────────────┘"
+  wizard_summary
+  echo
+  echo "  将要执行的步骤："
+  echo "    1) 检查并准备系统环境（curl / git / Docker）"
+  echo "    2) 获取代码：${REPO}@${REF}"
+  echo "    3) 生成 ${INSTALL_DIR}/.env（含随机密钥）"
+  echo "    4) 起飞前检查（资源 / 端口 / 域名 / 防火墙）"
+  echo "    5) 构建镜像并启动容器"
+  [ "$WIZ_BACKUP" = "1" ] && echo "    6) 安装定时备份（每天 ${AT_TIME}，保留 ${KEEP_N} 份）"
+  echo
+  echo "  现在不会做：不装 Docker、不下载代码、不写 .env、不启动容器。"
+  echo "  确认无误后去掉 --dry-run 再跑一次即可。"
+  return 0
+}
+
+apply_timezone() {
+  [ -n "$TIMEZONE" ] || return 0
+  if [ "$DRY_RUN" = "1" ]; then log "演练：将把系统时区设为 ${TIMEZONE}"; return 0; fi
+  if have timedatectl && timedatectl set-timezone "$TIMEZONE" >/dev/null 2>&1; then
+    log "已将系统时区设为 ${TIMEZONE}（定时备份按此时间执行）"
+  elif [ -f "/usr/share/zoneinfo/$TIMEZONE" ]; then
+    if ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime 2>/dev/null; then
+      log "已将系统时区设为 ${TIMEZONE}"
+    else
+      warn "设置时区失败（需要 root）：${TIMEZONE}"
+    fi
+  else
+    warn "无法设置时区 ${TIMEZONE}：这台机器既没有 timedatectl，也找不到 /usr/share/zoneinfo/${TIMEZONE}"
+    warn "常见写法：Asia/Shanghai、Asia/Tokyo、America/New_York、UTC"
+  fi
+}
+
+# 把向导里补填的邮件 / 时区写进已存在的 .env（.env 是新建的则 ensure_env 已经写好）
+env_set() {
+  local key="$1" val="$2" f="$INSTALL_DIR/.env"
+  [ -f "$f" ] || return 0
+  if grep -qE "^${key}=" "$f" 2>/dev/null; then
+    # 值里可能含 / 与 &，sed 用 | 做分隔符，并对 & 做转义
+    local esc; esc="$(printf '%s' "$val" | sed -e 's/[&|]/\\&/g')"
+    sed -i "s|^${key}=.*|${key}=${esc}|" "$f"
+  else
+    printf '%s=%s\n' "$key" "$val" >> "$f"
+  fi
+}
+
+apply_env_extras() {
+  [ -f "$INSTALL_DIR/.env" ] || return 0
+  local n=0
+  if [ -n "$SMTP_HOST_OPT" ]; then
+    env_set SMTP_HOST "$SMTP_HOST_OPT"; n=$((n + 1))
+  fi
+  [ -n "$SMTP_PORT_OPT" ] && { env_set SMTP_PORT "$SMTP_PORT_OPT"; n=$((n + 1)); }
+  [ -n "$SMTP_USER_OPT" ] && { env_set SMTP_USER "$SMTP_USER_OPT"; n=$((n + 1)); }
+  [ -n "$SMTP_PASS_OPT" ] && { env_set SMTP_PASS "$SMTP_PASS_OPT"; n=$((n + 1)); }
+  [ -n "$SMTP_FROM_OPT" ] && { env_set BLOG_MAIL_FROM "$SMTP_FROM_OPT"; n=$((n + 1)); }
+  [ -n "$TIMEZONE" ]      && { env_set TZ "$TIMEZONE"; n=$((n + 1)); }
+  [ "$n" -gt 0 ] && log "已把邮件 / 时区配置写入 .env（${n} 项；改完执行 $0 restart 生效）"
+  return 0
+}
+
+save_config_maybe() {
+  [ -n "$SAVE_CONFIG" ] || return 0
+  local f="$SAVE_CONFIG"
+  cat > "$f" <<EOF
+# 轻语博客部署配置档 —— 由 deploy/install.sh 于 $(date -u +"%Y-%m-%dT%H:%M:%SZ") 生成
+# 用法： bash deploy/install.sh install --config $f
+# 命令行参数优先于本文件；本文件只补命令行没给的项。
+DOMAIN=$DOMAIN
+PORT=$APP_PORT
+DB=$DB_KIND
+DATABASE_URL=$DATABASE_URL_OPT
+DIR=$INSTALL_DIR
+REF=$REF
+REPO=$REPO
+EMAIL=$EMAIL
+TIMEZONE=$TIMEZONE
+SMTP_HOST=$SMTP_HOST_OPT
+SMTP_PORT=$SMTP_PORT_OPT
+SMTP_USER=$SMTP_USER_OPT
+SMTP_PASS=$SMTP_PASS_OPT
+SMTP_FROM=$SMTP_FROM_OPT
+MIRROR=${MIRROR:-0}
+KEEP=$KEEP_N
+AT=$AT_TIME
+AUTOBACKUP=$WIZ_BACKUP
+EOF
+  chmod 600 "$f" 2>/dev/null || true
+  log "配置档已保存到 ${f}（含 SMTP 密码，权限已设为 600）"
+  echo "    下次复用： bash deploy/install.sh install --config ${f}"
+}
+
+# ============================================================
+# 安装后引导 + 自动体检
+# ============================================================
+post_install_guide() {
+  local site_url key
+  site_url="$(env_value SITE_URL)"
+  [ -n "$site_url" ] || site_url="http://localhost:$(local_health_port)"
+  key="$(env_value BLOG_ADMIN_SETUP_KEY)"
+  echo
+  echo "  ┌──────────────────────────────────────────────────────────┐"
+  echo "  │  接下来三件事                                            │"
+  echo "  └──────────────────────────────────────────────────────────┘"
+  echo
+  echo "    1) 打开 ${site_url}"
+  echo "       首次打开可能要等十几秒（容器正在初始化数据库）"
+  echo
+  echo "    2) 打开 ${site_url}/admin 设置管理员密码"
+  if [ -n "$key" ]; then
+    echo "       安装密钥：${key}"
+    echo "       （已存在 .env 里，忘了随时跑 $0 info 查看）"
+  fi
+  echo "       设完密码后，到「设置 → 站点」把站名、简介改成你自己的"
+  echo
+  echo "    3) 确认 SITE_URL 是真实域名"
+  echo "       现在是 ${site_url}"
+  echo "       如果是 localhost / 内网 IP，改 ${INSTALL_DIR}/.env 里的 SITE_URL 后执行 $0 restart"
+  echo
+  echo "  出问题先跑： $0 doctor        （Docker / 容器 / 端口 / 证书 / 磁盘逐项检查）"
+  echo "  看实时日志： $0 logs"
+  echo
+  if [ "$SKIP_DOCTOR" = "1" ]; then
+    log "已跳过自动体检（--no-doctor）"
+    return 0
+  fi
+  log "正在做一次自动体检…"
+  cmd_doctor || true
 }
 
 # ------------------------------------------------------------
@@ -1558,49 +2122,122 @@ summary() {
 }
 
 # ---------- 各子命令 ----------
-cmd_install() {
-  STEP_TOTAL=7
-  need_root
-  step_begin "检查并准备系统环境（curl / git / Docker）"
+# 每一步都拆成独立函数，配合 run_step 才能「失败后重跑只补没做的部分」
+install_step_sysenv() {
   resolve_docker
   resolve_mirror
   ensure_curl
   ensure_git
   install_docker
   configure_registry_mirror
-  step_end
-
-  step_begin "获取博客代码"
-  fetch_source
-  step_end
-
-  step_begin "选择访问方式与数据库"
-  interact_mode
-  interact_database
-  resolve_mode
-  resolve_database
-  step_end
-
-  step_begin "生成配置文件（.env）"
-  ensure_env
-  persist_mirror_env
-  step_end
-
-  step_begin "起飞前检查（资源 / 端口 / 域名 / 防火墙）"
-  preflight
-  step_end
-
-  step_begin "构建镜像并启动服务"
+}
+install_step_source() { fetch_source; }
+install_step_config() { ensure_env; persist_mirror_env; apply_env_extras; }
+install_step_preflight() { preflight; }
+install_step_build() {
   BUILD_REVISION="$(resolve_revision)"
   [ -n "$BUILD_REVISION" ] || BUILD_REVISION=unknown
   export BUILD_REVISION
   log "构建并启动容器…（版本 $BUILD_REVISION）"
   compose up -d --build
   wait_healthy
+}
+
+cmd_install() {
+  STEP_TOTAL=6
+  need_root
+
+  # 已经完整装过 → 直接转升级，避免重复构建把线上配置顶掉
+  if [ -f "$INSTALL_DIR/.env" ] && [ -f "$INSTALL_DIR/compose.yaml" ] \
+     && state_has build && [ "$RESET_STATE" != "1" ]; then
+    log "检测到 ${INSTALL_DIR} 已经安装完成，自动改为执行升级"
+    log "（想推倒重来： $0 install --reset -- 会保留 .env 与数据，只重跑安装流程）"
+    cmd_upgrade
+    return 0
+  fi
+  if [ "$RESET_STATE" = "1" ]; then
+    state_clear
+    log "已清除安装进度记录，本次从头执行"
+  fi
+
+  prepare_install_dir
+  # 向导要用 detect_ip，得先有 curl；演练模式下不装任何东西
+  [ "$DRY_RUN" = "1" ] || ensure_curl
+
+  # 第 1 步：把选项一次性问清楚（向导）或沿用默认值
+  step_begin "确认安装选项"
+  if [ "$DRY_RUN" = "1" ] && [ "$WIZARD_FORCE" != "1" ] && ! can_ask; then
+    log "演练模式：不提问，使用默认值"
+  else
+    wizard_maybe
+  fi
+  interact_mode
+  interact_database
+  resolve_mode
+  resolve_database
+  # 非交互 / 向导都没设 IP 时补一次探测，否则演练摘要里只能显示占位符
+  if [ -z "$DOMAIN" ] && [ -z "$IP_ADDR" ]; then IP_ADDR="$(detect_ip)"; fi
   step_end
+
+  apply_timezone
+
+  # 演练到此为止：后面的步骤才会真正改动系统
+  if [ "$DRY_RUN" = "1" ]; then
+    STEP_TOTAL=0
+    dry_run_report
+    save_config_maybe
+    return 0
+  fi
+
+  run_step sysenv    "检查并准备系统环境（curl / git / Docker）"  install_step_sysenv
+  run_step source    "获取博客代码"                              install_step_source
+  run_step config    "生成配置文件（.env）"                       install_step_config
+  if [ "$SKIP_PREFLIGHT" = "1" ]; then
+    log "已跳过起飞前检查（--skip-preflight）"
+  else
+    run_step preflight "起飞前检查（资源 / 端口 / 域名 / 防火墙）" install_step_preflight
+  fi
+  run_step build     "构建镜像并启动服务"                         install_step_build
+
+  # 进度记录**保留**：下次再跑 install 会被上面的路由送到 upgrade，
+  # 不会重复走一遍完整安装流程（想推倒重来用 --reset）。
+  save_config_maybe
+
+  # 向导里选了自动备份 → 立刻装上
+  if [ "$WIZ_BACKUP" = "1" ]; then
+    log "安装定时备份（每天 ${AT_TIME}，保留最近 ${KEEP_N} 份）"
+    cmd_autobackup || warn "定时备份安装失败，可稍后手动执行：$0 autobackup"
+  fi
 
   STEP_TOTAL=0
   summary
+  post_install_guide
+}
+
+# 升级前先把「从哪个版本升到哪个版本」说清楚，中间隔了多少个提交也一并列出
+show_version_diff() {
+  local after
+  after="$(resolve_revision)"
+  if [ -z "${UPGRADE_FROM:-}" ] || [ -z "$after" ]; then
+    [ -n "$after" ] && log "当前版本：$after"
+    return 0
+  fi
+  if refs_equal "$UPGRADE_FROM" "$after"; then
+    log "版本未变化：$after（已经是最新的代码）"
+    return 0
+  fi
+  echo
+  log "版本变化：${UPGRADE_FROM} → ${after}"
+  if [ -d "$INSTALL_DIR/.git" ] && have git; then
+    local n
+    n="$(git -C "$INSTALL_DIR" rev-list --count "${UPGRADE_FROM}..HEAD" 2>/dev/null || true)"
+    case "$n" in ''|*[!0-9]*) n="" ;; esac
+    [ -n "$n" ] && echo "    新增 ${n} 个提交"
+    git -C "$INSTALL_DIR" log --oneline --no-decorate "${UPGRADE_FROM}..HEAD" 2>/dev/null \
+      | head -n 8 | sed 's/^/      /' || true
+  fi
+  echo
+  return 0
 }
 
 cmd_upgrade() {
@@ -1613,12 +2250,18 @@ cmd_upgrade() {
   configure_registry_mirror
   [ -d "$INSTALL_DIR" ] || die "未找到安装目录：$INSTALL_DIR"
   ensure_git
+  # 记下升级前的版本，拉完代码后好对比
+  UPGRADE_FROM="$(resolve_revision)"
   step_end
+
+  apply_timezone
 
   step_begin "拉取最新代码并备份当前数据"
   update_source
+  show_version_diff
   resolve_mode
   persist_mirror_env
+  apply_env_extras
   # 先备份，再升级
   backup_now || warn "升级前备份失败，继续升级"
   step_end

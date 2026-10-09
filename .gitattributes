@@ -1,0 +1,5 @@
+# Shell 脚本必须保持 LF。
+# 在 Windows 上（core.autocrlf=true）检出时会带上 CR，脚本到了 Linux 容器里
+# 第一行 `set -euo pipefail\r` 就会报 "invalid option name" 直接退出 ——
+# 这个坑在把 install.sh 拷进容器实测时真的踩到过。
+*.sh text eol=lf
