@@ -53,6 +53,12 @@ describe('公开站 SSR', () => {
     // 正文真的被渲染进去了（这是整个改动的意义）
     expect(html).toContain('<strong>正文</strong>');
     expect(html).toContain('入门系列');
+    // 字号工具条必须首屏就在 SSR HTML 中，而不是等 app.js 接管后才出现
+    expect(html).toContain('<div class="reading-tools">');
+    expect((html.match(/data-rs="/g) ?? []).length).toBe(3);
+    expect(html).toContain('data-rs="-1"');
+    expect(html).toContain('data-rs="0"');
+    expect(html).toContain('data-rs="1"');
   });
 
   it('受保护文章不注入正文（内容是密文且已 noindex）', () => {

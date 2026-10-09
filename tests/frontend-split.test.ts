@@ -22,6 +22,19 @@ describe('公开站前端拆分（v0.7-b）', () => {
     expect(boot).toContain('/edit');
   });
 
+  it('字号按钮在 app.js 接管前已有首屏点击兜底', () => {
+    const html = read('index.html');
+    expect(html).toContain("closest('[data-rs]')");
+    expect(html).toContain("localStorage.setItem('qingyu.readingScale'");
+    const click = html.indexOf("document.addEventListener('click'");
+    const fallback = html.indexOf("closest('[data-rs]')");
+    const captureEnd = html.indexOf('}, true);', fallback);
+    expect(click).toBeGreaterThan(-1);
+    expect(fallback).toBeGreaterThan(click);
+    expect(captureEnd).toBeGreaterThan(fallback);
+    expect(captureEnd - click).toBeLessThan(1200);
+  });
+
   it('旧后台代码已从主包移出，只保留按需加载入口', () => {
     const app = read('app.js');
     const legacy = read('admin-legacy.js');

@@ -83,6 +83,13 @@ export async function startTestServer(): Promise<TestServer> {
   const workerEntry = pathToFileURL(path.join(config.appDir, 'worker.js')).href;
   const worker = ((await import(workerEntry)) as { default: WorkerModule }).default;
 
+  /* 与 src/index.ts 保持一致：接入服务端 SEO 路由。
+   * 少了这一段，/ 与 /posts/:id 会落到兜底的外壳 HTML，
+   * 于是文章页的压缩头、缓存头、SSR 正文在测试里全都测不到。 */
+  const apiCoreEntry = pathToFileURL(path.join(config.appDir, 'functions/_lib/api-core.js')).href;
+  const apiCore = (await import(apiCoreEntry)) as { securityHeaders?: () => Record<string, string> };
+  const securityHeaders = typeof apiCore.securityHeaders === 'function' ? apiCore.securityHeaders : undefined;
+
   const app = createApp({
     config,
     db,
@@ -90,6 +97,7 @@ export async function startTestServer(): Promise<TestServer> {
     worker,
     migration,
     storage,
+    seo: { config, db, securityHeaders },
     // 测试环境一律 strict：schema 与实际响应不符就当作失败
     validateResponses: 'strict'
   });

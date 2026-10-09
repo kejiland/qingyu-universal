@@ -25,8 +25,17 @@ describe('公开站 SSR · 站点框架', () => {
     expect(html).toContain('<a class="brand" href="/">测试博客</a>');
     expect(html).toContain('<nav class="main-nav">');
     expect(html).toContain('<div class="topbar-actions">');
-    // 4 个占位图标按钮：CSS 给了 .icon-btn 固定尺寸，能占住空间
-    expect((html.match(/class="icon-btn"/g) ?? []).length).toBe(4);
+    // 5 个动作必须随 SSR 连同图标一起输出，不能等 app.js 空闲接管后才补上
+    expect((html.match(/class="icon-btn/g) ?? []).length).toBe(5);
+    expect(html).toContain('id="searchToggle"');
+    expect(html).toContain('id="langToggle"');
+    expect(html).toContain('id="accentToggle"');
+    expect(html).toContain('id="bgAnimToggle"');
+    expect(html).toContain('id="themeToggle"');
+    expect(html).not.toContain('<button class="icon-btn" tabindex="-1" aria-hidden="true"></button>');
+    expect((html.match(/<svg /g) ?? []).length).toBeGreaterThanOrEqual(6);
+    expect(html).toContain('ssr-theme-moon');
+    expect(html).toContain('ssr-theme-sun');
   });
 
   it('当前路径的导航项高亮', async () => {
@@ -99,6 +108,26 @@ describe('公开站 SSR · 站点框架', () => {
       expect(urls).toContain('/tags');  // 缺失的默认项补上
       expect(chrome.primaryNav.map((n) => n.url)).toContain('/about');
       expect(chrome.secondaryNav.map((n) => n.url)).toEqual(['/tags', '/history', '/series', '/popular']);
+    } finally {
+      db.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('预取 site_settings 行时不再回查数据库', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qingyu-chrome4-'));
+    const db = createD1(path.join(dir, 'c4.db'));
+    try {
+      await runMigrations(db, MIGRATIONS_DIR);
+      db.native.prepare('INSERT INTO site_settings (k,v) VALUES (?,?)').run('site', JSON.stringify({ name: '预取站名' }));
+      const rows = await db.all<{ k: string; v: string }>('SELECT k, v FROM site_settings');
+      const chrome = await readChrome(db, '兜底名', rows);
+      expect(chrome.siteName).toBe('预取站名');
+      // 传入的预取行为空数组（表确实为空）与不传是两种语义：
+      // 空数组表示「查过了，确实没有」，不应退回默认导航去再查一次。
+      const empty = await readChrome(db, '兜底名', []);
+      expect(empty.nav.length).toBeGreaterThan(0);
+      expect(empty.footer.copyrightName).toBe('兜底名');
     } finally {
       db.close();
       fs.rmSync(dir, { recursive: true, force: true });

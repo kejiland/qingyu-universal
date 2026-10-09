@@ -53,6 +53,14 @@ export interface SeoDeps {
 }
 
 /** 当前请求的导航高亮状态：路径 + 首页 ?category= 选中的分类。 */
+/** 可短期缓存的 HTML（列表页 / 静态页）缓存策略：1 分钟新鲜 + 10 分钟后台刷新。 */
+const LIST_CACHE_CONTROL = 'public, max-age=60, stale-while-revalidate=600';
+
+/** 把整批 site_settings 折成一个稳定指纹，用于静态页的 ETag。 */
+function fingerprintOfSettings(rows: Array<{ k: string; v: string }>): string {
+  return rows.map((r) => `${r.k}=${r.v}`).join('|');
+}
+
 function activeOf(c: Context): ActiveState {
   const url = new URL(c.req.url);
   return { path: url.pathname.replace(/\/+$/, '') || '/', category: url.searchParams.get('category') || '' };
@@ -101,24 +109,40 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
 
   const home = async (c: Context): Promise<Response> => {
     const shell = await loadShell();
-    const site = await readSiteIdentity(db);
+    // 首页同样只读一次 site_settings：站点身份与顶栏/页脚共用同一批数据。
+    let settingsRows: Array<{ k: string; v: string }> = [];
+    try {
+      settingsRows = await db.all<{ k: string; v: string }>('SELECT k, v FROM site_settings');
+    } catch {
+      settingsRows = [];
+    }
+    const site = await readSiteIdentity(db, settingsRows);
     const meta = buildHomeMeta(site, config.siteUrl);
 
     let withList = shell;
     // ETag 指纹要在 try 外可见：列表查询失败时为空串，同样能算出一个稳定的 ETag。
     let fingerprint = '';
+    // tag / category 必须进指纹：不同筛选条件可能筛出同一批文章，
+    // 若只按列表算指纹，两种条件的 ETag 会撞在一起，浏览器拿到 304
+    // 却显示的是另一种筛选的页面。
+    let filterKey = '';
     try {
       const url = new URL(c.req.url);
       const tag = url.searchParams.get('tag');
       const category = url.searchParams.get('category');
+      filterKey = `${tag ?? ''}|${category ?? ''}`;
       let posts = await db.all<PostRow>(HOME_POSTS_SQL);
       if (tag || category) {
         const all = await db.all<PostRow>(ARCHIVE_POSTS_SQL);
         posts = filterPosts(all, { tag, category }).slice(0, 10);
       }
-      fingerprint = posts.map((p) => `${p.id}:${p.updated_at ?? p.date ?? ''}`).join('|');
+      // 同 article 页：updated_at 从不被写入，光看它无法反映正文变化，
+      // 这里把参与渲染的字段一起纳入，避免允许缓存后出现「改了还是旧内容」。
+      fingerprint = posts
+        .map((p) => `${p.id}:${p.title ?? ''}:${p.excerpt ?? ''}:${(p.content ?? '').length}:${p.tags ?? ''}:${p.category ?? ''}:${p.pinned ?? ''}:${p.protected ?? ''}`)
+        .join('|');
       if (posts.length) {
-        const chrome = await readChrome(db, site.name);
+        const chrome = await readChrome(db, site.name, settingsRows);
         withList = injectAppContent(shell, wrapWithChrome(chrome, renderHomeContent(posts, site), { path: '/', category: category || '' }));
       }
     } catch {
@@ -131,9 +155,18 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
      * If-None-Match 协商（所以暂未表现为内容不更新），但一旦前面挂了
      * CDN / 反向代理按 ETag 做缓存，新发布的文章就永远推不到访客和爬虫。
      * 这里把列表里每篇的 id 与更新时间纳入指纹。 */
+    const etag = weakEtag('home', config.siteUrl, filterKey, fingerprint);
+    if (c.req.header('if-none-match') === etag) {
+      return new Response(null, {
+        status: 304,
+        headers: { ETag: etag, 'Cache-Control': LIST_CACHE_CONTROL, ...security() }
+      });
+    }
+    // 首页列表同样是「未更新前静态」的内容：允许短期复用 + 后台刷新，
+    // 新文章发布时 ETag 立刻变化，会强制回源，不会被压住 60 秒。
     return htmlResponse(c, html, {
-      'Cache-Control': 'no-cache',
-      ETag: weakEtag('home', config.siteUrl, fingerprint),
+      'Cache-Control': LIST_CACHE_CONTROL,
+      ETag: etag,
       ...security()
     });
   };
@@ -162,51 +195,118 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
       return htmlResponse(c, fallbackHtml, { 'Cache-Control': 'no-cache', ...security() });
     }
 
-    const site = await readSiteIdentity(db);
+    // 文章页只需要读一次 site_settings：站点身份与顶栏/页脚共用同一批数据，
+    // 避免首次打开一篇文章时把整张设置表连续查两遍。
+    let settingsRows: Array<{ k: string; v: string }> = [];
+    try {
+      settingsRows = await db.all<{ k: string; v: string }>('SELECT k, v FROM site_settings');
+    } catch {
+      settingsRows = [];
+    }
+    const site = await readSiteIdentity(db, settingsRows);
     const meta = buildArticleMeta(row, site, config.siteUrl);
-    const etag = weakEtag('post', row.id, row.updated_at ?? row.date);
+    /* ETag 必须反映**正文本身**。
+     * 之前只按 (id, updated_at ?? date) 算，而上游写路径从不写 updated_at，
+     * 于是同一天内改一次文章，ETag 纹丝不动 —— 配合 no-cache 时浏览器会拿到
+     * 304 并继续显示旧正文；一旦允许短期缓存，后果从「偶尔看到旧内容」
+     * 放大成「60 秒内所有人都看到旧内容」。所以把参与渲染的字段一起纳入指纹。
+     * 代价只是对几 KB 文本做一次 sha1，微秒级，换来「改了立刻生效」。 */
+    const etag = weakEtag(
+      'post',
+      row.id,
+      row.updated_at ?? row.date,
+      row.title,
+      row.excerpt,
+      row.content,
+      row.cover,
+      row.og_image,
+      row.tags,
+      row.category,
+      row.series,
+      row.author,
+      row.seo,
+      row.pinned,
+      row.protected
+    );
+    const cacheControl = row.protected
+      ? 'private, no-cache'
+      : 'public, max-age=60, stale-while-revalidate=600';
 
     if (c.req.header('if-none-match') === etag) {
-      return new Response(null, { status: 304, headers: { ETag: etag, ...security() } });
+      return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': cacheControl, ...security() } });
     }
 
     const content = renderPostContent(row, site);
-    const chrome = await readChrome(db, site.name);
+    const chrome = await readChrome(db, site.name, settingsRows);
     const withBody = content
       ? injectAppContent(shell, wrapWithChrome(chrome, content, activeOf(c)))
       : shell;
     const html = injectHead(withBody, meta, renderHeadBlock(meta));
-    return htmlResponse(c, html, { 'Cache-Control': 'no-cache', ETag: etag, ...security() });
+    // 已发布正文在未更新前是静态的：允许浏览器/前置代理短期复用，
+    // ETag 保证文章一改就立刻回源；动态评论和浏览数仍由 API 单独读取。
+    return htmlResponse(c, html, {
+      'Cache-Control': cacheControl,
+      ETag: etag,
+      ...security()
+    });
   };
 
-  function makeListPage(render: (posts: PostRow[], site: SiteIdentity) => string) {
+  function makeListPage(render: (posts: PostRow[], site: SiteIdentity) => string, pagePath: string) {
     return async (c: Context): Promise<Response> => {
       const shell = await loadShell();
-      const site = await readSiteIdentity(db);
+      let settingsRows: Array<{ k: string; v: string }> = [];
+      try {
+        settingsRows = await db.all<{ k: string; v: string }>('SELECT k, v FROM site_settings');
+      } catch {
+        settingsRows = [];
+      }
+      const site = await readSiteIdentity(db, settingsRows);
       let withContent = shell;
+      let fingerprint = '';
       try {
         const posts = await db.all<PostRow>(ARCHIVE_POSTS_SQL);
-        const chrome = await readChrome(db, site.name);
+        const chrome = await readChrome(db, site.name, settingsRows);
         withContent = injectAppContent(
           shell,
           wrapWithChrome(chrome, render(posts, site), activeOf(c))
         );
+        fingerprint = posts
+          .map((p) => `${p.id}:${p.title ?? ''}:${p.excerpt ?? ''}:${(p.content ?? '').length}:${p.tags ?? ''}:${p.category ?? ''}`)
+          .join('|');
       } catch {
         /* 查询失败时回落到原始外壳 */
       }
-      return htmlResponse(c, withContent, { 'Cache-Control': 'no-cache', ...security() });
+      // 与文章页同策略：列表页内容在文章改动前是静态的，允许短期复用。
+      const etag = weakEtag(pagePath, config.siteUrl, fingerprint);
+      if (fingerprint && c.req.header('if-none-match') === etag) {
+        return new Response(null, {
+          status: 304,
+          headers: { ETag: etag, 'Cache-Control': LIST_CACHE_CONTROL, ...security() }
+        });
+      }
+      return htmlResponse(c, withContent, {
+        'Cache-Control': fingerprint ? LIST_CACHE_CONTROL : 'no-cache',
+        ETag: etag,
+        ...security()
+      });
     };
   }
 
-  const archive = makeListPage(renderArchiveContent);
-  const tags = makeListPage(renderTagsContent);
-  const categories = makeListPage(renderCategoriesContent);
+  const archive = makeListPage(renderArchiveContent, '/archive');
+  const tags = makeListPage(renderTagsContent, '/tags');
+  const categories = makeListPage(renderCategoriesContent, '/categories');
 
   function makePage(render: (site: SiteIdentity, chrome: ChromeData) => string | Promise<string>, pagePath: string, title: string, desc?: string) {
     return async (c: Context): Promise<Response> => {
       const shell = await loadShell();
-      const site = await readSiteIdentity(db);
-      const chrome = await readChrome(db, site.name);
+      let settingsRows: Array<{ k: string; v: string }> = [];
+      try {
+        settingsRows = await db.all<{ k: string; v: string }>('SELECT k, v FROM site_settings');
+      } catch {
+        settingsRows = [];
+      }
+      const site = await readSiteIdentity(db, settingsRows);
+      const chrome = await readChrome(db, site.name, settingsRows);
       let withContent = shell;
       try {
         withContent = injectAppContent(shell, wrapWithChrome(chrome, await render(site, chrome), { path: pagePath, category: '' }));
@@ -224,8 +324,17 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
         ogUrl: config.siteUrl + pagePath,
         jsonLd: { '@context': 'https://schema.org', '@type': 'WebPage', name: title, url: config.siteUrl + pagePath }
       };
+      // 关于/友链这类页面只有站点设置会变，跟着设置一起做指纹即可。
+      const etag = weakEtag('page', pagePath, config.siteUrl, meta.title, meta.description, fingerprintOfSettings(settingsRows));
+      if (c.req.header('if-none-match') === etag) {
+        return new Response(null, {
+          status: 304,
+          headers: { ETag: etag, 'Cache-Control': LIST_CACHE_CONTROL, ...security() }
+        });
+      }
       return htmlResponse(c, injectHead(withContent, meta, renderHeadBlock(meta)), {
-        'Cache-Control': 'no-cache',
+        'Cache-Control': LIST_CACHE_CONTROL,
+        ETag: etag,
         ...security()
       });
     };

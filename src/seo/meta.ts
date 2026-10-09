@@ -100,12 +100,19 @@ export interface SiteIdentity {
  *   name   : settings.site.name → settings.footer.copyrightName → i18n 默认
  *   author : settings.profile.name → footer.copyrightName → name
  */
-export async function readSiteIdentity(db: AppDatabase): Promise<SiteIdentity> {
+export async function readSiteIdentity(
+  db: AppDatabase,
+  prefetchedRows?: Array<{ k: string; v: string }> | null
+): Promise<SiteIdentity> {
   let rows: Array<{ k: string; v: string }> = [];
-  try {
-    rows = await db.all<{ k: string; v: string }>('SELECT k, v FROM site_settings');
-  } catch {
-    rows = [];
+  if (prefetchedRows) {
+    rows = prefetchedRows;
+  } else {
+    try {
+      rows = await db.all<{ k: string; v: string }>('SELECT k, v FROM site_settings');
+    } catch {
+      rows = [];
+    }
   }
   const map = new Map(rows.map((row) => [row.k, row.v]));
   const site = safeJson(map.get('site'), {} as Record<string, unknown>);
@@ -138,6 +145,8 @@ export interface PostRow {
   tags?: string | null;
   seo?: string | null;
   status?: string | null;
+  /** 作者署名（后台文章属性里可填）。参与 ETag 指纹。 */
+  author?: string | null;
   protected?: number | null;
   pinned?: number | null;
   updated_at?: string | null;

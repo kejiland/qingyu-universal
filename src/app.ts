@@ -16,6 +16,7 @@
  * ============================================================ */
 import path from 'node:path';
 import { Hono } from 'hono';
+import { compress } from 'hono/compress';
 import type { AppConfig } from './config.js';
 import type { AppDatabase } from './types.js';
 import type { LocalStorage } from './bindings/storage.js';
@@ -62,6 +63,9 @@ export interface AppDeps {
 
 export function createApp(deps: AppDeps): Hono {
   const app = new Hono();
+  // 服务端直接提供文本压缩，兼容不经 Caddy 的直连/端口部署。
+  // 只压缩小于阈值不划算的响应，已有 Content-Encoding 的响应由中间件跳过。
+  app.use(compress({ threshold: 1024 }));
   const { config } = deps;
   const logger = deps.logger ?? { warn: console.warn, error: console.error };
 

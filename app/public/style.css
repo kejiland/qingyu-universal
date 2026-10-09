@@ -644,6 +644,12 @@ a:hover { text-decoration: underline; }
 }
 .icon-btn:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
+/* SSR 主题按钮：日 / 月双图标只显示与当前主题匹配的一枚。
+   app.js 接管后会替换为单枚 SVG，本规则不会命中它。 */
+html[data-theme] .ssr-theme-icon { display: none; }
+html[data-theme="light"] .ssr-theme-moon { display: block; }
+html[data-theme="dark"] .ssr-theme-sun { display: block; }
+
 /* ---------- 桌面：主题色 & 语言 图标按钮 + 弹出面板（同风格） ---------- */
 .accent-wrap { position: relative; }
 .lang-wrap { position: relative; }

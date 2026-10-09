@@ -197,13 +197,21 @@ function isDiscoverItem(item: NavItem): boolean {
 }
 
 /** 站点框架的配置来源与 app.js getConfig() 相同：site_settings 的一组键。 */
-export async function readChrome(db: AppDatabase, siteName: string): Promise<ChromeData> {
+export async function readChrome(
+  db: AppDatabase,
+  siteName: string,
+  prefetchedRows?: Array<{ k: string; v: string }> | null
+): Promise<ChromeData> {
   let map = new Map<string, string>();
-  try {
-    const rows = await db.all<{ k: string; v: string }>('SELECT k, v FROM site_settings');
-    map = new Map(rows.map((row) => [row.k, row.v]));
-  } catch {
-    /* 读取失败时用默认值 */
+  if (prefetchedRows) {
+    map = new Map(prefetchedRows.map((row) => [row.k, row.v]));
+  } else {
+    try {
+      const rows = await db.all<{ k: string; v: string }>('SELECT k, v FROM site_settings');
+      map = new Map(rows.map((row) => [row.k, row.v]));
+    } catch {
+      /* 读取失败时用默认值 */
+    }
   }
 
   const footer = safeJson<Record<string, unknown>>(map.get('footer'), {});
@@ -411,8 +419,51 @@ export function renderTopbar(input: ChromeInput, activeInput: ActiveState | stri
     links.splice(insertAt, 0, dropdown);
   }
 
-  // 空壳按钮：.icon-btn 固定 34×34，占位正确；图标与事件由 app.js 接管后填充
-  const iconBtn = '<button class="icon-btn" tabindex="-1" aria-hidden="true"></button>';
+  /*
+   * 顶栏动作区必须**连图标一起**随 SSR 输出。
+   * 此前这里只放 4 个空壳 .icon-btn，等 app.js 空闲接管后才补图标与弹层，
+   * 于是首屏右上角会长时间显示几个空方块（app.js 实际是 5 个动作）。
+   * 现在静态标记与 renderNav() 一一对应；app.js 接管后原地替换并绑定事件。
+   * 主题按钮同时带日/月两枚 SVG，由 style.css 按 html[data-theme] 选择，
+   * 所以深浅色首屏也不会先显示反向图标。
+   */
+  const svgAttrs =
+    'width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
+    ' stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"';
+  const searchSvg =
+    '<svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+    '<circle cx="11" cy="11" r="7"></circle><circle class="search-dot" cx="15.2" cy="15.2" r="1.6"></circle></svg>';
+  const globeSvg = `<svg ${svgAttrs}><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15.5 15.5 0 0 1 0 18M12 3a15.5 15.5 0 0 0 0 18"/></svg>`;
+  const paletteSvg =
+    `<svg ${svgAttrs}><path d="M12 3a9 9 0 1 0 5.4 16.2A2.4 2.4 0 0 0 15.6 17h-.9a2.6 2.6 0 0 1-2.6-2.6c0-1.4 1.1-2.6 2.6-2.6h1.4A3.9 3.9 0 0 0 20.2 8 9 9 0 0 0 12 3z"/>` +
+    '<circle cx="7.4" cy="11.3" r="1"/><circle cx="10.6" cy="7.2" r="1"/><circle cx="15.4" cy="8.6" r="1"/></svg>';
+  const sparkSvg =
+    `<svg ${svgAttrs}><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>` +
+    '<path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/></svg>';
+  const moonSvg =
+    `<svg class="ssr-theme-icon ssr-theme-moon" ${svgAttrs}><path d="M20.5 13.2A8.5 8.5 0 1 1 11 3.5a6.6 6.6 0 0 0 9.5 9.7z"/></svg>`;
+  const sunSvg =
+    `<svg class="ssr-theme-icon ssr-theme-sun" ${svgAttrs}><circle cx="12" cy="12" r="4"/>` +
+    '<path d="M12 2.4v2.4M12 19.2v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.4 12h2.4M19.2 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7"/></svg>';
+
+  const topbarActions =
+    `<button class="icon-btn search-toggle" id="searchToggle" aria-label="搜索文章" title="搜索文章">${searchSvg}</button>` +
+    '<div class="lang-wrap" id="langWrap" role="group" aria-label="语言">' +
+    `<button class="icon-btn" id="langToggle" aria-label="语言" title="语言" aria-haspopup="listbox"` +
+    ` aria-controls="langPop" aria-expanded="false">${globeSvg}</button>` +
+    '<div class="lang-pop" id="langPop" role="listbox" aria-label="语言">' +
+    '<div class="accent-pop-title">语言</div><div class="lang-pop-options" id="langPopInner"></div>' +
+    '</div></div>' +
+    '<div class="accent-wrap" id="accentWrap" role="group" aria-label="主题色">' +
+    `<button class="icon-btn" id="accentToggle" aria-label="主题色" title="主题色" aria-haspopup="true"` +
+    ` aria-expanded="false" aria-controls="accentPop">${paletteSvg}</button>` +
+    '<div class="accent-pop" id="accentPop" role="group" aria-label="主题色">' +
+    '<div class="accent-pop-title">主题色</div><div class="accent-pop-swatches"></div>' +
+    '</div></div>' +
+    `<button class="icon-btn" id="bgAnimToggle" aria-pressed="false" aria-label="背景动画"` +
+    ` title="背景动画已关闭（点击开启）">${sparkSvg}</button>` +
+    `<button class="icon-btn" id="themeToggle" aria-label="切换深色/浅色模式"` +
+    ` title="切换深色/浅色模式">${moonSvg}${sunSvg}</button>`;
 
   return (
     '<header class="topbar"><div class="container topbar-inner">' +
@@ -421,7 +472,7 @@ export function renderTopbar(input: ChromeInput, activeInput: ActiveState | stri
     `<a class="brand" href="/">${escapeHtml(chrome.siteName)}</a>` +
     '</div>' +
     `<nav class="main-nav">${links.join('')}</nav>` +
-    `<div class="topbar-actions">${iconBtn.repeat(4)}</div>` +
+    `<div class="topbar-actions">${topbarActions}</div>` +
     '</div><div class="search-panel" id="searchPanel"></div></header>'
   );
 }
