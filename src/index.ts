@@ -13,7 +13,13 @@ import { createDatabase } from './bindings/database.js';
 import { createKV } from './bindings/kv.js';
 import { createAssets } from './bindings/assets.js';
 import { createLocalStorage, normalizeLocalObjectUrls } from './bindings/storage.js';
-import { createAI } from './bindings/ai.js';
+import { aiRuntime, envDefaults, loadAiConfigFromDb, mergeAiConfig } from './bindings/ai-config.js';
+import {
+  loadStorageConfigFromDb,
+  mergeStorageConfig,
+  storageEnvDefaults,
+  storageRuntime
+} from './bindings/storage-config.js';
 import { createSmtpSender, type SmtpSender } from './bindings/mail.js';
 import { buildWorkerEnv } from './bindings/worker-env.js';
 import { runMigrations } from './migrate.js';
@@ -34,13 +40,18 @@ const db = createDatabase(config);
 const kv = createKV(db, config.redisUrl);
 const assets = createAssets(config.publicDir);
 
-const storage =
-  config.storageMode === 'local'
-    ? createLocalStorage({ uploadDir: config.uploadDir, secret: config.secret, baseUrl: `http://127.0.0.1:${config.port}` })
-    : undefined;
+/* 本地磁盘实例**始终创建**（不再只在 local 模式创建）：
+ *   · 它是「新上传」的目标 —— 是否真的用它由 storageRuntime 动态决定（见 LOCAL_STORAGE getter）；
+ *   · 它同时承担 /media/* /music/* /og/* 的本地读取 —— 常驻挂载，
+ *     这样即便切到对象存储，库里相对地址的老文件仍能正常访问，不会 404。 */
+const storage = createLocalStorage({
+  uploadDir: config.uploadDir,
+  secret: config.secret,
+  baseUrl: `http://127.0.0.1:${config.port}`
+});
 
-const ai = config.ai.baseUrl ? createAI(config.ai) : undefined;
-
+/* AI 绑定改为动态（见 worker-env.ts 的 getter）：这里不再按启动配置决定有无 AI，
+ * 而是等迁移完成后把「环境变量默认值 + 数据库后台配置」合并进 aiRuntime。 */
 const smtp: SmtpSender | undefined = config.mail.smtp.host
   ? createSmtpSender({
       host: config.mail.smtp.host,
@@ -57,8 +68,7 @@ const bindings: Bindings = {
   db,
   kv,
   assets,
-  ...(ai ? { ai } : {}),
-  ...(storage ? { storage } : {}),
+  storage,
   ...(smtp ? { mailSender: smtp.send } : {})
 };
 
@@ -66,9 +76,57 @@ const env: WorkerEnv = buildWorkerEnv(config, bindings);
 
 /* ---------- 数据库结构 ---------- */
 const migration = await runMigrations(db, config.migrationsDir, (message) => logger.info(message), path.join(config.root, 'deploy', 'postgres', 'schema.sql'));
-if (config.storageMode === 'local') {
+
+/* ---------- 对象存储配置（环境变量兜底，后台配置优先） ----------
+ * 表在迁移之后才存在，所以放在这里读；写回由 /api/admin/storage 负责。
+ * 后台保存时会同步刷新 storageRuntime，env.R2_* / LOCAL_STORAGE 的动态 getter
+ * 立即反映 → 无需重启即生效（与 AI 助手同一套机制）。 */
+{
+  const defaults = storageEnvDefaults({
+    mode: config.storageMode,
+    ...config.s3
+  });
+  const fromDb = await loadStorageConfigFromDb(db);
+  const merged = mergeStorageConfig(defaults, fromDb);
+  // 本地实例已由 buildWorkerEnv 登记进 storageRuntime，这里只补默认值与生效配置
+  storageRuntime.setDefaults(defaults);
+  storageRuntime.set(merged.config, merged.source);
+  const snap = storageRuntime.snapshot();
+  logger.info(
+    snap.useLocalUpload
+      ? `[storage] 本机磁盘 ${snap.uploadDir}（来源：${snap.source}`
+        + `${snap.degraded ? '，已选对象存储但配置不完整，暂降级为本地盘' : ''}）`
+      : `[storage] 对象存储 ${snap.config.endpoint}（来源：${snap.source}，媒体桶 ${snap.config.mediaBucket}）`
+  );
+}
+
+/* 只在「实际生效」的存储方式是本地磁盘时才回写历史绝对地址。
+ * 注意判据必须是 storageRuntime 的**生效值**，不能再用 config.storageMode ——
+ * 后台切到云之后环境变量仍是 local，若照旧执行会把刚迁移过去的绝对地址又改回相对，白干。 */
+if (storageRuntime.snapshot().mode === 'local') {
   const normalized = await normalizeLocalObjectUrls(db, config.siteUrl);
   if (normalized > 0) logger.info(`[storage] 已修正 ${normalized} 行本地对象地址`);
+}
+
+/* ---------- AI 助手配置（环境变量兜底，后台配置优先） ----------
+ * 表在迁移之后才存在，所以放在这里读；写回由 /api/admin/ai 负责。
+ * 后台保存时会同步刷新 aiRuntime，env.AI 的动态 getter 立即反映 → 无需重启。 */
+{
+  const defaults = envDefaults({
+    ...config.ai,
+    enabled: config.flags.aiEnabled,
+    publicGenerate: config.flags.aiPublic
+  });
+  const fromDb = await loadAiConfigFromDb(db);
+  const merged = mergeAiConfig(defaults, fromDb);
+  // defaults 存进 runtime：后台接口保存后要用它重新合并，才能立刻回显真实生效值
+  aiRuntime.setDefaults(defaults);
+  aiRuntime.set(merged.config, merged.source);
+  logger.info(
+    merged.config.enabled && merged.config.baseUrl
+      ? `[ai] 已启用（来源：${merged.source}，模型：${merged.config.model || '（上游默认）'}）`
+      : '[ai] 未启用（可在后台「设置 → AI 助手」配置）'
+  );
 }
 
 /* ---------- 上游应用（Cloudflare Workers 形态） ---------- */

@@ -21,9 +21,14 @@ function parseTags(raw: unknown): string[] {
 function renderThumb(post: PostRow, index: number): string {
   const cover = String(post.cover ?? '').trim();
   if (!cover) return '';
-  // 前两张是首屏可视区，给高优先级
-  const priority = index < 2 ? ' fetchpriority="high"' : ' loading="lazy"';
-  return `<div class="post-thumb"><img src="${escapeHtml(cover)}" alt="" decoding="async"${priority}></div>`;
+  // 前两张是首屏可视区，给高优先级；其余懒加载 + 低优先级
+  const priority = index < 2 ? ' fetchpriority="high"' : ' fetchpriority="low" loading="lazy"';
+  // onerror 兜底必须与服务端渲染期就有：外链图床挂掉时（DNS 失败/代理挂死），
+  // 浏览器可能几十秒都不报错，期间用户看到的是一张挂着加载态的破图。
+  // app.js 接管后重新渲染的卡片自带 onerror="this.remove()"，但接管前的
+  // SSR 阶段同样要有，否则首屏破图 + 标签页转圈的感知都发生在这段时间。
+  // referrerpolicy 与 app.js 的 renderPostThumb() 保持一致（防盗链图床）。
+  return `<div class="post-thumb"><img src="${escapeHtml(cover)}" alt="" decoding="async"${priority} referrerpolicy="no-referrer" onerror="this.remove()"></div>`;
 }
 
 function renderCard(post: PostRow, index: number): string {

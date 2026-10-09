@@ -15,7 +15,7 @@
  * ============================================================ */
 import type { Context, Hono } from 'hono';
 import { z, type ZodType } from 'zod';
-import type { WorkerEnv, WorkerModule } from '../types.js';
+import type { AppDatabase, WorkerEnv, WorkerModule } from '../types.js';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 
@@ -32,6 +32,14 @@ export interface ApiRequestSpec {
 
 export interface ApiContext {
   c: Context;
+  /** 自托管数据库：仅供「上游没有、自托管新增」的接口使用（如后台 AI 配置）。 */
+  db: AppDatabase;
+  /** 上游 worker 期望的绑定集合（含动态 AI 绑定）。 */
+  env: WorkerEnv;
+  /** 上游应用（app/）的绝对路径 —— 用于复用其中的 JS 模块（如审计写入）。 */
+  appDir: string;
+  /** 解析真实客户端 IP（与 catch-all 路径同一实现，受 TRUST_PROXY 约束）。 */
+  clientIp: (c: Context) => string;
   /** 把当前请求原样转发给上游 worker（含注入的边缘头）。 */
   callUpstream: () => Promise<Response>;
 }
@@ -58,6 +66,12 @@ export type ResponseValidation = 'off' | 'warn' | 'strict';
 export interface ApiDeps {
   worker: WorkerModule;
   env: WorkerEnv;
+  /** 自托管数据库（自托管新增接口用）。 */
+  db: AppDatabase;
+  /** 上游应用（app/）的绝对路径。 */
+  appDir: string;
+  /** 解析真实客户端 IP（与 catch-all 路径共用同一实现）。 */
+  clientIp: (c: Context) => string;
   /** 构造带边缘头（CF-Connecting-IP 等）的请求，与 catch-all 路径共用同一实现。 */
   withEdgeHeaders: (c: Context) => Request;
   validateResponses: ResponseValidation;
@@ -175,6 +189,10 @@ export function registerApiRoutes(app: Hono, deps: ApiDeps, routes: ApiRoute[]):
 
       const response = await route.handler({
         c,
+        db: deps.db,
+        env: deps.env,
+        appDir: deps.appDir,
+        clientIp: deps.clientIp,
         callUpstream: () => deps.worker.fetch(deps.withEdgeHeaders(c), deps.env)
       });
 

@@ -121,9 +121,21 @@ export function createLocalDownloadHandler(storage: LocalStorage) {
     const stat = target ? await fsp.stat(target).catch(() => null) : null;
     if (!target || !stat?.isFile()) return c.json({ ok: false, error: '对象不存在' }, 404);
 
-    const stream = Readable.toWeb(fs.createReadStream(target)) as ReadableStream<Uint8Array>;
     const metaType = (await storage.readMeta(target)).trim();
-    return new Response(c.req.method === 'HEAD' ? null : stream, {
+    // HEAD 必须先返回、不要建流：ReadStream 会在下一个 tick 打开 fd，
+    // 而没人消费它的 body —— 每个 HEAD 请求都会漏一个文件描述符。
+    if (c.req.method === 'HEAD') {
+      return new Response(null, {
+        status: 200,
+        headers: {
+          'Content-Type': metaType || contentTypeFor(target),
+          'Content-Length': String(stat.size),
+          'Cache-Control': 'no-store'
+        }
+      });
+    }
+    const stream = Readable.toWeb(fs.createReadStream(target)) as ReadableStream<Uint8Array>;
+    return new Response(stream, {
       status: 200,
       headers: {
         'Content-Type': metaType || contentTypeFor(target),
@@ -165,15 +177,18 @@ export function createPublicObjectHandler(storage: LocalStorage) {
         return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${stat.size}` } });
       }
       const length = end - start + 1;
+      const rangeHeaders = { ...baseHeaders, 'Content-Range': `bytes ${start}-${end}/${stat.size}`, 'Content-Length': String(length) };
+      // 同上：HEAD 不建流，否则每个请求漏一个 fd。
+      if (c.req.method === 'HEAD') return new Response(null, { status: 206, headers: rangeHeaders });
       const stream = Readable.toWeb(fs.createReadStream(target, { start, end })) as ReadableStream<Uint8Array>;
-      return new Response(c.req.method === 'HEAD' ? null : stream, {
-        status: 206,
-        headers: { ...baseHeaders, 'Content-Range': `bytes ${start}-${end}/${stat.size}`, 'Content-Length': String(length) }
-      });
+      return new Response(stream, { status: 206, headers: rangeHeaders });
     }
 
+    if (c.req.method === 'HEAD') {
+      return new Response(null, { status: 200, headers: { ...baseHeaders, 'Content-Length': String(stat.size) } });
+    }
     const stream = Readable.toWeb(fs.createReadStream(target)) as ReadableStream<Uint8Array>;
-    return new Response(c.req.method === 'HEAD' ? null : stream, {
+    return new Response(stream, {
       status: 200,
       headers: { ...baseHeaders, 'Content-Length': String(stat.size) }
     });

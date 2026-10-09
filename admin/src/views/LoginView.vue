@@ -79,7 +79,7 @@ function switchMode(next: Mode): void {
     <div class="w-full max-w-[400px] animate-in">
       <!-- 品牌 -->
       <div class="flex flex-col items-center mb-7">
-        <span class="grid place-items-center size-12 rounded-2xl bg-accent text-white shadow-md mb-4">
+        <span class="grid place-items-center size-12 rounded-2xl bg-accent text-accent-fg shadow-md mb-4">
           <PenLine :size="24" :stroke-width="2.2" />
         </span>
         <h1 class="text-[22px] font-semibold tracking-tight">轻语博客</h1>

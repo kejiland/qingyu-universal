@@ -27,6 +27,12 @@
       "name": "设置"
     },
     {
+      "name": "AI"
+    },
+    {
+      "name": "存储"
+    },
+    {
       "name": "认证"
     },
     {
@@ -52,9 +58,6 @@
     },
     {
       "name": "SEO"
-    },
-    {
-      "name": "AI"
     },
     {
       "name": "音乐"
@@ -308,6 +311,188 @@
         ],
         "additionalProperties": false
       },
+      "CreatePostBody": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "date": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "excerpt": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "content": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "cover": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "ogImage": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "og_image": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "pinned": {
+            "type": [
+              "boolean",
+              "number",
+              "string",
+              "null"
+            ]
+          },
+          "protected": {
+            "type": [
+              "boolean",
+              "number",
+              "string",
+              "null"
+            ]
+          },
+          "enc": {},
+          "category": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "series": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "seriesOrder": {
+            "type": [
+              "number",
+              "string",
+              "null"
+            ]
+          },
+          "series_order": {
+            "type": [
+              "number",
+              "string",
+              "null"
+            ]
+          },
+          "author": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "published",
+                  "draft",
+                  "scheduled"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "publishAt": {
+            "type": [
+              "number",
+              "string",
+              "null"
+            ]
+          },
+          "publish_at": {
+            "type": [
+              "number",
+              "string",
+              "null"
+            ]
+          },
+          "seo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Seo"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {}
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
       "PostRelationsResponse": {
         "type": "object",
         "properties": {
@@ -444,6 +629,185 @@
         "required": [
           "action"
         ],
+        "additionalProperties": false
+      },
+      "UpdatePostBody": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "date": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "excerpt": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "content": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "cover": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "ogImage": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "og_image": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "pinned": {
+            "type": [
+              "boolean",
+              "number",
+              "string",
+              "null"
+            ]
+          },
+          "protected": {
+            "type": [
+              "boolean",
+              "number",
+              "string",
+              "null"
+            ]
+          },
+          "enc": {},
+          "category": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "series": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "seriesOrder": {
+            "type": [
+              "number",
+              "string",
+              "null"
+            ]
+          },
+          "series_order": {
+            "type": [
+              "number",
+              "string",
+              "null"
+            ]
+          },
+          "author": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "published",
+                  "draft",
+                  "scheduled"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "publishAt": {
+            "type": [
+              "number",
+              "string",
+              "null"
+            ]
+          },
+          "publish_at": {
+            "type": [
+              "number",
+              "string",
+              "null"
+            ]
+          },
+          "seo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Seo"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {}
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": [
+              "string",
+              "number"
+            ]
+          }
+        },
         "additionalProperties": false
       },
       "OkResponse": {
@@ -759,6 +1123,500 @@
           "ok",
           "settings"
         ],
+        "additionalProperties": false
+      },
+      "AiConfigResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "publicGenerate": {
+            "type": "boolean"
+          },
+          "baseUrl": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "hasApiKey": {
+            "type": "boolean"
+          },
+          "apiKeyMasked": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "db",
+              "env",
+              "none"
+            ]
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "envProvided": {
+            "type": "object",
+            "properties": {
+              "baseUrl": {
+                "type": "boolean"
+              },
+              "apiKey": {
+                "type": "boolean"
+              },
+              "model": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "baseUrl",
+              "apiKey",
+              "model"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "enabled",
+          "publicGenerate",
+          "baseUrl",
+          "model",
+          "hasApiKey",
+          "apiKeyMasked",
+          "source",
+          "active",
+          "envProvided"
+        ],
+        "additionalProperties": false,
+        "description": "AI 助手配置（密钥打码）"
+      },
+      "AiConfigUpdateBody": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "publicGenerate": {
+            "type": "boolean"
+          },
+          "baseUrl": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "apiKey": {
+            "type": "string"
+          },
+          "clearApiKey": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AiModelsResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "ownedBy": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "models"
+        ],
+        "additionalProperties": false,
+        "description": "上游 /models 拉取结果"
+      },
+      "AiModelsBody": {
+        "type": "object",
+        "properties": {
+          "baseUrl": {
+            "type": "string"
+          },
+          "apiKey": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AiTestResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "ms": {
+            "type": "number"
+          },
+          "reply": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "model",
+          "ms"
+        ],
+        "additionalProperties": false,
+        "description": "连通性测试结果"
+      },
+      "AiTestBody": {
+        "type": "object",
+        "properties": {
+          "baseUrl": {
+            "type": "string"
+          },
+          "apiKey": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StorageConfigResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "local",
+              "s3"
+            ]
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "accessKeyId": {
+            "type": "string"
+          },
+          "hasSecretAccessKey": {
+            "type": "boolean"
+          },
+          "secretAccessKeyMasked": {
+            "type": "string"
+          },
+          "mediaBucket": {
+            "type": "string"
+          },
+          "mediaPublicBase": {
+            "type": "string"
+          },
+          "musicBucket": {
+            "type": "string"
+          },
+          "musicPublicBase": {
+            "type": "string"
+          },
+          "backupBucket": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "db",
+              "env",
+              "none"
+            ]
+          },
+          "s3Ready": {
+            "type": "boolean"
+          },
+          "degraded": {
+            "type": "boolean"
+          },
+          "uploadDir": {
+            "type": "string"
+          },
+          "localCounts": {
+            "$ref": "#/components/schemas/StorageCounts"
+          },
+          "envProvided": {
+            "type": "object",
+            "properties": {
+              "endpoint": {
+                "type": "boolean"
+              },
+              "accessKeyId": {
+                "type": "boolean"
+              },
+              "secretAccessKey": {
+                "type": "boolean"
+              },
+              "mediaBucket": {
+                "type": "boolean"
+              },
+              "mediaPublicBase": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "endpoint",
+              "accessKeyId",
+              "secretAccessKey",
+              "mediaBucket",
+              "mediaPublicBase"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok",
+          "mode",
+          "endpoint",
+          "region",
+          "accessKeyId",
+          "hasSecretAccessKey",
+          "secretAccessKeyMasked",
+          "mediaBucket",
+          "mediaPublicBase",
+          "musicBucket",
+          "musicPublicBase",
+          "backupBucket",
+          "source",
+          "s3Ready",
+          "degraded",
+          "uploadDir",
+          "localCounts",
+          "envProvided"
+        ],
+        "additionalProperties": false,
+        "description": "存储配置（密钥打码）"
+      },
+      "StorageCounts": {
+        "type": "object",
+        "properties": {
+          "media": {
+            "type": "number"
+          },
+          "music": {
+            "type": "number"
+          },
+          "og": {
+            "type": "number"
+          },
+          "total": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "media",
+          "music",
+          "og",
+          "total"
+        ],
+        "additionalProperties": false,
+        "description": "本机磁盘上各类对象的数量"
+      },
+      "StorageConfigUpdateBody": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "local",
+              "s3"
+            ]
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "accessKeyId": {
+            "type": "string"
+          },
+          "secretAccessKey": {
+            "type": "string"
+          },
+          "clearSecretAccessKey": {
+            "type": "boolean"
+          },
+          "mediaBucket": {
+            "type": "string"
+          },
+          "mediaPublicBase": {
+            "type": "string"
+          },
+          "musicBucket": {
+            "type": "string"
+          },
+          "musicPublicBase": {
+            "type": "string"
+          },
+          "backupBucket": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StorageTestResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "local",
+              "s3"
+            ]
+          },
+          "bucket": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "ms": {
+            "type": "number"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "target",
+          "bucket",
+          "key",
+          "ms"
+        ],
+        "additionalProperties": false,
+        "description": "存储连通性测试结果"
+      },
+      "StorageTestBody": {
+        "$ref": "#/components/schemas/StorageConfigUpdateBody"
+      },
+      "StorageMigrateResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "total": {
+            "type": "number"
+          },
+          "migrated": {
+            "type": "number"
+          },
+          "skipped": {
+            "type": "number"
+          },
+          "failed": {
+            "type": "number"
+          },
+          "rewroteRows": {
+            "type": "number"
+          },
+          "deletedLocal": {
+            "type": "number"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StorageMigrateDetail"
+            }
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "total",
+          "migrated",
+          "skipped",
+          "failed",
+          "rewroteRows",
+          "deletedLocal",
+          "details"
+        ],
+        "additionalProperties": false,
+        "description": "本地文件迁移到对象存储的结果"
+      },
+      "StorageMigrateDetail": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "migrated",
+              "skipped",
+              "failed"
+            ]
+          },
+          "bytes": {
+            "type": "number"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "StorageMigrateBody": {
+        "type": "object",
+        "properties": {
+          "deleteLocal": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 20000
+          }
+        },
         "additionalProperties": false
       },
       "LoginResponse": {
@@ -2027,110 +2885,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "title": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "date": {
-                    "type": "string"
-                  },
-                  "excerpt": {
-                    "type": "string"
-                  },
-                  "content": {
-                    "type": "string"
-                  },
-                  "cover": {
-                    "type": "string"
-                  },
-                  "ogImage": {
-                    "type": "string"
-                  },
-                  "og_image": {
-                    "type": "string"
-                  },
-                  "pinned": {
-                    "type": [
-                      "boolean",
-                      "number"
-                    ]
-                  },
-                  "protected": {
-                    "type": [
-                      "boolean",
-                      "number"
-                    ]
-                  },
-                  "enc": {},
-                  "category": {
-                    "type": "string"
-                  },
-                  "series": {
-                    "type": "string"
-                  },
-                  "seriesOrder": {
-                    "type": [
-                      "number",
-                      "string"
-                    ]
-                  },
-                  "series_order": {
-                    "type": [
-                      "number",
-                      "string"
-                    ]
-                  },
-                  "author": {
-                    "type": "string"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "published",
-                      "draft",
-                      "scheduled"
-                    ]
-                  },
-                  "publishAt": {
-                    "type": [
-                      "number",
-                      "string"
-                    ]
-                  },
-                  "publish_at": {
-                    "type": [
-                      "number",
-                      "string"
-                    ]
-                  },
-                  "seo": {
-                    "$ref": "#/components/schemas/Seo"
-                  },
-                  "tags": {
-                    "anyOf": [
-                      {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      {
-                        "type": "string"
-                      }
-                    ]
-                  }
-                },
-                "required": [
-                  "id",
-                  "title"
-                ],
-                "additionalProperties": false
+                "$ref": "#/components/schemas/CreatePostBody"
               }
             }
           }
@@ -2239,108 +2994,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "title": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "date": {
-                    "type": "string"
-                  },
-                  "excerpt": {
-                    "type": "string"
-                  },
-                  "content": {
-                    "type": "string"
-                  },
-                  "cover": {
-                    "type": "string"
-                  },
-                  "ogImage": {
-                    "type": "string"
-                  },
-                  "og_image": {
-                    "type": "string"
-                  },
-                  "pinned": {
-                    "type": [
-                      "boolean",
-                      "number"
-                    ]
-                  },
-                  "protected": {
-                    "type": [
-                      "boolean",
-                      "number"
-                    ]
-                  },
-                  "enc": {},
-                  "category": {
-                    "type": "string"
-                  },
-                  "series": {
-                    "type": "string"
-                  },
-                  "seriesOrder": {
-                    "type": [
-                      "number",
-                      "string"
-                    ]
-                  },
-                  "series_order": {
-                    "type": [
-                      "number",
-                      "string"
-                    ]
-                  },
-                  "author": {
-                    "type": "string"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "published",
-                      "draft",
-                      "scheduled"
-                    ]
-                  },
-                  "publishAt": {
-                    "type": [
-                      "number",
-                      "string"
-                    ]
-                  },
-                  "publish_at": {
-                    "type": [
-                      "number",
-                      "string"
-                    ]
-                  },
-                  "seo": {
-                    "$ref": "#/components/schemas/Seo"
-                  },
-                  "tags": {
-                    "anyOf": [
-                      {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      {
-                        "type": "string"
-                      }
-                    ]
-                  },
-                  "id": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "title"
-                ],
-                "additionalProperties": false
+                "$ref": "#/components/schemas/UpdatePostBody"
               }
             }
           }
@@ -2676,7 +3330,10 @@
                     "minLength": 1
                   },
                   "parent_id": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "hp": {
                     "type": "string"
@@ -2781,6 +3438,478 @@
           }
         },
         "description": "返回 site_settings 表的所有键值（值统一为字符串，JSON 需自行解析）。"
+      }
+    },
+    "/api/admin/ai": {
+      "get": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "读取 AI 助手配置",
+        "operationId": "getApiAdminAi",
+        "responses": {
+          "200": {
+            "description": "当前配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiConfigResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或会话已过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "仍需修改初始密码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "返回当前生效的 AI 配置。密钥只回传打码值（apiKeyMasked）与是否已配置（hasApiKey），明文永不出服务端。source 表示配置来自后台保存（db）还是环境变量兜底（env）。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "保存 AI 助手配置",
+        "operationId": "putApiAdminAi",
+        "responses": {
+          "200": {
+            "description": "保存后的生效配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiConfigResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或会话已过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "仍需修改初始密码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "部分更新：只写传入的字段。apiKey 留空表示保持原密钥不变（避免只改模型时把密钥清掉），需要清空请显式传 clearApiKey=true。保存后立即刷新运行时绑定，无需重启服务。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiConfigUpdateBody"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/ai/models": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "拉取上游可用模型列表",
+        "operationId": "postApiAdminAiModels",
+        "responses": {
+          "200": {
+            "description": "模型列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiModelsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "缺少 Base URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或会话已过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "仍需修改初始密码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "上游不可达或鉴权失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "服务端代理请求 {baseUrl}/models（避免浏览器 CORS 与密钥外泄），兼容 OpenAI 的 {data:[{id}]}、Ollama 的 {models:[{name}]} 以及裸数组三种返回形态。baseUrl/apiKey 不传则使用当前已保存配置，便于「先填地址→拉取→再保存」。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiModelsBody"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/ai/test": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "测试 AI 连通性",
+        "operationId": "postApiAdminAiTest",
+        "responses": {
+          "200": {
+            "description": "测试结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiTestResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或会话已过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "仍需修改初始密码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "用最小 token 数真实跑一次 chat/completions，可同时暴露地址、密钥、模型名三类问题。测试失败也返回 200（ok=false + error），因为它表达的是「连通性结论」而不是接口错误。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiTestBody"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/storage": {
+      "get": {
+        "tags": [
+          "存储"
+        ],
+        "summary": "读取存储配置",
+        "operationId": "getApiAdminStorage",
+        "responses": {
+          "200": {
+            "description": "当前配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageConfigResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或会话已过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "仍需修改初始密码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "返回当前生效的存储配置。Secret Access Key 只回传打码值（secretAccessKeyMasked）与是否已配置（hasSecretAccessKey），明文永不出服务端。degraded=true 表示已选择对象存储但配置不完整，当前正降级使用本机磁盘。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "存储"
+        ],
+        "summary": "保存存储配置",
+        "operationId": "putApiAdminStorage",
+        "responses": {
+          "200": {
+            "description": "保存后的生效配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageConfigResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或会话已过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "仍需修改初始密码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "部分更新：只写传入的字段。secretAccessKey 留空表示保持原密钥不变（避免只改桶名时把密钥清掉），需要清空请显式传 clearSecretAccessKey=true。保存后立即刷新运行时绑定，无需重启服务；MODE=local 表示新上传写入本机磁盘。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StorageConfigUpdateBody"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/storage/test": {
+      "post": {
+        "tags": [
+          "存储"
+        ],
+        "summary": "测试存储连通性",
+        "operationId": "postApiAdminStorageTest",
+        "responses": {
+          "200": {
+            "description": "测试结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageTestResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或会话已过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "仍需修改初始密码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "按 mode 决定测哪一圈：local 往上传目录写一个探针文件再删（能发现挂载点只读 / 磁盘满）；s3 用表单里的**候选值**（不传则用已保存值）真签一次 SigV4 并写删一个探针对象。测试失败也返回 200（ok=false + error），因为它表达的是「连通性结论」而不是接口错误。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StorageTestBody"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/storage/migrate": {
+      "post": {
+        "tags": [
+          "存储"
+        ],
+        "summary": "把本机磁盘上的文件迁移到对象存储",
+        "operationId": "postApiAdminStorageMigrate",
+        "responses": {
+          "200": {
+            "description": "迁移结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageMigrateResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或会话已过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "仍需修改初始密码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "逐对象上传，并且**只有确认某个对象已进桶**才会把引用它的数据库行改写成云端外链，因此不会出现「库里指向云、云上没这个文件」的坏引用。默认保留本地副本（deleteLocal=false）——迁移中途失败或桶不可达时本地仍是兜底。本地读取路由 /media/* 常驻挂载，未迁移的老文件照常可访问，不存在中间态 404。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StorageMigrateBody"
+              }
+            }
+          }
+        }
       }
     },
     "/api/admin/login": {

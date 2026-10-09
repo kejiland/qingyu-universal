@@ -43,13 +43,25 @@ export function startScheduler(worker: WorkerModule, env: WorkerEnv, options: Sc
     return { stop: () => {}, tasks: [] };
   }
 
+  /* 同一表达式的在途任务：node-cron 不防重入 —— 备份或发布若耗时超过周期，
+   * 第二次触发会与前一次**并行**跑同一个 worker.scheduled()，表现为重复发信、
+   * 重复发布、两个备份同时写盘。这里按表达式加在途标志，执行中直接跳过本轮。 */
+  const inFlight = new Set<string>();
+
   const invoke = async (expression: string): Promise<void> => {
+    if (inFlight.has(expression)) {
+      log.info(`[cron] 上一轮「${expression}」仍在执行，跳过本轮（避免并发重入）`);
+      return;
+    }
+    inFlight.add(expression);
     const event: ScheduledEventLike = { cron: expression, scheduledTime: Date.now() };
     try {
       await worker.scheduled(event, env);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log.error(`[cron] 任务执行失败（${expression}）：${message}`);
+    } finally {
+      inFlight.delete(expression);
     }
   };
 

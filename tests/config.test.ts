@@ -42,7 +42,9 @@ describe('配置加载', () => {
     expect(config.host).toBe('127.0.0.1');
     expect(config.siteUrl).toBe('http://localhost:8787');
     expect(config.storageMode).toBe('local');
-    expect(config.trustProxy).toBe(true);
+    // 安全默认：不信任 X-Forwarded-For。直连暴露时若默认信任，客户端伪造该头
+    // 就能绕过登录失败锁定、评论频控、点赞去重。有反代才显式设 TRUST_PROXY=1。
+    expect(config.trustProxy).toBe(false);
     expect(config.dbPath).toBe(path.join(dir, 'qingyu.db'));
     expect(config.cron.timezone).toBe('UTC');
     expect(config.cron.backup).toBe('0 19 * * *');

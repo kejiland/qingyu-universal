@@ -162,6 +162,42 @@ const adminCss = fs.readFileSync(path.join(ROOT, 'admin/src/style.css'), 'utf8')
 run('前台博客', siteCss, ':root', 'html[data-theme="dark"]', TARGETS);
 run('管理后台', adminCss, ':root', '.dark', ADMIN_TARGETS);
 
+/* ---------- 后台主题色板（[data-accent=...]） ---------- */
+const ADMIN_PALETTE_COMBOS = [
+  ['主色文字（画布）', '--accent', '--canvas'],
+  ['主色文字（卡片）', '--accent', '--surface'],
+  ['主色浅底上的文字', '--accent', '--accent-soft'],
+  ['主色底上的按钮文字', '--accent-fg', '--accent'],
+  ['主色悬停（画布）', '--accent-hover', '--canvas'],
+];
+
+function adminPaletteBlocks(css) {
+  const re = /^(\.dark)?\[data-accent="([a-z]+)"\]\s*\{/gm;
+  const list = [];
+  let m;
+  while ((m = re.exec(css))) {
+    const vars = {};
+    for (const t of readBlock(css, m[0].replace(/\s*\{\s*$/, '')).matchAll(/(--[a-z0-9-]+)\s*:\s*(#[0-9a-fA-F]{3,8})\s*;/g)) vars[t[1]] = t[2];
+    list.push([m[1] ? '深色' : '浅色', m[2], vars]);
+  }
+  return list;
+}
+
+console.log('\n▌管理后台主题色板（data-accent）');
+for (const [theme, name, vars] of adminPaletteBlocks(adminCss.replace(/\r\n/g, '\n'))) {
+  const t = { ...tokens(adminCss.replace(/\r\n/g, '\n'), theme === '深色' ? '.dark' : ':root'), ...vars };
+  const rows = [];
+  for (const [label, fg, bg] of ADMIN_PALETTE_COMBOS) {
+    if (!t[fg] || !t[bg]) continue;
+    const r = ratio(t[fg], t[bg]);
+    const ok = r >= 4.5;
+    rows.push(`  ${ok ? '✅' : '❌'} ${label.padEnd(18, ' ')} ${r.toFixed(2)}:1  (${t[fg]} / ${t[bg]})`);
+    if (!ok) failures.push(`后台色板 ${name} · ${theme} · ${label}：${r.toFixed(2)}:1，低于 4.5:1`);
+  }
+  console.log(`\n  · ${name}（${theme}）`);
+  console.log(rows.join('\n'));
+}
+
 console.log('\n▌前台主题配色板（data-accent）');
 for (const [theme, name, vars] of paletteBlocks(siteCss.replace(/\r\n/g, '\n'))) {
   const rows = [];

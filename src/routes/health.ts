@@ -8,6 +8,7 @@ import type { Context } from 'hono';
 import type { AppConfig } from '../config.js';
 import type { AppDatabase } from '../types.js';
 import type { MigrationReport } from '../migrate.js';
+import { storageRuntime } from '../bindings/storage-config.js';
 
 export interface HealthDeps {
   config: AppConfig;
@@ -30,7 +31,8 @@ export function createHealthHandler(deps: HealthDeps) {
       ok: database === 'ok',
       version: deps.config.version,
       revision: deps.config.revision || null,
-      storage: deps.config.storageMode,
+      // 取实际生效的存储方式（后台可能覆盖了环境变量），只暴露模式名、不含任何凭据
+      storage: storageRuntime.snapshot().mode,
       database: deps.db.dialect,
       databaseStatus: database,
       posts,

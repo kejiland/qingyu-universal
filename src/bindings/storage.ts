@@ -105,7 +105,15 @@ export class LocalStorage implements LocalStorageLike {
 
   /** 公开对象（/media/*、/music/*、/og/*）对应的磁盘路径。 */
   resolvePublic(pathname: string): string | null {
-    const relative = decodeURIComponent(pathname).replace(/^\/+/, '');
+    // 解码失败（如 /media/%zz 这种非法百分号编码）必须按「找不到」处理，
+    // 不能让 URIError 冒泡成 500 —— 与 assets.ts 的 resolveWithinRoot 保持一致。
+    let decoded = pathname;
+    try {
+      decoded = decodeURIComponent(pathname);
+    } catch {
+      return null;
+    }
+    const relative = decoded.replace(/^\/+/, '');
     if (!relative || relative.split('/').includes('..')) return null;
     const target = path.join(this.uploadDir, relative);
     const within = path.relative(this.uploadDir, target);

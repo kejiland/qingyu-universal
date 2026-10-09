@@ -460,6 +460,7 @@ export async function handlePosts(request, env) {
     await recordPostRevision(env, p, 'create').catch(() => {});
     if ((p.status || 'published') === 'published') await queuePostNotifications(env, p).catch(() => {});
     await purgeTags(env, [TAG_POSTS, TAG_FEED, TAG_SITEMAP, 'post:' + p.id]);
+    await recordAudit(env, request, 'post.create', p.id, p.status || 'published');
     return json({ ok: true, post: p }, 201, request, env);
   }
 
@@ -501,6 +502,9 @@ export async function handlePostId(request, env, id) {
     const oldStatus = exist ? normalizePostStatus(exist.status) : '';
     if (oldStatus !== 'published' && (p.status || 'published') === 'published') await queuePostNotifications(env, p).catch(() => {});
     await purgeTags(env, [TAG_POSTS, TAG_FEED, TAG_SITEMAP, 'post:' + id]);
+    const nextStatus = p.status || 'published';
+    await recordAudit(env, request, 'post.update', id,
+      oldStatus && oldStatus !== nextStatus ? oldStatus + ' → ' + nextStatus : nextStatus);
     return json({ ok: true, post: p }, 200, request, env);
   }
 
@@ -1523,6 +1527,7 @@ export async function handleAdminLogin(request, env) {
     catch (e) { return json({ error: '数据库写入失败' }, 500, request, env); }
     const token = randomToken(32);
     await dbRun(env.DB, 'INSERT INTO admin_sessions (token,exp) VALUES (?,?)', token, nowMs() + ADMIN_SESSION_TTL * 1000);
+    await recordAudit(env, request, 'admin.login', '', '首次部署 · 自动生成默认密码');
     return json({ ok: true, token, expiresIn: ADMIN_SESSION_TTL, mustChange: true, defaultPassword: defaultPwd }, 200, request, env);
   }
 
@@ -1540,6 +1545,9 @@ export async function handleAdminLogin(request, env) {
           JSON.stringify({ ip, subnet: subKey, n: g.n, cooldownMs: ADMIN_GLOBAL_LOCK_MS }));
       }
     }
+    // 登录失败也留痕（安全审计最关键的一项）。写入量由三层限流天然兜住：
+    // 同一 IP 15 分钟内最多 ADMIN_MAX_FAILS 次，之后直接 429 不再落库。
+    await recordAudit(env, request, 'admin.login.fail', breakGlass ? 'breakGlass' : 'password');
     return json({ error: '密码错误' }, 401, request, env);
   }
 
@@ -1552,6 +1560,7 @@ export async function handleAdminLogin(request, env) {
   try { await dbRun(env.DB, 'DELETE FROM admin_sessions WHERE exp <= ?', nowMs()); } catch (e) { /* ignore */ }
   const token = randomToken(32);
   await dbRun(env.DB, 'INSERT INTO admin_sessions (token,exp) VALUES (?,?)', token, nowMs() + ADMIN_SESSION_TTL * 1000);
+  await recordAudit(env, request, 'admin.login', '', breakGlass ? 'breakGlass' : '');
   return json({ ok: true, token, expiresIn: ADMIN_SESSION_TTL, mustChange: !!auth.mustChange }, 200, request, env);
 }
 
@@ -1563,6 +1572,7 @@ export async function handleAdminLogout(request, env) {
   const auth = String(request.headers.get('Authorization') || '').trim();
   const m = /^Bearer\s+(.+)$/i.exec(auth);
   if (m) { try { await dbRun(env.DB, 'DELETE FROM admin_sessions WHERE token = ?', m[1].trim()); } catch (e) { /* ignore */ } }
+  if (m) await recordAudit(env, request, 'admin.logout', '');
   return json({ ok: true }, 200, request, env);
 }
 
@@ -1798,6 +1808,39 @@ export async function handleStatsTrend(request, env) {
  * 记录失败一律静默，绝不影响主业务流程。
  * ============================================================ */
 
+/* ---------- 保留策略：防止 audit_log 无限膨胀 ----------
+ * 两个上限任一超出即裁剪：最多留 AUDIT_MAX_ROWS 条，且只留最近 AUDIT_RETENTION_DAYS 天。
+ * 可用同名环境变量覆盖（后台不提供 UI，避免站长把自己锁在门外时查不到历史）。
+ * 裁剪时机：
+ *   ① 写入路径上按计数节流（每 AUDIT_TRIM_EVERY 条执行一次 DELETE），避免每条都扫表；
+ *   ② 每次读取日志时也裁一次 —— 这样即使写入停了，历史也不会无限留着。
+ * 两条 DELETE 都走 idx_audit_created 索引。 */
+const AUDIT_MAX_ROWS = 5000;
+const AUDIT_RETENTION_DAYS = 90;
+const AUDIT_TRIM_EVERY = 50;
+let auditWrites = 0;
+
+function auditLimits(env) {
+  const rows = Number(env && env.AUDIT_MAX_ROWS);
+  const days = Number(env && env.AUDIT_RETENTION_DAYS);
+  return {
+    rows: Number.isFinite(rows) && rows >= 100 ? Math.floor(rows) : AUDIT_MAX_ROWS,
+    days: Number.isFinite(days) && days >= 1 ? Math.floor(days) : AUDIT_RETENTION_DAYS
+  };
+}
+
+/** 按保留策略裁剪审计日志（永不抛出） */
+export async function trimAuditLog(env) {
+  try {
+    if (!env || !env.DB) return;
+    const lim = auditLimits(env);
+    await dbRun(env.DB, 'DELETE FROM audit_log WHERE created_at < ?', Date.now() - lim.days * 86400000);
+    await dbRun(env.DB,
+      'DELETE FROM audit_log WHERE id NOT IN (SELECT id FROM audit_log ORDER BY created_at DESC, id DESC LIMIT ?)',
+      lim.rows);
+  } catch (e) { /* 裁剪失败不影响业务 */ }
+}
+
 /** 写入一条审计日志（永不抛出） */
 export async function recordAudit(env, request, action, target, detail) {
   try {
@@ -1807,6 +1850,8 @@ export async function recordAudit(env, request, action, target, detail) {
       'INSERT INTO audit_log (id,action,target,detail,ip,created_at) VALUES (?,?,?,?,?,?)',
       'a-' + randomToken(12), String(action), String(target || '').slice(0, 200),
       String(detail || '').slice(0, 300), String(ip || ''), Date.now());
+    auditWrites += 1;
+    if (auditWrites % AUDIT_TRIM_EVERY === 0) await trimAuditLog(env);
   } catch (e) { /* 审计失败不影响业务 */ }
 }
 
@@ -1817,6 +1862,8 @@ export async function handleAuditLog(request, env) {
   if (!(await isWriteAuthed(request, env))) return unauthorized(request, env);
 
   if (request.method === 'GET') {
+    // 读取时顺带按保留策略裁剪：即使写入已停止，历史也不会无限留着
+    await trimAuditLog(env);
     let limit = 200, action = '';
     try {
       const sp = new URL(request.url).searchParams;
@@ -1999,6 +2046,54 @@ export async function handlePreviewGet(request, env) {
  * Webmention（W3C）：外站引用本篇文章 → 校验来源页确实链接到本站后收录展示
  * ============================================================ */
 const WEBMENTION_MAX_BYTES = 200000;
+
+/* ---------- Webmention 抓取的 SSRF 防护 ----------
+ * /api/webmention 是**匿名**接口（只做频控），它会用服务器去 fetch 调用方给的 URL。
+ * 不设防就等于对外提供一个内网探测器：扫端口、打 169.254.169.254 云元数据、
+ * 探测管理后台。三道闸：
+ *   1. 目标主机名命中私有/保留网段直接拒绝（IPv4 字面量 + IPv6 常用私有段 + localhost）；
+ *   2. 重定向改成 manual，自己跟着跳且**每一跳都重新校验** —— 否则用
+ *      「公网 URL 302 到 127.0.0.1」就能绕过第 1 条；
+ *   3. 超时定时器放 finally 里清理（此前只在成功路径 clear，失败时挂满 8 秒）。
+ * 注：域名型 DNS rebinding 需要攻击者控制解析，此处不做 dns 预解析
+ * （Cloudflare Workers 环境没有 node:dns，保持与上游运行时兼容）。
+ */
+const WM_PRIVATE_HOSTS = [
+  /^127\./, /^10\./, /^192\.168\./, /^169\.254\./, /^0\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,          // 172.16.0.0/12
+  /^100\.(6[4-9]|[7-9]\d|1\d\d)\./       // 100.64.0.0/10（CGNAT）
+];
+function wmBlockedHost(host) {
+  const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (!h) return true;
+  if (h === 'localhost' || h === '::1' || h === '0:0:0:0:0:0:0:1' || h.endsWith('.localhost')) return true;
+  if (WM_PRIVATE_HOSTS.some((re) => re.test(h))) return true;
+  // IPv6 ULA fc00::/7 与链路本地 fe80::/10
+  if (/^f[cd][0-9a-f]{2}:/.test(h) || /^fe[89ab][0-9a-f]:/.test(h)) return true;
+  return false;
+}
+async function wmFetchGuarded(startUrl) {
+  const headers = { 'User-Agent': 'QingyuBlog-Webmention/1.0 (+webmention)', 'Accept': 'text/html,application/xhtml+xml' };
+  let url = startUrl;
+  for (let hop = 0; hop <= 3; hop++) {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('协议不被允许');
+    if (wmBlockedHost(parsed.hostname)) throw new Error('目标地址不被允许');
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    let res;
+    try {
+      res = await fetch(url, { redirect: 'manual', signal: ctrl.signal, headers });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (res.status < 300 || res.status > 399) return res;
+    const loc = String(res.headers.get('location') || '');
+    if (!loc) return res;
+    url = new URL(loc, url).href;   // 下一跳进入循环时会被重新校验
+  }
+  throw new Error('重定向次数过多');
+}
 function wmStripTags(s) {
   return String(s == null ? '' : s).replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/\s+/g, ' ').trim();
 }
@@ -2069,10 +2164,9 @@ export async function handleWebmention(request, env) {
   // 抓取来源页并校验其中确实链接到 target
   let html = '';
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000);
-    const res = await fetch(source, { redirect: 'follow', signal: ctrl.signal, headers: { 'User-Agent': 'QingyuBlog-Webmention/1.0 (+webmention)', 'Accept': 'text/html,application/xhtml+xml' } });
-    clearTimeout(timer);
+    // SSRF 防护见 wmFetchGuarded：本接口是匿名的，放任 fetch 任意 URL
+    // 等于对外提供「以服务器身份发请求」的探测器（内网端口扫描、云元数据）。
+    const res = await wmFetchGuarded(source);
     if (!res.ok) return json({ error: '来源页无法访问 HTTP ' + res.status }, 400, request, env);
     const ct = String(res.headers.get('content-type') || '');
     if (ct && ct.indexOf('text/html') < 0 && ct.indexOf('text/plain') < 0) return json({ error: '来源页不是 HTML' }, 400, request, env);

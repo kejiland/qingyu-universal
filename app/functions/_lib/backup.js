@@ -103,19 +103,36 @@ function insertStatements(table, rows) {
   const sql = 'INSERT OR REPLACE INTO ' + table + ' (' + cols.join(',') + ') VALUES (' + cols.map(() => '?').join(',') + ')';
   return rows.map((row) => ({ sql: sql, params: cols.map((col) => row[col] === undefined ? null : row[col]) }));
 }
-async function replaceTable(env, table, rows) {
-  await dbBatch(env.DB, [{ sql: 'DELETE FROM ' + table, params: [] }]);
-  const stmts = insertStatements(table, rows || []);
-  for (let i = 0; i < stmts.length; i += 50) {
-    await dbBatch(env.DB, stmts.slice(i, i + 50));
+/* 恢复语句的总量上限：落在这个数以内就整批一个事务提交，享受完整原子性。
+ * 超过则按块提交 —— 宁可牺牲跨块原子性，也不能让一次 batch 因过大而失败
+ * （Postgres 的 batch 会拼成一条大 SQL）。常见博客量级都远在单批之内。 */
+const RESTORE_BATCH_LIMIT = 5000;
+
+function restoreStatements(data) {
+  const stmts = [];
+  for (const table of DELETE_ORDER) stmts.push({ sql: 'DELETE FROM ' + table, params: [] });
+  for (const table of INSERT_ORDER) {
+    stmts.push({ sql: 'DELETE FROM ' + table, params: [] });
+    stmts.push(...insertStatements(table, (data && data.tables && data.tables[table]) || []));
   }
+  return stmts;
 }
 export async function restoreBackup(env, id) {
   if (!backupConfigured(env)) throw new Error('R2 备份桶未配置');
   const loaded = await loadBackup(env, id);
   const safety = await createBackup(env, 'pre-restore');
-  for (const table of DELETE_ORDER) await dbBatch(env.DB, [{ sql: 'DELETE FROM ' + table, params: [] }]);
-  for (const table of INSERT_ORDER) await replaceTable(env, table, loaded.data.tables[table] || []);
+  /* 全部语句合成**一次** batch（单个事务）。
+   * 此前是「每表一个事务」+「每 50 条再一个事务」，任意一批失败或进程崩溃，
+   * 数据库就停在「posts 已清空、comments 只写了一半」的半恢复态，既不能回滚
+   * 也不能继续，只能靠 pre-restore 快照补救。合成单事务后要么整份恢复、
+   * 要么原样不动。语句顺序与原来逐条执行时完全一致（先按 DELETE_ORDER 清表，
+   * 再逐表 DELETE + INSERT），行为不变，只补上原子性。 */
+  const stmts = restoreStatements(loaded.data);
+  if (stmts.length <= RESTORE_BATCH_LIMIT) {
+    await dbBatch(env.DB, stmts);
+  } else {
+    for (let i = 0; i < stmts.length; i += 500) await dbBatch(env.DB, stmts.slice(i, i + 500));
+  }
   // 恢复完成后重建全文索引，确保 posts_fts 与 posts 完全一致
   await dbRun(env.DB, "INSERT INTO posts_fts(posts_fts) VALUES ('rebuild')").catch(() => {});
   return { restored: true, safety: safety, counts: loaded.data.counts || {} };

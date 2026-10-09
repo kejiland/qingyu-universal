@@ -56,6 +56,9 @@ export interface KVNamespaceLike {
   get(key: string, options?: KVGetOptions | KVGetOptions['type']): Promise<unknown>;
   put(key: string, value: unknown, options?: KVPutOptions): Promise<void>;
   delete(key: string): Promise<void>;
+  /** 列出匹配前缀的键名（升序）。上游会用它遍历，接口必须声明，
+   *  否则各实现容易漏掉（Redis 版曾缺失，一旦被调用即 TypeError）。 */
+  list(prefix?: string): Promise<string[]>;
 }
 
 export interface AssetsBindingLike {

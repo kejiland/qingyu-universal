@@ -1,52 +1,121 @@
 /* ============================================================
  * 公开站 SSR：站点框架（顶栏 / 页脚）
  * ------------------------------------------------------------
- * 之前只渲染了 <main>（正文区），顶栏与页脚仍由 app.js 在加载后补上，
- * 于是页面会先显示"只有正文"，随后突然长出导航栏和页脚 —— 明显的布局跳动。
+ * 框架也服务端渲染出来，避免「先只有正文、app.js 加载后突然长出
+ * 导航栏和页脚」的布局跳动。
  *
- * 这里把框架也服务端渲染出来，标记对齐 app.js 的 renderNav() / renderFooter()：
- *   header.topbar > .container.topbar-inner > .topbar-left + nav.main-nav + .topbar-actions
- *   footer > .container.footer-inner > .footer-nav + .footer-copy
+ * 结构与文案必须与 app/public/app.js 的 renderNav() / renderFooter()
+ * 逐项对齐：同样的导航数据源（site_settings.nav_menu）、
+ * 同样的「发现」二级下拉拆分、同样的自定义分类子菜单、
+ * 同样的页脚附加区块。app.js 接管后原地替换，肉眼无跳动。
  *
- * 图标按钮（语言/主题/搜索/配色）只渲染 <button class="icon-btn"> 空壳：
- * CSS 给了 .icon-btn 固定 34×34 尺寸，因此空间能占住，
- * 图标与交互仍由 app.js 接管后填充。
+ * 对应上游：app.js → NAV / SECONDARY_NAV / renderNav() / renderFooter()
  * ============================================================ */
 import { escapeHtml } from '../seo/meta.js';
 import type { AppDatabase } from '../types.js';
 
+export interface NavChild {
+  text: string;
+  url: string;
+}
+
 export interface NavItem {
   text: string;
   url: string;
-  children?: NavItem[];
+  /** 路由匹配用的路径键（app.js 的 item.path） */
+  path: string;
+  /** 子项：自定义分类 / 后台自定义的下拉 */
+  children: NavChild[];
+  /** 归入「发现」下拉；显式 false 表示强制留在一级导航 */
+  discover: boolean | undefined;
 }
 
 export interface ChromeData {
   siteName: string;
   nav: NavItem[];
+  primaryNav: NavItem[];
+  secondaryNav: NavItem[];
+  footerNav: NavItem[];
+  friendLinks: NavChild[];
   footer: {
     copyrightName: string;
     startYear: string;
     icp: string;
+    /** 自定义文字 */
+    text: string;
+    /** 站点声明 */
+    decl: string;
+    contactEmail: string;
+    links: NavChild[];
   };
 }
 
 /**
- * app.js 内置 NAV 常量的等价物（顺序与文案逐项对齐）。
- * 站点未在后台配置导航时，前后台必须用同一份默认值，
- * 否则 SSR 渲染 6 项、app.js 接管后变成 9 项，导航栏会明显跳一下。
+ * 渲染入口的**输入**形态（区别于 readChrome() 的产出形态 ChromeData）。
+ *
+ * hydrateChrome() 从一开始就是为「精简结构」设计的兜底：调用方（测试、
+ * 静态导出、第三方复用）可以只给 { siteName, nav, footer }，缺字段一律补
+ * 默认值，绝不在渲染期抛错。类型上必须如实反映这一点 —— 早期签名写死
+ * `ChromeData`，于是这类受支持的精简调用只能靠 `as unknown as` 强转才能过
+ * 类型检查，把「合法用法」渲染成了「看起来非法的用法」。
+ *
+ * 放宽**只针对渲染入口**；readChrome() 仍返回完整 ChromeData，
+ * 而 ChromeData 可无损赋给 ChromeInput，生产调用点不受影响。
  */
-const DEFAULT_NAV: NavItem[] = [
-  { text: '首页', url: '/' },
-  { text: '标签', url: '/tags' },
-  { text: '分类', url: '/categories' },
-  { text: '历史', url: '/history' },
-  { text: '系列', url: '/series' },
-  { text: '热门', url: '/popular' },
-  { text: '归档', url: '/archive' },
-  { text: '留言板', url: '/guestbook' },
-  { text: '关于', url: '/about' }
+export type ChromeInput = Partial<Omit<ChromeData, 'nav' | 'footer'>> & {
+  siteName?: string;
+  /** 精简项：只给 text / url，path 与 children 由 hydrateChrome 补齐 */
+  nav?: Array<Partial<NavItem> & { text: string; url: string }>;
+  footer?: Partial<ChromeData['footer']>;
+};
+
+/* ---------- 常量：与 app.js 的 NAV / SECONDARY_NAV 一一对应 ---------- */
+
+interface NavDef {
+  url: string;
+  path: string;
+  text: string;
+}
+
+const NAV_DEFS: NavDef[] = [
+  { url: '/', path: '/', text: '首页' },
+  { url: '/tags', path: '/tags', text: '标签' },
+  { url: '/categories', path: '/categories', text: '分类' },
+  { url: '/history', path: '/history', text: '历史' },
+  { url: '/series', path: '/series', text: '系列' },
+  { url: '/popular', path: '/popular', text: '热门' },
+  { url: '/archive', path: '/archive', text: '归档' },
+  { url: '/guestbook', path: '/guestbook', text: '留言板' },
+  { url: '/about', path: '/about', text: '关于' }
 ];
+
+/** 「发现」下拉的固定内容（app.js SECONDARY_NAV）。 */
+const SECONDARY_PATHS = new Set(['/tags', '/history', '/series', '/popular']);
+/** 功能开关 navExtras=false 时隐藏的入口（app.js NAV_EXTRA_PATHS）。 */
+const EXTRA_PATHS = new Set(['/history', '/series', '/popular']);
+/** 后台导航默认项版本：老数据首次渲染时补齐新增默认项。 */
+const NAV_DEFAULT_VERSION = 1;
+
+/** app.js isDefaultZhText：这些中文文案视为「默认值」，应按内置项翻译。 */
+const DEFAULT_ZH: Record<string, string> = {};
+const DEFAULT_ZH_ALIAS: Record<string, string[]> = { '/guestbook': ['留言'] };
+for (const def of NAV_DEFS) DEFAULT_ZH[def.path] = def.text;
+
+/** 归一化路径键：去锚点、去尾斜杠（app.js navUrlKey）。 */
+export function navUrlKey(item: { url?: string }): string {
+  const u = String(item.url ?? '/').replace(/^#/, '');
+  if (!u.startsWith('/')) return u;
+  return u.replace(/\/+$/, '') || '/';
+}
+
+function isDefaultZhText(norm: string, text: string): boolean {
+  if (!text) return true;
+  if (DEFAULT_ZH[norm] === text) return true;
+  const alias = DEFAULT_ZH_ALIAS[norm];
+  return alias ? alias.includes(text) : false;
+}
+
+/* ---------- 读取与归一化 ---------- */
 
 function safeJson<T>(raw: unknown, fallback: T): T {
   if (typeof raw !== 'string' || !raw.trim()) return fallback;
@@ -60,26 +129,74 @@ function safeJson<T>(raw: unknown, fallback: T): T {
 
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
-function normalizeNav(raw: unknown): NavItem[] {
-  if (!Array.isArray(raw)) return DEFAULT_NAV;
-  const items = raw
-    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
-    .map((item) => ({
-      text: str(item.text),
-      url: str(item.url) || '/',
-      ...(Array.isArray(item.children)
-        ? {
-            children: item.children
-              .filter((c): c is Record<string, unknown> => Boolean(c) && typeof c === 'object')
-              .map((c) => ({ text: str(c.text), url: str(c.url) || '/' }))
-          }
-        : {})
-    }))
-    .filter((item) => item.text && item.url);
-  return items.length ? items : DEFAULT_NAV;
+function toChild(raw: unknown, parentPath: string): NavChild | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const item = raw as Record<string, unknown>;
+  const norm = navUrlKey({ url: str(item.url) || '/' });
+  const text = str(item.text) || DEFAULT_ZH[norm] || '';
+  if (!text) return null;
+  // 分类导航的子项 = 自定义分类：链接自动指向「按该分类筛选」的文章列表
+  const url = parentPath === '/categories' ? `/?category=${encodeURIComponent(text)}` : str(item.url) || '/';
+  return { text, url };
 }
 
-/** 站点框架的配置来源与 app.js 相同：site_settings 的 nav / footer / site。 */
+function normalizeNav(raw: unknown): NavItem[] {
+  const source = Array.isArray(raw) && raw.length ? raw : NAV_DEFS;
+  const items: NavItem[] = [];
+  for (const entry of source) {
+    if (!entry || typeof entry !== 'object') continue;
+    const item = entry as Record<string, unknown>;
+    const url = str(item.url) || '/';
+    const norm = navUrlKey({ url });
+    const text = str(item.text) || DEFAULT_ZH[norm] || '';
+    if (!text) continue;
+    const discover =
+      item.discover === true ? true : item.discover === false ? false : undefined;
+    items.push({
+      text,
+      url,
+      path: str(item.path) || norm,
+      children: Array.isArray(item.children)
+        ? item.children
+            .map((child) => toChild(child, norm))
+            .filter((child): child is NavChild => child !== null)
+        : [],
+      discover
+    });
+  }
+  return items.length ? items : NAV_DEFS.map((d) => ({ ...d, children: [], discover: undefined }));
+}
+
+/** 旧导航补齐新默认项（app.js mergeNavDefaults），按默认顺序插入且不重复。 */
+function mergeNavDefaults(items: NavItem[]): NavItem[] {
+  if (!items.length) return normalizeNav(null);
+  const out = items.slice();
+  const order = new Map<string, number>();
+  NAV_DEFS.forEach((def, i) => order.set(navUrlKey(def), i));
+  for (const def of NAV_DEFS) {
+    const key = navUrlKey(def);
+    if (out.some((it) => navUrlKey(it) === key)) continue;
+    const myOrder = order.get(key) ?? Number.POSITIVE_INFINITY;
+    let insertAt = out.length;
+    for (let i = 0; i < out.length; i++) {
+      const cur = order.get(navUrlKey(out[i]!)) ?? Number.POSITIVE_INFINITY;
+      if (cur > myOrder) {
+        insertAt = i;
+        break;
+      }
+    }
+    out.splice(insertAt, 0, { ...def, children: [], discover: undefined });
+  }
+  return out;
+}
+
+/** 是否归入「发现」二级下拉（app.js isDiscoverItem）。 */
+function isDiscoverItem(item: NavItem): boolean {
+  if (item.discover === false) return false;
+  return SECONDARY_PATHS.has(navUrlKey(item)) || item.discover === true;
+}
+
+/** 站点框架的配置来源与 app.js getConfig() 相同：site_settings 的一组键。 */
 export async function readChrome(db: AppDatabase, siteName: string): Promise<ChromeData> {
   let map = new Map<string, string>();
   try {
@@ -90,43 +207,210 @@ export async function readChrome(db: AppDatabase, siteName: string): Promise<Chr
   }
 
   const footer = safeJson<Record<string, unknown>>(map.get('footer'), {});
-  const site = safeJson<Record<string, unknown>>(map.get('site'), {});
+  const site = safeJson<Record<string, unknown>>(map.get('site_info') ?? map.get('site'), {});
+  const profile = safeJson<Record<string, unknown>>(map.get('profile'), {});
+  const features = safeJson<Record<string, unknown>>(map.get('features'), {});
+
+  // 后台保存的键是 nav_menu；早期数据里可能残留 nav，两个都读。
+  let nav = normalizeNav(safeJson<unknown>(map.get('nav_menu') ?? map.get('nav'), null));
+  if (Number(map.get('nav_defaults_version') ?? 0) < NAV_DEFAULT_VERSION) nav = mergeNavDefaults(nav);
+  if (features.navExtras === false) nav = nav.filter((it) => !EXTRA_PATHS.has(navUrlKey(it)));
+
+  const primaryNav = nav.filter((it) => !isDiscoverItem(it));
+  const secondaryNav = nav.filter((it) => isDiscoverItem(it));
+
+  const toLink = (raw: unknown): NavChild | null => {
+    if (!raw || typeof raw !== 'object') return null;
+    const item = raw as Record<string, unknown>;
+    const text = str(item.text);
+    if (!text) return null;
+    return { text, url: str(item.url) || '/' };
+  };
+  const listOf = (raw: unknown): NavChild[] => {
+    const parsed = safeJson<unknown>(raw, []);
+    return Array.isArray(parsed)
+      ? parsed.map(toLink).filter((x): x is NavChild => x !== null)
+      : [];
+  };
+
+  const friendLinks = listOf(map.get('friend_links'));
+  const footerNav = listOf(map.get('footer_nav')).map((link) => ({
+    ...link,
+    path: link.url,
+    children: [],
+    discover: undefined
+  }));
 
   return {
     siteName: str(site.name) || siteName,
-    // 后台保存的键是 nav_menu；早期数据里可能残留 nav，两个都读。
-    nav: normalizeNav(safeJson<unknown>(map.get('nav_menu') ?? map.get('nav'), null)),
+    nav,
+    primaryNav,
+    secondaryNav,
+    footerNav,
+    friendLinks: friendLinks.length ? friendLinks : listOf(footer.links),
     footer: {
-      copyrightName: str(footer.copyrightName) || siteName,
+      copyrightName: str(site.copyright) || str(footer.copyrightName) || siteName,
       startYear: str(footer.startYear),
-      icp: str(footer.icp)
+      icp: str(footer.icp),
+      text: str(footer.text),
+      decl: str(site.footerText) || str(footer.decl),
+      contactEmail: str(profile.email) || str(footer.email),
+      links: listOf(footer.links)
     }
   };
 }
 
 /* ---------- 渲染 ---------- */
 
-function linkFor(item: NavItem, activePath: string): string {
-  const url = item.url;
-  const isActive = url === activePath || (url !== '/' && activePath.startsWith(url));
-  if (item.children?.length) {
-    const sub = item.children
-      .map((c) => `<a href="${escapeHtml(c.url)}">${escapeHtml(c.text)}</a>`)
-      .join('');
-    return (
-      `<div class="nav-item has-sub">` +
-      `<a href="${escapeHtml(url)}" class="${isActive ? 'active' : ''}">${escapeHtml(item.text)}</a>` +
-      `<div class="sub-menu">${sub}</div></div>`
-    );
-  }
-  return (
-    `<div class="nav-item"><a href="${escapeHtml(url)}" class="${isActive ? 'active' : ''}">` +
-    `${escapeHtml(item.text)}</a></div>`
-  );
+const CHEVRON =
+  '<span class="nav-caret" aria-hidden="true">' +
+  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"' +
+  ' stroke-linecap="round" stroke-linejoin="round"><path d="M6 9.5l6 6 6-6"/></svg></span>';
+
+const TOP_ICON =
+  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"' +
+  ' stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V6"/><path d="M6 11.5 12 5.5l6 6"/></svg>';
+
+function extOf(url: string): string {
+  return /^https?:|^\/\//.test(url) ? ' target="_blank" rel="noopener"' : '';
 }
 
-export function renderTopbar(chrome: ChromeData, activePath: string): string {
-  const links = chrome.nav.map((item) => linkFor(item, activePath)).join('');
+/** 命中判定：与 app.js 一样用 path 键与当前路由比较。 */
+function pathKeyOf(item: NavItem): string {
+  if (item.path) return item.path;
+  const raw = item.url || '/';
+  if (raw.startsWith('#/')) return raw.slice(1);
+  return raw.startsWith('/') ? raw : '';
+}
+
+/**
+ * 渲染入口兜底：允许调用方直接传 { siteName, nav, footer } 这样的精简结构
+ * （测试、静态导出、第三方复用），缺字段一律补默认值，绝不在渲染期抛错。
+ */
+export function hydrateChrome(input: ChromeInput): ChromeData {
+  const nav: NavItem[] = (Array.isArray(input.nav) ? input.nav : []).map((item) => ({
+    ...item,
+    path: item.path || navUrlKey(item),
+    children: Array.isArray(item.children) ? item.children : [],
+    discover: item.discover
+  }));
+  const footer = input.footer ?? ({} as ChromeData['footer']);
+  return {
+    siteName: input.siteName || '',
+    nav,
+    primaryNav: input.primaryNav?.length ? input.primaryNav : nav.filter((it) => !isDiscoverItem(it)),
+    secondaryNav: input.secondaryNav?.length ? input.secondaryNav : nav.filter(isDiscoverItem),
+    footerNav: Array.isArray(input.footerNav) ? input.footerNav : [],
+    friendLinks: Array.isArray(input.friendLinks) ? input.friendLinks : [],
+    footer: {
+      copyrightName: footer.copyrightName || '',
+      startYear: footer.startYear || '',
+      icp: footer.icp || '',
+      text: footer.text || '',
+      decl: footer.decl || '',
+      contactEmail: footer.contactEmail || '',
+      links: Array.isArray(footer.links) ? footer.links : []
+    }
+  };
+}
+export interface ActiveState {
+  /** 当前路由路径，例如 /tags */
+  path: string;
+  /** 首页 ?category=xxx 选中的分类 */
+  category: string;
+}
+
+/** active 归一化：容忍直接传字符串路径（旧签名 / 静态导出脚本）。 */
+export function activeOf(active: ActiveState | string | undefined): ActiveState {
+  if (typeof active === 'string') return { path: navUrlKey({ url: active }), category: '' };
+  return { path: active?.path ?? '', category: active?.category ?? '' };
+}
+
+function subMenu(items: NavItem[], activeInput: ActiveState | string, idPrefix: string): string {
+  const active = activeOf(activeInput);
+  return items
+    .map((item) => {
+      const key = pathKeyOf(item);
+      const cls = key && key === active.path ? 'nav-link active' : 'nav-link';
+      if (item.children.length) {
+        const kids = item.children
+          .map((child) => {
+            const on = child.text === active.category;
+            const cCls = on ? 'nav-link active' : 'nav-link';
+            return `<a href="${escapeHtml(child.url)}" class="${cCls}" role="menuitem">${escapeHtml(child.text)}</a>`;
+          })
+          .join('');
+        return (
+          '<div class="nav-item has-sub click-dropdown" data-nav-dropdown>' +
+          `<a href="${escapeHtml(item.url)}" class="${cls}"${extOf(item.url)}` +
+          ' data-nav-dropdown-trigger="true" aria-haspopup="true" aria-expanded="false">' +
+          `${escapeHtml(item.text)}</a>` +
+          '<div class="sub-menu sub-sub-menu" role="menu">' +
+          kids +
+          '</div></div>'
+        );
+      }
+      return `<a href="${escapeHtml(item.url)}" class="${cls}" role="menuitem"${extOf(item.url)}>${escapeHtml(item.text)}</a>`;
+    })
+    .join('');
+}
+
+export function renderTopbar(input: ChromeInput, activeInput: ActiveState | string): string {
+  const chrome = hydrateChrome(input);
+  const active = activeOf(activeInput);
+  const secondaryActive = chrome.secondaryNav.some((it) => {
+    const key = pathKeyOf(it);
+    return !!key && key === active.path;
+  });
+
+  const secondaryLinks = subMenu(chrome.secondaryNav, active, 'navExploreMenu');
+
+  const links: string[] = chrome.primaryNav.map((item) => {
+    const key = pathKeyOf(item);
+    const url = item.url || '/';
+    const cls = key && key === active.path ? 'nav-link active' : 'nav-link';
+    if (item.children.length) {
+      const kids = item.children
+        .map(
+          (child) =>
+            `<a href="${escapeHtml(child.url)}" class="nav-link"${extOf(child.url)} role="menuitem">${escapeHtml(child.text)}</a>`
+        )
+        .join('');
+      // 主链接保留跳转能力（点标题直达），右侧箭头单独负责展开下拉
+      return (
+        '<div class="nav-item has-sub click-dropdown" data-nav-dropdown>' +
+        `<a href="${escapeHtml(url)}" class="${cls}"${extOf(url)}` +
+        ' data-nav-dropdown-trigger="true" aria-haspopup="true" aria-expanded="false">' +
+        `${escapeHtml(item.text)}</a>` +
+        '<button type="button" class="nav-sub-caret" data-nav-dropdown-trigger="true"' +
+        ` aria-label="${escapeHtml(item.text)}" aria-haspopup="true" aria-expanded="false">${CHEVRON}</button>` +
+        `<div class="sub-menu" role="menu">${kids}</div></div>`
+      );
+    }
+    return (
+      `<div class="nav-item"><a href="${escapeHtml(url)}" class="${cls}"${extOf(url)}>` +
+      `${escapeHtml(item.text)}</a></div>`
+    );
+  });
+
+  // 「发现」入口：button 负责展开/收起，本身不跳转；位置固定在「首页」之后
+  if (chrome.secondaryNav.length) {
+    const dropdown =
+      '<div class="nav-item has-sub click-dropdown" data-nav-dropdown>' +
+      `<button type="button" class="nav-link nav-dropdown-trigger${secondaryActive ? ' active' : ''}"` +
+      ' data-nav-dropdown-trigger="true" aria-haspopup="true" aria-expanded="false" aria-controls="navExploreMenu">' +
+      `发现${CHEVRON}</button>` +
+      `<div class="sub-menu" id="navExploreMenu" role="menu">${secondaryLinks}</div></div>`;
+    let insertAt = 0;
+    for (let i = 0; i < chrome.primaryNav.length; i++) {
+      if (pathKeyOf(chrome.primaryNav[i]!) === '/') {
+        insertAt = i + 1;
+        break;
+      }
+    }
+    links.splice(insertAt, 0, dropdown);
+  }
+
   // 空壳按钮：.icon-btn 固定 34×34，占位正确；图标与事件由 app.js 接管后填充
   const iconBtn = '<button class="icon-btn" tabindex="-1" aria-hidden="true"></button>';
 
@@ -136,33 +420,64 @@ export function renderTopbar(chrome: ChromeData, activePath: string): string {
     '<button class="hamburger-btn" id="hamburgerBtn" aria-label="打开菜单"><span></span><span></span><span></span></button>' +
     `<a class="brand" href="/">${escapeHtml(chrome.siteName)}</a>` +
     '</div>' +
-    `<nav class="main-nav">${links}</nav>` +
+    `<nav class="main-nav">${links.join('')}</nav>` +
     `<div class="topbar-actions">${iconBtn.repeat(4)}</div>` +
     '</div><div class="search-panel" id="searchPanel"></div></header>'
   );
 }
 
-export function renderFooter(chrome: ChromeData): string {
-  const navHtml = chrome.nav
-    .map((item) => `<a href="${escapeHtml(item.url)}">${escapeHtml(item.text)}</a>`)
-    .join('<span class="footer-dot">·</span>');
+function footerLink(item: NavChild): string {
+  return `<a href="${escapeHtml(item.url)}"${extOf(item.url)}>${escapeHtml(item.text)}</a>`;
+}
+
+export function renderFooter(input: ChromeInput): string {
+  const chrome = hydrateChrome(input);
+  // 页脚导航：优先后台「底部导航」，其次 footer.contact，最后回退主导航
+  const source: NavChild[] = chrome.footerNav.length
+    ? chrome.footerNav
+    : chrome.footer.links.length
+      ? chrome.footer.links
+      : chrome.nav.map((it) => ({ text: it.text, url: it.url }));
+  const list = source.slice();
+  if (!list.some((x) => String(x.url) === '/links')) list.push({ text: '友链', url: '/links' });
+
+  let navHtml = list.map(footerLink).join('<span class="footer-dot">·</span>');
+  navHtml +=
+    '<span class="footer-dot footer-rss">·</span><a class="footer-rss" href="/feed.xml">RSS</a>' +
+    `<span class="footer-dot">·</span><a href="/subscribe">邮件订阅</a>`;
+
+  let extra = '';
+  if (chrome.footer.text) extra += `<p class="footer-text">${escapeHtml(chrome.footer.text)}</p>`;
+  if (chrome.footer.decl) {
+    extra += `<p class="footer-decl"><span class="footer-lbl">站点声明：</span>${escapeHtml(chrome.footer.decl)}</p>`;
+  }
+  if (chrome.footer.contactEmail) {
+    extra +=
+      '<p class="footer-contact"><span class="footer-lbl">相关侵权、举报、投诉及建议等，请发邮件至 E-mail：</span>' +
+      `<a href="mailto:${escapeHtml(chrome.footer.contactEmail)}">${escapeHtml(chrome.footer.contactEmail)}</a></p>`;
+  }
+  const friends = chrome.friendLinks.map(footerLink).join('');
+  if (friends) {
+    extra += `<p class="footer-friends"><span class="footer-lbl">友情链接：</span><span class="footer-friend-links">${friends}</span></p>`;
+  }
 
   const year = new Date().getFullYear();
-  const start = chrome.footer.startYear || String(year);
-  const range = start === String(year) ? start : `${start}–${year}`;
+  const start = Number(chrome.footer.startYear) || 2019;
+  const range = start && start < year ? `${start}-${year}` : String(year);
   const icp = chrome.footer.icp ? ` <span class="footer-icp">${escapeHtml(chrome.footer.icp)}</span>` : '';
 
   return (
     '<footer><div class="container footer-inner">' +
-    `<div class="footer-nav">${navHtml}` +
-    '<span class="footer-dot footer-rss">·</span><a class="footer-rss" href="/feed.xml">RSS</a>' +
-    '<span class="footer-dot">·</span><a href="/subscribe">订阅</a></div>' +
-    `<div class="footer-copy">© ${escapeHtml(range)} ${escapeHtml(chrome.footer.copyrightName)}${icp}</div>` +
-    '</div></footer>'
+    `<div class="footer-nav">${navHtml}</div>` +
+    (extra ? `<div class="footer-extra">${extra}</div>` : '') +
+    `<div class="footer-copy">Copyright ©${range} ${escapeHtml(chrome.footer.copyrightName)}${icp}</div>` +
+    '</div>' +
+    `<button class="btn-top" id="backTop" aria-label="返回顶部" title="返回顶部">${TOP_ICON}</button>` +
+    '</footer>'
   );
 }
 
 /** 按 app.js 的顺序组装整页：顶栏 + 正文 + 页脚。 */
-export function wrapWithChrome(chrome: ChromeData, content: string, activePath: string): string {
-  return renderTopbar(chrome, activePath) + content + renderFooter(chrome);
+export function wrapWithChrome(chrome: ChromeInput, content: string, active: ActiveState | string): string {
+  return renderTopbar(chrome, active) + content + renderFooter(chrome);
 }

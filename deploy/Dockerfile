@@ -45,6 +45,10 @@ RUN npm run build \
 
 # ------------------------------------------------------------
 FROM node:24-alpine
+# 运行阶段还要装 postgresql-client（PostgreSQL 模式首次建表用），
+# 而 Alpine 官方源 dl-cdn.alpinelinux.org 在部分网络下不可达。
+# 传 ALPINE_MIRROR（如 https://mirrors.aliyun.com/alpine）即可换源；留空走官方源。
+ARG ALPINE_MIRROR=""
 WORKDIR /app
 
 # 非 root 运行：直接使用镜像内置的 node 用户（uid/gid 1000）
@@ -66,7 +70,10 @@ COPY --from=server-build /app/app ./app
 # 运行时首次启动要用它建表（PostgreSQL 模式）；不打进镜像会在容器里找不到文件
 COPY deploy/postgres/schema.sql ./deploy/postgres/schema.sql
 
-RUN apk add --no-cache postgresql-client \
+RUN if [ -n "$ALPINE_MIRROR" ]; then \
+      sed -i "s#https://dl-cdn.alpinelinux.org/alpine#${ALPINE_MIRROR%/}#g" /etc/apk/repositories; \
+    fi \
+ && apk add --no-cache postgresql-client \
  && mkdir -p /data \
  && chown -R node:node /data
 

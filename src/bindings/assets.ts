@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { Readable } from 'node:stream';
 import type { AssetsBindingLike } from '../types.js';
 
@@ -50,6 +51,49 @@ const MIME: Record<string, string> = {
 
 export function contentTypeFor(filePath: string): string {
   return MIME[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream';
+}
+
+/* ============================================================
+ * 静态资源 gzip
+ * ------------------------------------------------------------
+ * Cloudflare 版由边缘自动压缩；自托管版此前裸传 —— style.min.css
+ * 101KB、app.min.js 167KB 原样出网，公网访问首屏传输量白白多 3~4 倍。
+ * 这里对文本类静态资源做 gzip + 进程内缓存（按 mtime+size 失效）：
+ *  · 只压文本类（html/js/css/json/xml/svg/txt/webmanifest）；
+ *  · 只压 >=1KB 的文件，二进制（图片/字体/音频）不碰；
+ *  · 客户端 Accept-Encoding 不含 gzip 时保持原样；
+ *  · 缓存上限 48 条（全是几十 KB 级文本，约 2~3MB 内存），LRU 淘汰；
+ *  · 压缩响应的 ETag 追加 -gzip 后缀（nginx 惯例），避免裸传与
+ *    压缩两种字节混用同一弱 ETag 造成 304 误判。
+ * ============================================================ */
+const COMPRESSIBLE_TYPES = new Set([
+  'text/html', 'text/javascript', 'text/css', 'application/json',
+  'application/manifest+json', 'application/xml', 'text/plain', 'image/svg+xml'
+]);
+const GZIP_MIN_BYTES = 1024;
+const GZIP_CACHE_MAX = 48;
+const gzipCache = new Map<string, { body: Uint8Array; etag: string }>();
+
+function acceptsGzip(request: Request): boolean {
+  return /\bgzip\b/i.test(request.headers.get('Accept-Encoding') || '');
+}
+
+async function gzipAsset(target: string, stat: fs.Stats, etag: string): Promise<{ body: Uint8Array; etag: string }> {
+  const key = `${target}|${stat.mtimeMs}|${stat.size}`;
+  const hit = gzipCache.get(key);
+  if (hit) return hit;
+  const raw = await fsp.readFile(target);
+  const body = await new Promise<Uint8Array>((resolve, reject) => {
+    zlib.gzip(raw, { level: 6 }, (err, out) => (err ? reject(err) : resolve(new Uint8Array(out))));
+  });
+  const gzEtag = etag.replace(/"$/, '-gzip"');
+  const entry = { body, etag: gzEtag };
+  if (gzipCache.size >= GZIP_CACHE_MAX) {
+    const oldest = gzipCache.keys().next().value;
+    if (oldest !== undefined) gzipCache.delete(oldest);
+  }
+  gzipCache.set(key, entry);
+  return entry;
 }
 
 /** 解析请求路径到 root 内的真实文件，阻断 ../ 目录穿越。 */
@@ -101,8 +145,31 @@ export class AssetsBinding implements AssetsBindingLike {
     }
     if (!stat?.isFile()) return new Response('Not Found', { status: 404 });
 
+    const ctype = contentTypeFor(target);
+    const gzCandidate =
+      acceptsGzip(request) &&
+      stat.size >= GZIP_MIN_BYTES &&
+      COMPRESSIBLE_TYPES.has(ctype.split(';')[0]);
+
+    if (gzCandidate) {
+      const gz = await gzipAsset(target, stat, `W/"${stat.size.toString(16)}-${Math.round(stat.mtimeMs).toString(16)}"`);
+      const headers = new Headers({
+        'Content-Type': ctype,
+        'Content-Encoding': 'gzip',
+        'Content-Length': String(gz.body.length),
+        'Last-Modified': stat.mtime.toUTCString(),
+        ETag: gz.etag,
+        Vary: 'Accept-Encoding'
+      });
+      if (request.headers.get('If-None-Match') === gz.etag) {
+        return new Response(null, { status: 304, headers });
+      }
+      if (method === 'HEAD') return new Response(null, { status: 200, headers });
+      return new Response(gz.body, { status: 200, headers });
+    }
+
     const headers = new Headers({
-      'Content-Type': contentTypeFor(target),
+      'Content-Type': ctype,
       'Content-Length': String(stat.size),
       'Last-Modified': stat.mtime.toUTCString(),
       ETag: `W/"${stat.size.toString(16)}-${Math.round(stat.mtimeMs).toString(16)}"`

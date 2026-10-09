@@ -22,12 +22,34 @@ import { formatDate } from './format.js';
 /** 与 public/index.html 里的启动动画元素匹配（app.js 不引用它，替换安全）。 */
 const BOOT_LOADER = /<div class="boot-load" id="bootLoad">[\s\S]*?<\/div>\s*<\/div>/;
 
+/* marked 默认放行内联 HTML，而渲染结果最终会 innerHTML 进页面。
+ * 写入面目前只有管理员，但仍要兜底三层现实风险：
+ *   ① 后台会话存在 localStorage，被 XSS 一次即整站接管；
+ *   ② 从不可信备份恢复（restore）可绕过编辑器直接注入正文；
+ *   ③ 将来开放多作者 / 导入功能时，这里立刻变成存储型 XSS。
+ * 只移除「正常写作不需要」的构造，保留 iframe/video 等嵌入 —— 视频嵌入是
+ * 合理需求，且跨源 iframe 受同源策略约束，取不到父页面。
+ */
+const DANGEROUS_BLOCK = /<\s*(script|style)\b[\s\S]*?<\s*\/\s*\1\s*>/gi;
+const DANGEROUS_SELF = /<\s*(script|style)\b[^>]*\/?>/gi;
+const EVENT_ATTR = /\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi;
+const JS_PROTOCOL = /(href|src)\s*=\s*(["'])\s*(?:javascript|vbscript|data\s*:\s*text\/html)\s*:[^"']*\2/gi;
+
+function sanitizeRenderedHtml(html: string): string {
+  return html
+    .replace(DANGEROUS_BLOCK, '')
+    .replace(DANGEROUS_SELF, '')
+    .replace(EVENT_ATTR, '')
+    .replace(JS_PROTOCOL, '$1=""');
+}
+
 export function renderMarkdown(markdown: string): string {
-  return marked.parse(String(markdown ?? ''), {
+  const html = marked.parse(String(markdown ?? ''), {
     async: false,
     gfm: true,
     breaks: false
   }) as string;
+  return sanitizeRenderedHtml(html);
 }
 
 export function injectAppContent(shell: string, content: string): string {

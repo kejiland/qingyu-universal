@@ -339,7 +339,7 @@ export async function buildStaticSite(deps: StaticSiteDeps): Promise<StaticSiteR
     name: 'index.html',
     text: finalize(
       injectHead(
-        injectAppContent(shell, wrapWithChrome(chrome, renderHomeContent(posts.slice(0, 10), site), '/')),
+        injectAppContent(shell, wrapWithChrome(chrome, renderHomeContent(posts.slice(0, 10), site), { path: '/', category: '' })),
         buildHomeMeta(site, siteUrl),
         renderHeadBlock(buildHomeMeta(site, siteUrl))
       ),
@@ -351,7 +351,7 @@ export async function buildStaticSite(deps: StaticSiteDeps): Promise<StaticSiteR
   for (const post of posts) {
     const meta = buildArticleMeta(post, site, siteUrl);
     const content = renderPostContent(post, site);
-    const body = content ? injectAppContent(shell, wrapWithChrome(chrome, content, '/posts')) : shell;
+    const body = content ? injectAppContent(shell, wrapWithChrome(chrome, content, { path: '/posts', category: '' })) : shell;
     files.push({
       name: `posts/${postDir(str(post.id))}/index.html`,
       text: finalize(injectHead(body, meta, renderHeadBlock(meta)), '../../')
@@ -375,7 +375,7 @@ export async function buildStaticSite(deps: StaticSiteDeps): Promise<StaticSiteR
       name: `${pagePath.replace(/^\//, '')}/index.html`,
       text: finalize(
         injectHead(
-          injectAppContent(shell, wrapWithChrome(chrome, render(posts, site), pagePath)),
+          injectAppContent(shell, wrapWithChrome(chrome, render(posts, site), { path: pagePath, category: '' })),
           meta,
           renderHeadBlock(meta)
         ),
@@ -402,7 +402,7 @@ export async function buildStaticSite(deps: StaticSiteDeps): Promise<StaticSiteR
     const render = async (): Promise<string> => {
       try {
         const content = await build();
-        return injectAppContent(shell, wrapWithChrome(chrome, content, '/' + name));
+        return injectAppContent(shell, wrapWithChrome(chrome, content, { path: '/' + name, category: '' }));
       } catch {
         return shell;
       }

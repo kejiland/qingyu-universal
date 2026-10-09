@@ -31,6 +31,52 @@
   function go(path) { if (window.navigate) window.navigate(path); }
   function link(path) { return window.href ? window.href(path) : path; }
 
+  /* 站点对外地址是否还是「本机占位值」。
+   * SITE_URL 没配时后端默认会给 http://localhost:<PORT>（见 src/config.ts），
+   * 此时若照搬它，用户在域名下访问后台会复制出 http://localhost:8788/media/… 这种打不开的链接。 */
+  function isLoopbackUrl(v) {
+    if (!v) return true;
+    try {
+      var h = new URL(v).hostname.toLowerCase();
+      return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]' || h === '0.0.0.0';
+    } catch (e) { return true; }
+  }
+
+  /* 把「根相对地址」补成完整链接。
+   *
+   * 为什么需要在展示层补、而不是直接改存储值：
+   * 本地磁盘模式下 media/music 的 url 就是 `/media/xxx.png`（根相对），这是**故意**的 ——
+   * src/bindings/storage.ts 的 normalizeLocalObjectUrls() 还会主动把历史绝对地址改回相对地址，
+   * 就是为了不把 host 绑死（今天用 localhost、明天用域名、后天走反代，绑了就全失效）。
+   * 但「复制链接 / 复制 MD」是给人贴到站外用的，必须是完整地址，所以在复制这一刻补全。
+   * 已配 S3/R2 时上游返回的本就是绝对外链（publicUrlForKey），这里原样放行。
+   *
+   * 取哪个域名：优先站点对外地址 cfg().siteUrl（与 1143 / 2224 行、前台 app.js 的写法一致），
+   * 但它还是 localhost 占位值时改用当前浏览器 origin —— 否则用户走域名访问后台，
+   * 复制出来的却是 localhost，等于废链接。 */
+  function absUrl(u) {
+    var s = String(u || '').trim();
+    if (!s) return '';
+    if (/^[a-z][a-z0-9+.-]*:/i.test(s) || s.slice(0, 2) === '//') return s; // 已是绝对 URL / data: / 协议相对
+    var site = String((cfg() && cfg().siteUrl) || '').replace(/\/+$/, '');
+    var origin = String((window.location && window.location.origin) || '');
+    var base = isLoopbackUrl(site) ? (origin || site) : (site || origin);
+    if (!base) return s;
+    return s.charAt(0) === '/' ? base + s : base + '/' + s;
+  }
+
+  /* -------- 主题色（accent）· 与前台博客共用一份实现 --------
+   * 色板、持久化键（qingyu.accent）与取色面板都定义在 app.js：accentTitle() /
+   * accentSwatchesHTML() / setAccent() / getAccent()。后台直接复用这些全局函数，
+   * 于是「后台换色 → 已打开的前台标签页立刻跟随」这条链路天然成立（app.js 里已有
+   * storage 事件监听），无需在这里重复实现一份。 */
+  function accentTitleText() {
+    try { return (typeof window.accentTitle === 'function' && window.accentTitle()) || '主题色'; } catch (e) { return '主题色'; }
+  }
+  function accentSwatchesMarkup() {
+    try { return typeof window.accentSwatchesHTML === 'function' ? window.accentSwatchesHTML() : ''; } catch (e) { return ''; }
+  }
+
   /* 从 R2 / S3 的 XML 错误响应里提取 <Code>/<Message>，用于把上传失败原因显示给管理员。
    * 浏览器跨域直传 R2 时，只有桶的 CORS 规则允许才读得到响应体；读不到就返回空串。 */
   function r2Detail(xhr) {
@@ -789,6 +835,14 @@
         '<div class="ab-header-spacer"></div>' +
         '<div class="ab-header-right">' +
           '<button class="ab-header-btn" id="abPreview" title="' + t('admin.header.preview') + '">' + icon('external', 16) + '<span class="ab-hide-sm">' + t('admin.header.preview') + '</span></button>' +
+          // 主题色：与前台博客共用 localStorage['qingyu.accent'] 与同一套色板（style.css 的 .accent-* 样式）
+          '<div class="ab-lang-wrap">' +
+            '<button class="ab-btn-icon" id="abAccentToggle" title="' + esc(accentTitleText()) + '" aria-haspopup="true" aria-controls="abAccentPop" aria-expanded="false">' + icon('palette', 18) + '</button>' +
+            '<div class="ab-lang-pop" id="abAccentPop" role="listbox" aria-label="' + esc(accentTitleText()) + '">' +
+              '<div class="ab-lang-pop-title">' + esc(accentTitleText()) + '</div>' +
+              '<div class="accent-pop-swatches" id="abAccentSwatches"></div>' +
+            '</div>' +
+          '</div>' +
           '<div class="ab-lang-wrap">' +
             '<button class="ab-btn-icon" id="abLangToggle" title="' + esc(window.langTitle ? window.langTitle() : 'Language') + '" aria-haspopup="listbox" aria-controls="abLangPop" aria-expanded="false">' + icon('globe', 18) + '</button>' +
             '<div class="ab-lang-pop" id="abLangPop" role="listbox">' +
@@ -799,6 +853,7 @@
           '<div class="ab-dropdown">' +
             '<button class="ab-btn-icon" id="abAvatarBtn" title="' + t('admin.header.account') + '">' + icon('lock', 18) + '</button>' +
             '<div class="ab-menu" id="abAvatarMenu">' +
+              '<div class="ab-menu-item" data-act="welcome">' + icon('spark', 16) + t('admin.header.welcome') + '</div>' +
               '<div class="ab-menu-item" data-act="profile">' + icon('pen', 16) + t('admin.header.profile') + '</div>' +
               '<div class="ab-menu-item" data-act="password">' + icon('lock', 16) + t('admin.header.changePwd') + '</div>' +
               '<div class="ab-menu-sep"></div>' +
@@ -907,13 +962,23 @@
     if (mustChangeRequired()) { renderMustChangeGate(root); return; }
     // 确保 i18n 已加载
     var route = parseRoute(path);
+    /* 切换路由时 renderShell() 会重建整个外壳（含侧边栏 <aside id="abSider">），
+     * 新建节点的 scrollTop 恒为 0 —— 于是滚动到侧边栏底部再点导航项，侧边栏就自己弹回顶部。
+     * 导航本身没变化，只是高亮项变了，这里把 .ab-nav 的滚动位置接回去。 */
+    var prevNav = root.querySelector('#abSider .ab-nav');
+    var navScrollTop = prevNav ? prevNav.scrollTop : 0;
     // 异步拉取待审核数量用于角标
     var pendingCount = 0;
     renderShell(root, route, pendingCount);
+    if (navScrollTop > 0) {
+      var nextNav = root.querySelector('#abSider .ab-nav');
+      if (nextNav) nextNav.scrollTop = navScrollTop;
+    }
     bindShell(root, route);
     loadPendingBadge(root, route);
     renderPage(root, route);
     refreshSiderProfile(root);
+    maybeAutoWelcome(root, route);
   }
 
   function renderShell(root, route, pendingCount) {
@@ -956,6 +1021,30 @@
       });
     }
 
+    // 主题色选择（复用前台 app.js 的色板与持久化，切换后前台标签页实时跟随）
+    var accentToggle = root.querySelector('#abAccentToggle');
+    var accentPop = root.querySelector('#abAccentPop');
+    if (accentToggle && accentPop) {
+      var accentInner = root.querySelector('#abAccentSwatches');
+      function paintAccentSwatches() { if (accentInner) accentInner.innerHTML = accentSwatchesMarkup(); }
+      paintAccentSwatches();
+      accentToggle.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = accentPop.classList.toggle('open');
+        accentToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) paintAccentSwatches();
+      });
+      accentPop.addEventListener('click', function (e) {
+        var b = e.target.closest ? e.target.closest('[data-accent]') : null;
+        if (!b) return;
+        var id = b.getAttribute('data-accent');
+        if (typeof window.setAccent === 'function') window.setAccent(id);
+        paintAccentSwatches();
+        accentPop.classList.remove('open');
+        accentToggle.setAttribute('aria-expanded', 'false');
+      });
+    }
+
     var menuBtn = root.querySelector('#abMenuBtn');
     menuBtn.addEventListener('click', function () {
       if (window.innerWidth <= 991) {
@@ -985,12 +1074,16 @@
     var avMenu = root.querySelector('#abAvatarMenu');
     avBtn.addEventListener('click', function (e) { e.stopPropagation(); avMenu.classList.toggle('open'); });
     avMenu.addEventListener('click', function (e) {
-      var act = e.target.getAttribute('data-act');
+      // 用 closest 取最近的可点项：点在图标的 path 上时 target 不是菜单项本身
+      var item = e.target.closest ? e.target.closest('[data-act]') : null;
+      var act = item ? item.getAttribute('data-act') : null;
       if (!act) return;
       avMenu.classList.remove('open');
       if (act === 'logout') {
         if (cloudOn()) window.cloudLogout && window.cloudLogout(); else window.adminLogout && window.adminLogout();
         go('/admin');
+      } else if (act === 'welcome') {
+        openWelcomeGuide(root);
       } else if (act === 'profile') {
         go('/admin/settings');
       } else if (act === 'password') {
@@ -1004,6 +1097,8 @@
         ms.forEach(function (m) { m.classList.remove('open'); });
         var alt = document.getElementById('abLangToggle');
         if (alt && !document.querySelector('.ab-lang-pop.open')) alt.setAttribute('aria-expanded', 'false');
+        var act = document.getElementById('abAccentToggle');
+        if (act && !document.querySelector('#abAccentPop.open')) act.setAttribute('aria-expanded', 'false');
       });
     }
   }
@@ -1042,6 +1137,113 @@
     if (route.page === 'backup') return pageBackups(content);
     if (route.page === 'transfer') return pageImportExport(content);
     if (route.page === 'settings') return pageSettings(content);
+  }
+
+  /* ====================== 新站上手引导 ======================
+   * 首次进入后台（停在仪表盘）时自动弹出「五步把新站变成能用的博客」；
+   * 关闭后记住、不再自动出现，但可从右上角头像菜单 →「新站上手引导」随时重开或重来。
+   * localStorage 键沿用新版后台的同一份，两个后台互不打架。 */
+  var WELCOME_DISMISS_KEY = 'qy.welcome.dismissed';
+  var WELCOME_CHECKS_KEY = 'qy.welcome.checks';
+
+  function welcomeReadChecks() {
+    try { return JSON.parse(localStorage.getItem(WELCOME_CHECKS_KEY) || '{}') || {}; } catch (e) { return {}; }
+  }
+  function welcomeWriteChecks(checks) {
+    try { localStorage.setItem(WELCOME_CHECKS_KEY, JSON.stringify(checks || {})); } catch (e) {}
+  }
+  function welcomeSteps() {
+    return [
+      { id: 'settings', icon: 'sliders', to: '/admin/settings', title: t('admin.welcome.stepSettings'), hint: t('admin.welcome.stepSettingsHint'), cta: t('admin.welcome.stepSettingsCta') },
+      { id: 'post', icon: 'pen', to: '/admin/posts/new', title: t('admin.welcome.stepPost'), hint: t('admin.welcome.stepPostHint'), cta: t('admin.welcome.stepPostCta') },
+      { id: 'media', icon: 'image', to: '/admin/media', title: t('admin.welcome.stepMedia'), hint: t('admin.welcome.stepMediaHint'), cta: t('admin.welcome.stepMediaCta') },
+      { id: 'comment', icon: 'quote', to: '/admin/comments', title: t('admin.welcome.stepComment'), hint: t('admin.welcome.stepCommentHint'), cta: t('admin.welcome.stepCommentCta') },
+      { id: 'backup', icon: 'save', to: '/admin/backups', title: t('admin.welcome.stepBackup'), hint: t('admin.welcome.stepBackupHint'), cta: t('admin.welcome.stepBackupCta') }
+    ];
+  }
+  function welcomeMarkup(checks) {
+    var steps = welcomeSteps();
+    var done = steps.filter(function (s) { return !!checks[s.id]; }).length;
+    var pct = Math.round((done / steps.length) * 100);
+    var items = steps.map(function (s) {
+      var on = !!checks[s.id];
+      return '<li class="' + (on ? 'done' : '') + '">' +
+        '<button class="ab-welcome-check" type="button" data-wtoggle="' + s.id + '" aria-pressed="' + (on ? 'true' : 'false') + '" title="' + esc(s.title) + '">' + (on ? icon('check', 13) : '') + '</button>' +
+        '<span class="ab-welcome-icon">' + icon(s.icon, 17) + '</span>' +
+        '<div class="ab-welcome-text"><strong>' + esc(s.title) + '</strong><small>' + esc(s.hint) + '</small></div>' +
+        '<button class="ab-btn sm" type="button" data-wgo="' + esc(s.to) + '">' + esc(s.cta) + '</button>' +
+        '</li>';
+    }).join('');
+    var site = String((cfg() && cfg().siteUrl) || window.location.origin || '');
+    return '<div class="ab-welcome-mask" id="abWelcomeMask" role="dialog" aria-modal="true" aria-label="' + esc(t('admin.welcome.title')) + '">' +
+      '<section class="ab-welcome-card">' +
+        '<header class="ab-welcome-head">' +
+          '<div class="ab-welcome-title">' +
+            '<span class="ab-welcome-badge">' + icon('spark', 17) + '</span>' +
+            '<div><h2>' + esc(t('admin.welcome.title')) + '</h2><p>' + esc(t('admin.welcome.subtitle')) + '</p></div>' +
+          '</div>' +
+          '<button class="ab-welcome-close" type="button" data-wclose="1" title="' + esc(t('admin.welcome.close')) + '">&times;</button>' +
+        '</header>' +
+        '<div class="ab-welcome-progress">' +
+          '<div class="ab-welcome-bar"><i style="width:' + pct + '%"></i></div>' +
+          '<span class="ab-welcome-count">' + esc(t('admin.welcome.progress', { done: done, total: steps.length })) + '</span>' +
+        '</div>' +
+        '<ul class="ab-welcome-list">' + items + '</ul>' +
+        '<footer class="ab-welcome-foot">' +
+          '<span class="ab-welcome-site">' + esc(site) + '</span>' +
+          '<div class="ab-welcome-actions">' +
+            '<button class="ab-btn ghost sm" type="button" data-wreset="1">' + esc(t('admin.welcome.reset')) + '</button>' +
+            '<button class="ab-btn primary sm" type="button" data-wclose="1">' + esc(done === steps.length ? t('admin.welcome.allDone') : t('admin.welcome.later')) + '</button>' +
+          '</div>' +
+        '</footer>' +
+      '</section></div>';
+  }
+  /** 打开引导（挂在 root 上，随页面切换自然销毁）。 */
+  function openWelcomeGuide(root) {
+    if (!root || root.querySelector('#abWelcomeMask')) return;
+    var host = root.querySelector('.ab-root') || root;
+    var checks = welcomeReadChecks();
+    var holder = document.createElement('div');
+    holder.innerHTML = welcomeMarkup(checks);
+    var mask = holder.firstChild;
+    host.appendChild(mask);
+
+    function repaint() { mask.outerHTML = welcomeMarkup(checks); mask = host.querySelector('#abWelcomeMask'); wire(); }
+    function close() {
+      try { localStorage.setItem(WELCOME_DISMISS_KEY, '1'); } catch (e) {}
+      var el = host.querySelector('#abWelcomeMask');
+      if (el) el.remove();
+    }
+    function wire() {
+      mask.addEventListener('click', function (e) {
+        if (e.target === mask) { close(); return; }               // 点遮罩空白处关闭
+        var tgl = e.target.closest ? e.target.closest('[data-wtoggle]') : null;
+        if (tgl) {
+          var id = tgl.getAttribute('data-wtoggle');
+          checks[id] = !checks[id];
+          welcomeWriteChecks(checks);
+          repaint();
+          return;
+        }
+        var goBtn = e.target.closest ? e.target.closest('[data-wgo]') : null;
+        if (goBtn) { var to = goBtn.getAttribute('data-wgo'); close(); go(to); return; }
+        if (e.target.closest && e.target.closest('[data-wreset]')) {
+          checks = {}; welcomeWriteChecks(checks); repaint(); return;
+        }
+        if (e.target.closest && e.target.closest('[data-wclose]')) close();
+      });
+    }
+    wire();
+    var first = mask.querySelector('[data-wtoggle]');
+    if (first) { try { first.focus({ preventScroll: true }); } catch (e) {} }
+  }
+  /** 仅「首次进入后台且停在仪表盘」时自动弹出，避免写文章/看评论时被挡住。 */
+  function maybeAutoWelcome(root, route) {
+    if (!route || route.page !== 'dashboard') return;
+    var dismissed = '';
+    try { dismissed = localStorage.getItem(WELCOME_DISMISS_KEY) || ''; } catch (e) {}
+    if (dismissed === '1') return;
+    openWelcomeGuide(root);
   }
 
   /* ====================== 仪表盘 ====================== */
@@ -1745,6 +1947,34 @@
     }
     transferAnchorDownload(name, blob);
   }
+  /** 在「用户点击手势仍然有效」时先弹出另存为对话框，返回 Promise<FileSystemFileHandle>。
+   *  浏览器要求 showSaveFilePicker 必须在用户手势内调用；而导出过程是异步的（要抓资源、等接口），
+   *  等到打包完再调用会因丢失手势被浏览器拒绝，于是只剩下载没有「保存位置」这一步。 */
+  function transferPickSaveHandle(name) {
+    try {
+      if (typeof window.showSaveFilePicker !== 'function') return null;
+      return window.showSaveFilePicker({ suggestedName: name });
+    } catch (e) { return null; }
+  }
+  /** 把内容写入先前选定的位置；没有选过 / 被取消 / 权限不足时回退到默认下载目录。
+   *  返回 'saved' | 'cancelled' | 'downloaded' */
+  async function transferSaveAs(handlePromise, name, blob) {
+    var handle = null;
+    if (handlePromise) { try { handle = await handlePromise; } catch (e) { handle = null; } }
+    if (handle) {
+      try {
+        var writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return 'saved';
+      } catch (e) { /* 写入失败则回退到默认下载目录 */ }
+    } else if (handlePromise) {
+      // 用户主动取消「另存为」：尊重取消，不再偷偷下载
+      return 'cancelled';
+    }
+    transferAnchorDownload(name, blob);
+    return 'downloaded';
+  }
   function transferDownloadText(name, text, type) {
     transferDownload(name, new Blob([String(text || '')], { type: type || 'text/plain;charset=utf-8' }));
   }
@@ -2012,9 +2242,15 @@
   async function exportStaticSite(content, button) {
     var status = content ? content.querySelector('#abIeStatus') : null;
     var old = button ? button.innerHTML : '';
+    // 必须在用户手势内同步弹出「另存为」，否则打包结束再调会被浏览器拒绝（只剩下载、没有保存位置）
+    var suggestedName = 'qingyu-static-site-' + transferStamp() + '.zip';
+    var cached = (content && content.__iePosts) || null;
+    var lookEmpty = cached ? cached.filter(function (p) { return (p.status || 'published') === 'published'; }).length === 0 : false;
+    var saveHandle = lookEmpty ? null : transferPickSaveHandle(suggestedName);
+
     if (button) { button.disabled = true; button.innerHTML = icon('spinner', 12) + ' ' + t('admin.transfer.exporting'); }
     try {
-      var all = (content && content.__iePosts) || await listFullPosts();
+      var all = cached || await listFullPosts();
       var posts = (all || []).filter(function (p) { return (p.status || 'published') === 'published'; });
       if (!posts.length) { toast(t('admin.staticExport.empty'), 'err'); return; }
       if (status) status.textContent = t('admin.staticExport.building');
@@ -2082,8 +2318,9 @@
       try { if (window.buildSitemapClient) files.push({ name: 'sitemap.xml', text: window.buildSitemapClient() }); } catch (e) {}
       try { if (window.buildFeedXmlClient) files.push({ name: 'feed.xml', text: window.buildFeedXmlClient(data, 20) }); } catch (e) {}
       files.push({ name: 'README-静态站说明.txt', text: t('admin.staticExport.readme', { site: siteName, count: data.length }) });
-      transferDownload('qingyu-static-site-' + transferStamp() + '.zip', transferZip(files));
-      toast(t('admin.staticExport.done', { count: data.length, files: files.length }), 'ok');
+      var outcome = await transferSaveAs(saveHandle, suggestedName, transferZip(files));
+      if (outcome === 'cancelled') toast(t('admin.staticExport.cancelled'));
+      else toast(t('admin.staticExport.done', { count: data.length, files: files.length }), 'ok');
     } catch (e) {
       toast(t('admin.staticExport.fail') + (e.message || e), 'err');
     } finally {
@@ -2348,6 +2585,7 @@
       + '<span class="ab-ai-title">' + icon('spark', 14) + ' ' + esc(t('ai.assist.title')) + '</span>'
       + '<select class="ab-ai-lang" id="abAiLang">' + opts + '</select>'
       + '<button type="button" class="ab-btn sm" data-abai="title">' + esc(t('ai.assist.titles')) + '</button>'
+      + '<button type="button" class="ab-btn sm" data-abai="tags">' + esc(t('ai.assist.tags')) + '</button>'
       + '<button type="button" class="ab-btn sm" data-abai="polish">' + esc(t('ai.assist.polish')) + '</button>'
       + '<button type="button" class="ab-btn sm" data-abai="translate">' + esc(t('ai.assist.translate')) + '</button>'
       + '<span class="ab-ai-msg" id="abAiMsg"></span>'
@@ -2957,9 +3195,21 @@
     if (!list) return;
     var posts = [];
     try { posts = await listPosts(); } catch (e) {}
-    var seen = {};
-    posts.forEach(function (x) { if (x && x.category) seen[x.category] = 1; });
-    list.innerHTML = Object.keys(seen).sort().map(function (c) { return '<option value="' + esc(c) + '"></option>'; }).join('');
+    var seen = {}; var names = [];
+    // 先放后台「分类」导航里自定义的分类（软件 / 系统 / 服务器…），再补历史已用分类，保证都能选
+    var navCfg = parseArr(settingsCache && settingsCache.nav_menu, []);
+    navCfg.forEach(function (it) {
+      if (!it || String(it.url || '').replace(/\/+$/, '') !== '/categories') return;
+      (it.children || []).forEach(function (c) {
+        var name = c && String(c.text || '').trim();
+        if (name && !seen[name]) { seen[name] = 1; names.push(name); }
+      });
+    });
+    posts.forEach(function (x) {
+      var c2 = x && x.category ? String(x.category).trim() : '';
+      if (c2 && !seen[c2]) { seen[c2] = 1; names.push(c2); }
+    });
+    list.innerHTML = names.map(function (c) { return '<option value="' + esc(c) + '"></option>'; }).join('');
   }
   /** 作者候选：来自已有文章的作者 + 站点个人资料昵称 */
   async function fillAuthorOptions(content) {
@@ -3519,10 +3769,11 @@
         syncMediaSelection(content);
       });
     });
-    grid.querySelectorAll('[data-copy]').forEach(function (b) { b.addEventListener('click', function () { copyText(dec(b.getAttribute('data-copy'))); toast(t('admin.media.copied'), 'ok'); }); });
+    // 复制出去的是完整链接（absUrl 会按需要补站点域名）；存储值仍是根相对，不动
+    grid.querySelectorAll('[data-copy]').forEach(function (b) { b.addEventListener('click', function () { copyText(absUrl(dec(b.getAttribute('data-copy')))); toast(t('admin.media.copied'), 'ok'); }); });
     grid.querySelectorAll('[data-mdimg]').forEach(function (b) {
       b.addEventListener('click', function () {
-        var md = '![' + (b.getAttribute('data-mdname') || '') + '](' + dec(b.getAttribute('data-mdimg')) + ')';
+        var md = '![' + (b.getAttribute('data-mdname') || '') + '](' + absUrl(dec(b.getAttribute('data-mdimg'))) + ')';
         copyText(md); toast(t('admin.media.copiedMd'), 'ok');
       });
     });
@@ -4009,7 +4260,19 @@
 
   /* ====================== 操作审计日志 ====================== */
   var auditState = { logs: [], action: 'all', from: '', to: '', page: 1, per: 20 };
-  var AUDIT_ACTIONS = ['post.delete', 'media.delete', 'settings.update', 'backup.create', 'backup.restore', 'backup.delete', 'audit.clear'];
+  /* 必须与后端实际写入的 action 一一对应：后端用 recordAudit(env, request, 'xxx') 写入，
+   * 这里漏一个，该动作在筛选下拉里就选不到（只能在「全部类型」里偶然看到）。
+   * 新增审计点时两边一起改。 */
+  var AUDIT_ACTIONS = [
+    'post.create', 'post.update', 'post.delete',
+    'media.delete',
+    'tag.rename', 'tag.delete',
+    'comment.bulk',
+    'settings.update', 'ai.update', 'storage.update', 'storage.migrate',
+    'admin.login', 'admin.login.fail', 'admin.logout',
+    'backup.create', 'backup.restore', 'backup.delete',
+    'audit.clear'
+  ];
   function auditActionLabel(a) {
     var key = 'admin.audit.a.' + String(a || '').replace(/[^a-z.]/g, '');
     var label = t(key);
@@ -4511,21 +4774,39 @@
       (cloudOn() ? '' : '<div class="ab-card"><div class="ab-empty"><div class="ab-empty-ico">⚙️</div><p>' + t('admin.settings.cloudOnly') + '</p></div></div>');
     if (!cloudOn()) return;
     content.innerHTML += '<div class="ab-tabs">' +
-      '<div class="ab-tab active" data-tab="site">' + t('admin.settings.siteInfo') + '</div>' +
+      '<div class="ab-tab" data-tab="site">' + t('admin.settings.siteInfo') + '</div>' +
       '<div class="ab-tab" data-tab="features">' + t('admin.settings.features') + '</div>' +
       '<div class="ab-tab" data-tab="profile">' + t('admin.settings.profile') + '</div>' +
       '<div class="ab-tab" data-tab="nav">' + t('admin.settings.navMenu') + '</div>' +
       '<div class="ab-tab" data-tab="footerNav">' + t('admin.settings.footerNav') + '</div>' +
       '<div class="ab-tab" data-tab="friends">' + t('admin.settings.friendLinks') + '</div>' +
+      '<div class="ab-tab" data-tab="ai">' + t('admin.settings.aiTab') + '</div>' +
+      '<div class="ab-tab" data-tab="storage">' + t('admin.settings.storageTab') + '</div>' +
       '</div><div id="abSettingsBody"></div>';
-    content.querySelectorAll('.ab-tab').forEach(function (t) { t.addEventListener('click', function () { saveTabToDraft(content); content.querySelectorAll('.ab-tab').forEach(function (x) { x.classList.remove('active'); }); t.classList.add('active'); renderSettingsTab(content, t.getAttribute('data-tab')); }); });
-    renderSettingsTab(content, 'site');
+    content.querySelectorAll('.ab-tab').forEach(function (t) { t.addEventListener('click', function () { saveTabToDraft(content); content.querySelectorAll('.ab-tab').forEach(function (x) { x.classList.remove('active'); }); t.classList.add('active'); var key = t.getAttribute('data-tab'); rememberSettingsTab(key); renderSettingsTab(content, key); }); });
+    // 恢复上次停留的标签页；记录里的标签已不存在（如后台改版增删了 tab）则回落到第一个
+    var tabsEl = content.querySelectorAll('.ab-tab');
+    var last = readSettingsTab();
+    var restored = null;
+    tabsEl.forEach(function (x) { if (x.getAttribute('data-tab') === last) restored = x; });
+    if (!restored) restored = tabsEl[0];
+    if (restored) restored.classList.add('active');
+    renderSettingsTab(content, restored ? restored.getAttribute('data-tab') : 'site');
     content.querySelector('#abSaveSettings').addEventListener('click', function () { saveSettings(content); });
     loadSettings(content);
   }
   var settingsCache = {};
   // 内存草稿：各 tab 未保存的输入在此暂存，切换 tab 不丢失数据
   var settingsDraft = { site: {}, features: { pageSize: 8, ads: {} }, profile: {}, nav: [], footerNav: [], links: [] };
+  // 记住「博客设置」上次停留的标签页，刷新页面后不再跳回「站点基础信息」
+  function settingsTabKey() { return 'qingyu.settingsTab'; }
+  function readSettingsTab() {
+    try { return String(localStorage.getItem(settingsTabKey()) || ''); } catch (e) { return ''; }
+  }
+  function rememberSettingsTab(tab) {
+    if (!tab) return;
+    try { localStorage.setItem(settingsTabKey(), String(tab)); } catch (e) {}
+  }
   async function loadSettings(content) {
     try { var d = await api('api/settings'); settingsCache = (d && d.settings) || {}; } catch (e) { settingsCache = {}; }
     // 同步到前台全局变量，确保前台渲染时读取到最新的站点设置
@@ -4561,9 +4842,12 @@
     var navItems = parseArr(s.nav_menu, defaultNavItems());
     if (Number(s.nav_defaults_version || 0) < NAV_DEFAULTS_VERSION) navItems = mergeDefaultNavItems(navItems);
     settingsDraft.nav = navItems;
+    settingsServerLoaded = true;
+    navUserEdited = false;
     settingsDraft.blocklist = String(s.comment_blocklist || '');
 
     settingsDraft.footerNav = parseArr(s.footer_nav, defaultFooterNav());
+    settingsDraft.homeTags = parseArr(s.home_tags, []).map(function (x) { return String(x).trim(); }).filter(Boolean);
     settingsDraft.links = parseArr(s.friend_links, defaultFriendLinks());
   }
   /** 默认顶部导航（与前台渲染兜底一致）：站点未自定义导航时作为基础项 */
@@ -4682,37 +4966,49 @@
         navExtras: content.querySelector('#abFeatNavExtras') ? content.querySelector('#abFeatNavExtras').checked : true
       };
     }
+    if (content.querySelector('#abHomeTags')) collectHomeTagsFromDom(content);
     if (content.querySelector('#abNavVisual')) collectNavFromDom(content);
     if (content.querySelector('#abFooterNavVisual')) collectLinksFromDom(content, 'footerNav', '#abFooterNavVisual');
     if (content.querySelector('#abFriendsVisual')) collectLinksFromDom(content, 'links', '#abFriendsVisual');
   }
-  /** 从顶部导航可视化 DOM 收集当前编辑结果到 settingsDraft.nav 并持久化草稿 */
+  /** 从顶部导航可视化 DOM 收集当前编辑结果到 settingsDraft.nav 并持久化草稿。
+   *  保留每项的 i18n / path / discover 等元信息，只覆盖用户可见的文案与链接。 */
   function collectNavFromDom(content) {
     var wrap = content.querySelector('#abNavVisual');
     if (!wrap) return;
     var newItems = [];
-    wrap.querySelectorAll('.ab-nav-row').forEach(function (row) {
-      if (row.classList.contains('child')) return; // 子项在父项中处理
-      var idx = parseInt(row.querySelector('[data-idx]').getAttribute('data-idx'), 10);
+    wrap.querySelectorAll('.ab-nav-row:not(.child)').forEach(function (row) {
+      var idx = parseInt(row.getAttribute('data-idx'), 10);
       var text = (row.querySelector('.ab-nav-text') || {}).value || '';
       var url = (row.querySelector('.ab-nav-url') || {}).value || '';
-      var children = [];
-      wrap.querySelectorAll('.ab-nav-row.child[data-idx="' + idx + '"]').forEach(function (cr) {
-        children.push({ text: (cr.querySelector('.ab-nav-text') || {}).value || '', url: (cr.querySelector('.ab-nav-url') || {}).value || '' });
-      });
       var old = settingsDraft.nav[idx] || {};
       var item = { text: text, url: url };
-      if (old.i18n) item.i18n = old.i18n;
-      if (children.length) {
-        item.children = children.map(function (c, ci) {
-          var childOld = (old.children && old.children[ci]) || {};
-          if (childOld.i18n) c.i18n = childOld.i18n;
-          return c;
+      ['i18n', 'path', 'discover'].forEach(function (k) {
+        if (old[k] !== undefined && old[k] !== null && old[k] !== '') item[k] = old[k];
+      });
+      var rowDiscover = row.getAttribute('data-discover');
+      if (rowDiscover === '1') item.discover = true;
+      else if (rowDiscover === '0') item.discover = false;
+      var childRows = wrap.querySelectorAll('.ab-nav-row.child[data-idx="' + idx + '"]');
+      if (childRows.length) {
+        item.children = [];
+        childRows.forEach(function (cr, ci) {
+          var c = {
+            text: (cr.querySelector('.ab-nav-text') || {}).value || '',
+            url: (cr.querySelector('.ab-nav-url') || {}).value || ''
+          };
+          var cOld = (old.children && old.children[ci]) || {};
+          if (cOld.i18n) c.i18n = cOld.i18n;
+          item.children.push(c);
         });
+      } else if (old.children && old.children.length) {
+        // DOM 里没有子行不等于用户要删子菜单，保留原值防止二级菜单被静默抹掉
+        item.children = old.children;
       }
       newItems.push(item);
     });
     settingsDraft.nav = newItems;
+    navUserEdited = true;
     try { localStorage.setItem(navDraftKey(), JSON.stringify(settingsDraft.nav)); } catch (e) {}
   }
   /** 从底部导航/友情链接的可视化 DOM 收集当前编辑结果到草稿 */
@@ -4762,8 +5058,188 @@
     if (content.querySelector('#abProfileBio')) content.querySelector('#abProfileBio').value = prof.bio || '';
     if (content.querySelector('#abProfileAvatar')) content.querySelector('#abProfileAvatar').value = prof.avatar || '';
     if (content.querySelector('#abProfileEmail')) content.querySelector('#abProfileEmail').value = prof.email || '';
+    // 服务端数据回来后重画一次导航编辑器，补上二级菜单与自定义项（用户已手动改过则不覆盖）
+    if (content.querySelector('#abNavVisual') && !navUserEdited) renderNavVisual(content);
   }
   function safeJson(v) { if (!v) return {}; if (typeof v === 'object') return v; try { return JSON.parse(v); } catch (e) { return {}; } }
+  /* ---------- 首页标签显示管理 ----------
+   * 文章一多，标签会越堆越多，首页标签条会被拉得很长。这里让站长自己勾选
+   * 「首页要显示哪些标签」：白名单存site_settings.home_tags（JSON 数组），
+   * 为空 = 保持原样全部显示；前台 renderHomeTagRow 只渲染白名单内的标签。
+   * 支持手动补一个「暂时还没有文章使用」的标签，避免必须先发文章才能选它。 */
+  function homeTagCounts() {
+    // 优先用前台已渲染的标签统计（页面刚打开时同步可用），否则退回已加载的文章列表
+    var counts = {};
+    try {
+      var chips = document.querySelectorAll('.home-tag-text');
+      for (var i = 0; i < chips.length; i++) {
+        var n = String(chips[i].textContent || '').trim();
+        if (n) counts[n] = 0;
+      }
+    } catch (e) {}
+    return counts;
+  }
+  function mergeTagCounts(counts, list) {
+    (list || []).forEach(function (p) {
+      (p && p.tags ? p.tags : []).forEach(function (t) {
+        var k = String(t).trim(); if (k) counts[k] = (counts[k] || 0) + 1;
+      });
+    });
+    return counts;
+  }
+  function renderHomeTagPicker(content) {
+    var box = content.querySelector('#abHomeTags');
+    if (!box) return;
+    var counts = homeTagCounts();
+    var chosen = (settingsDraft.homeTags || []).slice();
+    box.innerHTML = '<span class="ab-hint">' + t('admin.settings.featHomeTagsLoading') + '</span>';
+    listFullPosts().then(function (list) {
+      mergeTagCounts(counts, list);
+      draw();
+    }).catch(function () { draw(); });
+    function draw() {
+      var names = Object.keys(counts).sort(function (a, b) {
+        var d = (counts[b] || 0) - (counts[a] || 0);
+        return d !== 0 ? d : a.localeCompare(b);
+      });
+      // 已选但当前没有文章的标签也要显示出来，否则选了就看不见、也删不掉
+      chosen.forEach(function (n) { if (names.indexOf(n) < 0) names.push(n); });
+      var html = '';
+      if (!names.length) {
+        html = '<span class="ab-hint">' + t('admin.settings.featHomeTagsEmpty') + '</span>';
+      } else {
+        html = names.map(function (n) {
+          var on = chosen.indexOf(n) >= 0;
+          var c = counts[n] || 0;
+          return '<button type="button" class="ab-tagchip' + (on ? ' on' : '') + '" data-tagpick="' + esc(n) + '">'
+            + esc(n) + (c ? '<span class="ab-tagchip-n">' + c + '</span>' : '') + '</button>';
+        }).join('');
+      }
+      box.innerHTML = html;
+      box.querySelectorAll('[data-tagpick]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var n = btn.getAttribute('data-tagpick');
+          var i = chosen.indexOf(n);
+          if (i >= 0) chosen.splice(i, 1); else chosen.push(n);
+          settingsDraft.homeTags = chosen.slice();
+          draw();
+        });
+      });
+    }
+    function addTag() {
+      var inp = content.querySelector('#abHomeTagInput');
+      var n = String((inp && inp.value) || '').trim();
+      if (!n) return;
+      if (chosen.indexOf(n) < 0) chosen.push(n);
+      counts[n] = counts[n] || 0;
+      settingsDraft.homeTags = chosen.slice();
+      if (inp) inp.value = '';
+      draw();
+    }
+    var addBtn = content.querySelector('#abHomeTagAdd');
+    if (addBtn) addBtn.addEventListener('click', addTag);
+    var clrBtn = content.querySelector('#abHomeTagClear');
+    if (clrBtn) clrBtn.addEventListener('click', function () {
+      chosen = []; settingsDraft.homeTags = []; draw();
+    });
+    var inp = content.querySelector('#abHomeTagInput');
+    if (inp) inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); addTag(); } });
+    draw();
+  }
+  function collectHomeTagsFromDom(content) {
+    var box = content.querySelector('#abHomeTags');
+    if (!box) return;
+    var out = [];
+    box.querySelectorAll('[data-tagpick]').forEach(function (btn) {
+      if (btn.classList.contains('on')) out.push(btn.getAttribute('data-tagpick'));
+    });
+    settingsDraft.homeTags = out;
+  }
+  /* ---------- 设置页：JSON 高级模式 ----------
+   * 顶部导航 / 页脚导航 / 友情链接是对象数组，广告位是对象。可视化编辑器覆盖不到的
+   * 边角字段（i18n / path / discover 以及历史遗留的广告字段）用 JSON 一次改完更快，
+   * 与新版后台每张卡片右上角的「JSON」开关对齐。应用前做形状校验，
+   * 避免半截数据写进设置——校验收紧、失败不改任何东西。 */
+  function settingsCardTitle(iconName, title, jsonKey, extraStyle) {
+    return '<div class="ab-section-title" style="display:flex;align-items:center;gap:8px' + (extraStyle ? ';' + extraStyle : '') + '">' +
+      '<span style="display:flex;align-items:center;gap:7px;flex:1;min-width:0">' + icon(iconName, 15) + ' ' + esc(title) + '</span>' +
+      '<button type="button" class="ab-btn sm" data-sjson="' + esc(jsonKey) + '" title="' + esc(t('admin.settings.jsonHint')) + '">' + esc(t('admin.settings.jsonToggle')) + '</button>' +
+    '</div>';
+  }
+  function openJsonModal(opts) {
+    var mask = document.createElement('div');
+    mask.className = 'ab-modal-mask';
+    mask.innerHTML = '<div class="ab-modal" style="max-width:720px;width:min(94vw,720px)">' +
+      '<h3>' + esc(opts.title) + '</h3>' +
+      '<label class="ab-hint">' + esc(t('admin.settings.jsonHint')) + '</label>' +
+      '<textarea class="ab-textarea" id="abJsonArea" spellcheck="false" style="width:100%;min-height:320px;margin-top:8px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.6"></textarea>' +
+      '<div class="ab-hint" id="abJsonErr" style="color:var(--ab-danger);min-height:18px;margin-top:6px"></div>' +
+      '<div class="ab-modal-actions">' +
+        '<button type="button" class="ab-btn ghost" data-act="cancel">' + t('confirm.cancel') + '</button>' +
+        '<button type="button" class="ab-btn primary" id="abJsonApply">' + esc(t('admin.settings.jsonApply')) + '</button>' +
+      '</div></div>';
+    document.body.appendChild(mask);
+    var area = mask.querySelector('#abJsonArea');
+    var errEl = mask.querySelector('#abJsonErr');
+    area.value = JSON.stringify(opts.value, null, 2);
+    mask.addEventListener('click', function (e) {
+      if (e.target === mask || (e.target.getAttribute && e.target.getAttribute('data-act') === 'cancel')) mask.remove();
+    });
+    mask.querySelector('#abJsonApply').addEventListener('click', function () {
+      var parsed;
+      try { parsed = JSON.parse(area.value || (opts.kind === 'array' ? '[]' : '{}')); }
+      catch (e) { errEl.textContent = t('admin.settings.jsonInvalid'); return; }
+      if (opts.kind === 'array') {
+        if (!Array.isArray(parsed)) { errEl.textContent = t('admin.settings.jsonNeedArray'); return; }
+        for (var i = 0; i < parsed.length; i++) {
+          var x = parsed[i];
+          if (!x || typeof x !== 'object' || Array.isArray(x)) { errEl.textContent = t('admin.settings.jsonItemObject'); return; }
+        }
+      } else if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        errEl.textContent = t('admin.settings.jsonNeedObject'); return;
+      }
+      opts.onApply(parsed);
+      mask.remove();
+    });
+  }
+  function bindSettingsJsonButtons(content) {
+    content.querySelectorAll('[data-sjson]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var key = btn.getAttribute('data-sjson');
+        if (key === 'ads') {
+          var ads = (settingsDraft.features && settingsDraft.features.ads) || {};
+          openJsonModal({
+            title: t('admin.settings.featAds') + ' · JSON',
+            kind: 'object',
+            value: ads,
+            onApply: function (parsed) {
+              settingsDraft.features = settingsDraft.features || {};
+              settingsDraft.features.ads = parsed;
+              renderSettingsTab(content, 'features');
+            }
+          });
+          return;
+        }
+        var tabOf = { nav: 'nav', footerNav: 'footerNav', links: 'friends' };
+        var labelOf = { nav: t('admin.settings.visualEditor'), footerNav: t('admin.settings.footerNav'), links: t('admin.settings.friendLinks') };
+        var arr = Array.isArray(settingsDraft[key]) ? settingsDraft[key] : [];
+        openJsonModal({
+          title: labelOf[key] + ' · JSON',
+          kind: 'array',
+          value: arr,
+          onApply: function (parsed) {
+            settingsDraft[key] = parsed;
+            try {
+              if (key === 'nav') localStorage.setItem(navDraftKey(), JSON.stringify(parsed));
+              else localStorage.setItem('qingyu.linksDraft.' + key, JSON.stringify(parsed));
+            } catch (e) {}
+            renderSettingsTab(content, tabOf[key]);
+          }
+        });
+      });
+    });
+  }
+
   function renderSettingsTab(content, tab) {
     var body = content.querySelector('#abSettingsBody');
     if (tab === 'site') {
@@ -4796,7 +5272,14 @@
         '<div class="ab-field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input type="checkbox" id="abFeatErrReport"> ' + t('admin.settings.featErrReport') + '</label><label class="ab-hint">' + t('admin.settings.featErrReportHint') + '</label></div>' +
         '<div class="ab-section-title" style="margin-top:16px">' + icon('quote', 15) + ' ' + t('admin.settings.featAntiSpam') + '</div>' +
         '<div class="ab-field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input type="checkbox" id="abFeatCommentGuard"> ' + t('admin.settings.featCommentGuard') + '</label><label class="ab-hint">' + t('admin.settings.featCommentGuardHint') + '</label></div>' +
-        '<div class="ab-section-title" style="margin-top:16px">' + icon('spark', 15) + ' ' + t('admin.settings.featAds') + '</div>' +
+        '<div class="ab-section-title" style="margin-top:16px">' + icon('tag', 15) + ' ' + t('admin.settings.featHomeTags') + '</div>' +
+        '<div class="ab-field"><label class="ab-hint">' + t('admin.settings.featHomeTagsHint') + '</label>' +
+        '<div id="abHomeTags" class="ab-tagpick"></div>' +
+        '<div class="ab-row" style="gap:8px;margin-top:10px;flex-wrap:wrap">' +
+        '<input class="ab-input" id="abHomeTagInput" style="flex:1;min-width:160px" placeholder="' + t('admin.settings.featHomeTagAdd') + '">' +
+        '<button class="ab-btn" id="abHomeTagAdd">' + icon('plus', 14) + ' ' + t('admin.settings.featHomeTagAddBtn') + '</button>' +
+        '<button class="ab-btn" id="abHomeTagClear">' + t('admin.settings.featHomeTagClear') + '</button></div></div>' +
+        settingsCardTitle('spark', t('admin.settings.featAds'), 'ads', 'margin-top:16px') +
         '<div class="ab-field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input type="checkbox" id="abAdsEnabled"> ' + t('admin.settings.featAdsEnable') + '</label><label class="ab-hint">' + t('admin.settings.featAdsEnableHint') + '</label></div>' +
         '<div class="ab-field"><label class="ab-label">' + t('admin.settings.featAdsClient') + '</label><input class="ab-input" id="abAdsClient" placeholder="ca-pub-xxxxxxxxxxxxxxxx"></div>' +
         '<div class="ab-field"><label class="ab-label">' + t('admin.settings.featAdsBelow') + '</label><textarea class="ab-textarea" id="abAdsBelowSearch" style="min-height:80px"></textarea></div>' +
@@ -4805,42 +5288,479 @@
         '<div class="ab-field"><label class="ab-label">' + t('admin.settings.featAdsContent') + '</label><textarea class="ab-textarea" id="abAdsContent" style="min-height:80px"></textarea></div>' +
         '<label class="ab-hint">' + t('admin.settings.featAdsCodeHint') + '</label>' +
         '</div>';
+      renderHomeTagPicker(content);
     } else if (tab === 'profile') {
       body.innerHTML = '<div class="ab-card" style="max-width:620px">' +
-        '<div class="ab-avatar-edit"><img class="ab-avatar-prev" id="abProfPrev" src=""><div><div class="ab-label" style="margin:0">' + t('admin.settings.profileAvatar') + '</div><div class="ab-hint">' + t('admin.settings.avatarUrl') + '</div></div></div>' +
         '<div class="ab-field"><label class="ab-label">' + t('admin.settings.nickname') + '</label><input class="ab-input" id="abProfileName"></div>' +
         '<div class="ab-field"><label class="ab-label">' + t('admin.settings.bio') + '</label><textarea class="ab-textarea" id="abProfileBio" style="min-height:70px"></textarea></div>' +
         '<div class="ab-field"><label class="ab-label">' + t('admin.settings.avatarUrl') + '</label><input class="ab-input" id="abProfileAvatar"></div>' +
         '<div class="ab-field"><label class="ab-label">' + t('admin.settings.email') + '</label><input class="ab-input" id="abProfileEmail"></div>' +
       '</div>';
-      var pa = body.querySelector('#abProfileAvatar');
-      var pv = body.querySelector('#abProfPrev');
-      pa.addEventListener('input', function () { pv.src = pa.value; });
-      setTimeout(function () { if (pa && pv) pv.src = pa.value; }, 0);
     } else if (tab === 'nav') {
       body.innerHTML = '<div class="ab-card" style="max-width:720px">' +
-        '<div class="ab-section-title">' + icon('list', 15) + ' ' + t('admin.settings.visualEditor') + '</div>' +
+        settingsCardTitle('list', t('admin.settings.visualEditor'), 'nav') +
         '<div class="ab-hint" style="margin-bottom:8px">' + t('admin.settings.navVisualHint') + '</div>' +
         '<div id="abNavVisual" class="ab-nav-editor"></div>' +
       '</div>';
       renderNavVisual(content);
     } else if (tab === 'footerNav') {
       body.innerHTML = '<div class="ab-card" style="max-width:720px">' +
-        '<div class="ab-section-title">' + icon('list', 15) + ' ' + t('admin.settings.footerNav') + '</div>' +
+        settingsCardTitle('list', t('admin.settings.footerNav'), 'footerNav') +
         '<div class="ab-hint" style="margin-bottom:8px">' + t('admin.settings.footerNavHint') + '</div>' +
         '<div id="abFooterNavVisual" class="ab-nav-editor"></div>' +
       '</div>';
       renderLinkVisual(content, 'footerNav', '#abFooterNavVisual');
     } else if (tab === 'friends') {
       body.innerHTML = '<div class="ab-card" style="max-width:720px">' +
-        '<div class="ab-section-title">' + icon('heart', 15) + ' ' + t('admin.settings.friendLinks') + '</div>' +
+        settingsCardTitle('heart', t('admin.settings.friendLinks'), 'links') +
         '<div class="ab-hint" style="margin-bottom:8px">' + t('admin.settings.friendLinksHint') + '</div>' +
         '<div id="abFriendsVisual" class="ab-nav-editor"></div>' +
       '</div>';
       renderLinkVisual(content, 'links', '#abFriendsVisual');
+    } else if (tab === 'ai') {
+      body.innerHTML = '<div class="ab-card" style="max-width:720px">' +
+        '<div class="ab-section-title">' + icon('spark', 15) + ' ' + t('admin.settings.aiTitle') + '</div>' +
+        '<label class="ab-hint" style="display:block;margin-bottom:4px">' + t('admin.settings.aiHint') + '</label>' +
+        '<label class="ab-hint" style="display:block;margin-bottom:12px">' + t('admin.settings.aiIndependent') + '</label>' +
+        '<div class="ab-field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input type="checkbox" id="abAiEnabled"> ' + t('admin.settings.aiEnabled') + '</label><label class="ab-hint">' + t('admin.settings.aiEnabledHint') + '</label></div>' +
+        '<div class="ab-field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input type="checkbox" id="abAiPublic"> ' + t('admin.settings.aiPublic') + '</label><label class="ab-hint">' + t('admin.settings.aiPublicHint') + '</label></div>' +
+        '<div class="ab-section-title" style="margin-top:16px">' + icon('globe', 15) + ' ' + t('admin.settings.aiConnection') + '</div>' +
+        '<div class="ab-field"><label class="ab-label">' + t('admin.settings.aiBaseUrl') + '</label>' +
+        '<input class="ab-input" id="abAiBaseUrl" placeholder="https://api.example.com/v1" spellcheck="false" autocomplete="off">' +
+        '<label class="ab-hint">' + t('admin.settings.aiBaseUrlHint') + '</label></div>' +
+        '<div class="ab-field"><label class="ab-label">' + t('admin.settings.aiApiKey') + '</label>' +
+        '<input class="ab-input" id="abAiApiKey" type="password" spellcheck="false" autocomplete="new-password">' +
+        '<label class="ab-hint" id="abAiKeyState"></label>' +
+        '<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-top:8px"><input type="checkbox" id="abAiClearKey"> ' + t('admin.settings.aiClearKey') + '</label></div>' +
+        '<div class="ab-field"><label class="ab-label">' + t('admin.settings.aiModel') + '</label>' +
+        '<div class="ab-row" style="gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<input class="ab-input" id="abAiModel" placeholder="deepseek-v4-flash" spellcheck="false" autocomplete="off" style="flex:1;min-width:180px">' +
+        '<button type="button" class="ab-btn" id="abAiFetchModels">' + icon('download', 14) + ' ' + t('admin.settings.aiFetchModels') + '</button>' +
+        '</div>' +
+        '<label class="ab-hint" id="abAiModelCount">' + t('admin.settings.aiModelHint') + '</label>' +
+        /* 模型列表：**不能用 <datalist>** —— 浏览器会按输入框当前值过滤候选，
+         * 自动填入第一个之后点开就只剩它自己，看起来「根本没有列表」。
+         * 这里渲染成显式可点选的列表，点一下就填入输入框。 */
+        '<div class="ab-ai-models" id="abAiModelList" hidden></div>' +
+        '</div>' +
+        '<div class="ab-row" style="gap:10px;margin-top:16px;flex-wrap:wrap;align-items:center">' +
+        '<button type="button" class="ab-btn primary" id="abAiSave">' + icon('save', 15) + ' ' + t('admin.settings.aiSave') + '</button>' +
+        '<button type="button" class="ab-btn" id="abAiTest">' + icon('check', 15) + ' ' + t('admin.settings.aiTest') + '</button>' +
+        '<span class="ab-hint" id="abAiMsg" style="margin-left:auto"></span>' +
+        '</div>' +
+      '</div>';
+      bindAiSettings(content);
+    } else if (tab === 'storage') {
+      body.innerHTML = '<div class="ab-card" style="max-width:760px">' +
+        '<div class="ab-section-title">' + icon('cloud', 15) + ' ' + t('admin.settings.storageTitle') + '</div>' +
+        '<label class="ab-hint" style="display:block;margin-bottom:4px">' + t('admin.settings.storageHint') + '</label>' +
+        '<label class="ab-hint" style="display:block;margin-bottom:12px">' + t('admin.settings.storageIndependent') + '</label>' +
+
+        '<div class="ab-section-title" style="margin-top:4px">' + icon('pin', 15) + ' ' + t('admin.settings.storageWhereTitle') + '</div>' +
+        '<div class="ab-field"><label class="ab-label">' + t('admin.settings.storageUploadDir') + '</label>' +
+        '<input class="ab-input" id="abStUploadDir" readonly spellcheck="false"></div>' +
+        '<div class="ab-field"><label class="ab-label">' + t('admin.settings.storageCounts') + '</label>' +
+        '<label class="ab-hint" id="abStCounts"></label></div>' +
+        '<div class="ab-field"><label class="ab-hint" id="abStState"></label></div>' +
+
+        '<div class="ab-section-title" style="margin-top:16px">' + icon('layers', 15) + ' ' + t('admin.settings.storageMode') + '</div>' +
+        '<div class="ab-field">' +
+        '<label style="display:flex;gap:8px;align-items:flex-start;font-size:14px;cursor:pointer">' +
+        '<input type="radio" name="abStMode" value="local" style="margin-top:3px">' +
+        '<span>' + t('admin.settings.storageModeLocal') + '<br><span class="ab-hint">' + t('admin.settings.storageModeLocalHint') + '</span></span></label>' +
+        '<label style="display:flex;gap:8px;align-items:flex-start;font-size:14px;cursor:pointer;margin-top:10px">' +
+        '<input type="radio" name="abStMode" value="s3" style="margin-top:3px">' +
+        '<span>' + t('admin.settings.storageModeS3') + '<br><span class="ab-hint">' + t('admin.settings.storageModeS3Hint') + '</span></span></label>' +
+        '<label class="ab-hint" style="display:block;margin-top:10px">' + t('admin.settings.storageCoexist') + '</label>' +
+        '</div>' +
+
+        '<div id="abStS3Box">' +
+        '<div class="ab-section-title" style="margin-top:16px">' + icon('cloud', 15) + ' ' + t('admin.settings.storageSectionS3') + '</div>' +
+        '<div class="ab-field"><label class="ab-label">' + t('admin.settings.storageEndpoint') + '</label>' +
+        '<input class="ab-input" id="abStEndpoint" placeholder="https://&lt;account&gt;.r2.cloudflarestorage.com" spellcheck="false" autocomplete="off">' +
+        '<label class="ab-hint">' + t('admin.settings.storageEndpointHint') + '</label></div>' +
+        '<div class="ab-field"><label class="ab-label">' + t('admin.settings.storageRegion') + '</label>' +
+        '<input class="ab-input" id="abStRegion" placeholder="auto" spellcheck="false" autocomplete="off" style="max-width:220px"></div>' +
+        '<div class="ab-field"><label class="ab-label">' + t('admin.settings.storageAccessKey') + '</label>' +
+        '<input class="ab-input" id="abStAccessKey" spellcheck="false" autocomplete="off"></div>' +
+        '<div class="ab-field"><label class="ab-label">' + t('admin.settings.storageSecretKey') + '</label>' +
+        '<input class="ab-input" id="abStSecretKey" type="password" spellcheck="false" autocomplete="new-password">' +
+        '<label class="ab-hint" id="abStSecretState"></label>' +
+        '<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-top:8px">' +
+        '<input type="checkbox" id="abStClearSecret"> ' + t('admin.settings.storageClearSecret') + '</label></div>' +
+        '<div class="ab-field"><label class="ab-label">' + t('admin.settings.storageMediaBucket') + '</label>' +
+        '<input class="ab-input" id="abStMediaBucket" spellcheck="false" autocomplete="off"></div>' +
+        '<div class="ab-field"><label class="ab-label">' + t('admin.settings.storageMediaBase') + '</label>' +
+        '<input class="ab-input" id="abStMediaBase" placeholder="https://img.example.com" spellcheck="false" autocomplete="off"></div>' +
+        '<div class="ab-field"><label class="ab-label">' + t('admin.settings.storageMusicBucket') + '</label>' +
+        '<input class="ab-input" id="abStMusicBucket" spellcheck="false" autocomplete="off">' +
+        '<label class="ab-hint">' + t('admin.settings.storageBucketFallback') + '</label></div>' +
+        '<div class="ab-field"><label class="ab-label">' + t('admin.settings.storageMusicBase') + '</label>' +
+        '<input class="ab-input" id="abStMusicBase" spellcheck="false" autocomplete="off">' +
+        '<label class="ab-hint">' + t('admin.settings.storageBucketFallback') + '</label></div>' +
+        '<div class="ab-field"><label class="ab-label">' + t('admin.settings.storageBackupBucket') + '</label>' +
+        '<input class="ab-input" id="abStBackupBucket" spellcheck="false" autocomplete="off">' +
+        '<label class="ab-hint">' + t('admin.settings.storageBucketFallback') + '</label></div>' +
+        '<label class="ab-hint" style="display:block">' + t('admin.settings.storageBucketsHint') + '</label>' +
+
+        '<div class="ab-section-title" style="margin-top:16px">' + icon('upload', 15) + ' ' + t('admin.settings.storageMigrateTitle') + '</div>' +
+        '<label class="ab-hint" style="display:block;margin-bottom:10px">' + t('admin.settings.storageMigrateHint') + '</label>' +
+        '<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">' +
+        '<input type="checkbox" id="abStDeleteLocal"> ' + t('admin.settings.storageDeleteLocal') + '</label>' +
+        '<label class="ab-hint" style="display:block;margin-bottom:10px">' + t('admin.settings.storageDeleteLocalHint') + '</label>' +
+        '<div class="ab-row" style="gap:10px;flex-wrap:wrap;align-items:center">' +
+        '<button type="button" class="ab-btn" id="abStMigrate">' + icon('upload', 14) + ' ' + t('admin.settings.storageMigrate') + '</button>' +
+        '<span class="ab-hint" id="abStMigrateMsg"></span>' +
+        '</div>' +
+        '</div>' +
+
+        '<div class="ab-row" style="gap:10px;margin-top:16px;flex-wrap:wrap;align-items:center">' +
+        '<button type="button" class="ab-btn primary" id="abStSave">' + icon('save', 15) + ' ' + t('admin.settings.storageSave') + '</button>' +
+        '<button type="button" class="ab-btn" id="abStTest">' + icon('check', 15) + ' ' + t('admin.settings.storageTest') + '</button>' +
+        '<span class="ab-hint" id="abStMsg" style="margin-left:auto"></span>' +
+        '</div>' +
+        '</div>';
+      bindStorageSettings(content);
     }
+    bindSettingsJsonButtons(content);
     fillSettings(content);
   }
+
+  /* ---------- 设置页：存储（媒体 / 音乐） ----------
+   * 与 AI 助手页同一条理由：走独立接口 /api/admin/storage，而不是统一的「保存设置」。
+   *   1. /api/settings 是公开 GET（匿名可读 + 带缓存头），Secret Access Key 绝不能进那里；
+   *   2. 密钥不应混进 settingsDraft，避免被 saveSettings 顺带序列化出去。
+   * 服务端保存后会立刻重建 R2_* / LOCAL_STORAGE 绑定，无需重启即生效。 */
+  function bindStorageSettings(content) {
+    var msg = content.querySelector('#abStMsg');
+    var migrateMsg = content.querySelector('#abStMigrateMsg');
+    var stateEl = content.querySelector('#abStState');
+    var countsEl = content.querySelector('#abStCounts');
+    var dirEl = content.querySelector('#abStUploadDir');
+    var secretState = content.querySelector('#abStSecretState');
+    var s3Box = content.querySelector('#abStS3Box');
+    var saveBtn = content.querySelector('#abStSave');
+    var testBtn = content.querySelector('#abStTest');
+    var migrateBtn = content.querySelector('#abStMigrate');
+    var secretEl = content.querySelector('#abStSecretKey');
+    var clearEl = content.querySelector('#abStClearSecret');
+    var deleteLocalEl = content.querySelector('#abStDeleteLocal');
+    var endpoints = {
+      endpoint: '#abStEndpoint', region: '#abStRegion', accessKeyId: '#abStAccessKey',
+      mediaBucket: '#abStMediaBucket', mediaPublicBase: '#abStMediaBase',
+      musicBucket: '#abStMusicBucket', musicPublicBase: '#abStMusicBase',
+      backupBucket: '#abStBackupBucket'
+    };
+    function el(id) { return content.querySelector(id); }
+    function v(id) { var e = el(id); return e ? String(e.value || '').trim() : ''; }
+    function mode() {
+      var picked = content.querySelector('input[name="abStMode"]:checked');
+      return picked ? picked.value : 'local';
+    }
+    function say(text, kind) {
+      if (!msg) return;
+      msg.textContent = text || '';
+      msg.style.color = kind === 'err' ? 'var(--ab-danger, #d9534f)' : (kind === 'ok' ? 'var(--ab-ok, #4a9d5f)' : '');
+    }
+    function sayMigrate(text, kind) {
+      if (!migrateMsg) return;
+      migrateMsg.textContent = text || '';
+      migrateMsg.style.color = kind === 'err' ? 'var(--ab-danger, #d9534f)' : (kind === 'ok' ? 'var(--ab-ok, #4a9d5f)' : '');
+    }
+    /* 只有选了对象存储才展开 S3 表单：本地模式下这一堆字段纯属噪音 */
+    function syncMode() {
+      if (s3Box) s3Box.style.display = mode() === 's3' ? '' : 'none';
+    }
+
+    function fill(d) {
+      if (!d) return;
+      var picked = content.querySelector('input[name="abStMode"][value="' + (d.mode === 's3' ? 's3' : 'local') + '"]');
+      if (picked) picked.checked = true;
+      Object.keys(endpoints).forEach(function (k) { var e = el(endpoints[k]); if (e) e.value = d[k] || ''; });
+      if (clearEl) clearEl.checked = false;
+      if (secretEl) {
+        secretEl.value = '';
+        secretEl.placeholder = d.hasSecretAccessKey
+          ? t('admin.settings.storageSecretKeep') : t('admin.settings.storageSecretPlaceholder');
+      }
+      if (secretState) {
+        var srcKey = d.source === 'db' ? 'admin.settings.storageSourceDb'
+          : (d.source === 'env' ? 'admin.settings.storageSourceEnv' : 'admin.settings.storageSourceNone');
+        var parts = [d.hasSecretAccessKey ? t('admin.settings.storageSecretConfigured') : t('admin.settings.storageSecretEmpty')];
+        // 有密钥时把打码值也显示出来，方便确认当前生效的是哪一把
+        if (d.hasSecretAccessKey && d.secretAccessKeyMasked) parts.push(d.secretAccessKeyMasked);
+        parts.push(t(srcKey));
+        if (d.envProvided && (d.envProvided.endpoint || d.envProvided.accessKeyId)) parts.push(t('admin.settings.storageEnvProvided'));
+        secretState.textContent = parts.join(' · ');
+      }
+      if (dirEl) dirEl.value = d.uploadDir || '—';
+      var c = d.localCounts || {};
+      if (countsEl) {
+        countsEl.textContent = t('admin.settings.storageCountsValue')
+          .replace('{media}', String(c.media || 0))
+          .replace('{music}', String(c.music || 0))
+          .replace('{og}', String(c.og || 0));
+      }
+      if (stateEl) {
+        if (d.degraded) {
+          stateEl.textContent = '⚠ ' + t('admin.settings.storageDegraded');
+          stateEl.style.color = 'var(--ab-danger, #d9534f)';
+        } else if (d.mode === 's3') {
+          stateEl.textContent = '✓ ' + t('admin.settings.storageReady');
+          stateEl.style.color = 'var(--ab-ok, #4a9d5f)';
+        } else {
+          stateEl.textContent = t('admin.settings.storageModeLocalHint');
+          stateEl.style.color = '';
+        }
+      }
+      syncMode();
+    }
+
+    /** 表单 → 请求体。密钥留空不带，避免把「不修改」误写成空串 */
+    function payload() {
+      var body = { mode: mode() };
+      Object.keys(endpoints).forEach(function (k) { body[k] = v(endpoints[k]); });
+      var s = String((secretEl && secretEl.value) || '').trim();
+      if (s) body.secretAccessKey = s;
+      if (clearEl && clearEl.checked) body.clearSecretAccessKey = true;
+      return body;
+    }
+
+    async function load() {
+      try { fill(await api('api/admin/storage')); }
+      catch (e) { say(t('admin.settings.storageLoadFail') + (e.message || e), 'err'); }
+    }
+
+    async function save() {
+      saveBtn.disabled = true;
+      say(t('admin.settings.storageSaving'));
+      try {
+        var d = await api('api/admin/storage', { method: 'PUT', body: JSON.stringify(payload()) });
+        fill(d);
+        say(t('admin.settings.storageSaved'), 'ok');
+        toast(t('admin.settings.storageSaved'), 'ok');
+      } catch (e) {
+        say(t('admin.settings.storageSaveFail') + (e.message || e), 'err');
+      } finally {
+        saveBtn.disabled = false;
+      }
+    }
+
+    /* 测试走的是表单里的**候选值**（后端用同一份 patch 映射），
+     * 所以可以先填好地址密钥验证通过，再点保存。 */
+    async function test() {
+      testBtn.disabled = true;
+      say(t('admin.settings.storageTesting'));
+      try {
+        var d = await api('api/admin/storage/test', { method: 'POST', body: JSON.stringify(payload()) });
+        if (d && d.ok) {
+          say(t('admin.settings.storageTestOk') + ' · ' + (d.target === 'local' ? t('admin.settings.storageTestLocal') : d.bucket) + ' · ' + d.ms + 'ms', 'ok');
+        } else {
+          say(t('admin.settings.storageTestFail') + ((d && d.error) || ''), 'err');
+        }
+      } catch (e) {
+        say(t('admin.settings.storageTestFail') + (e.message || e), 'err');
+      } finally {
+        testBtn.disabled = false;
+      }
+    }
+
+    async function migrate() {
+      migrateBtn.disabled = true;
+      sayMigrate(t('admin.settings.storageMigrating'));
+      try {
+        var body = { deleteLocal: !!(deleteLocalEl && deleteLocalEl.checked) };
+        var d = await api('api/admin/storage/migrate', { method: 'POST', body: JSON.stringify(body) });
+        var stat = t('admin.settings.storageMigrateStat')
+          .replace('{total}', String((d && d.total) || 0))
+          .replace('{ok}', String((d && d.migrated) || 0))
+          .replace('{fail}', String((d && d.failed) || 0))
+          .replace('{rows}', String((d && d.rewroteRows) || 0));
+        if (d && d.ok) {
+          sayMigrate(t('admin.settings.storageMigrateDone') + ' · ' + stat, 'ok');
+          toast(t('admin.settings.storageMigrateDone'), 'ok');
+        } else {
+          // 单个对象失败不会中断整体，所以「部分失败」也要把统计摆出来
+          sayMigrate((d && d.error ? t('admin.settings.storageMigrateFail') + d.error : t('admin.settings.storageMigrateDone')) + ' · ' + stat, 'err');
+        }
+        await load();   // 迁移会改本地文件数，回读一次刷新「本机已有文件」
+      } catch (e) {
+        sayMigrate(t('admin.settings.storageMigrateFail') + (e.message || e), 'err');
+      } finally {
+        migrateBtn.disabled = false;
+      }
+    }
+
+    content.querySelectorAll('input[name="abStMode"]').forEach(function (r) { r.addEventListener('change', syncMode); });
+    if (saveBtn) saveBtn.addEventListener('click', save);
+    if (testBtn) testBtn.addEventListener('click', test);
+    if (migrateBtn) migrateBtn.addEventListener('click', migrate);
+    // 输入了密钥就自动取消「清除密钥」，避免两个意图打架
+    if (secretEl && clearEl) secretEl.addEventListener('input', function () { if (String(secretEl.value || '').trim()) clearEl.checked = false; });
+    load();
+  }
+  /* ---------- 设置页：AI 助手配置 ----------
+   * 走独立接口 /api/admin/ai，而不是统一的「保存设置」按钮，原因有二：
+   *   1. /api/settings 是公开 GET（匿名可读 + 缓存），API Key 绝不能进那里；
+   *   2. 密钥不应混进 settingsDraft，避免被 saveSettings 顺带序列化出去。
+   * 配置保存后服务端会立刻重建 AI 绑定，无需重启即生效。 */
+  function bindAiSettings(content) {
+    var msg = content.querySelector('#abAiMsg');
+    var keyState = content.querySelector('#abAiKeyState');
+    var modelCount = content.querySelector('#abAiModelCount');
+    var listEl = content.querySelector('#abAiModelList');
+    var baseUrlEl = content.querySelector('#abAiBaseUrl');
+    var apiKeyEl = content.querySelector('#abAiApiKey');
+    var modelEl = content.querySelector('#abAiModel');
+    var enabledEl = content.querySelector('#abAiEnabled');
+    var publicEl = content.querySelector('#abAiPublic');
+    var clearEl = content.querySelector('#abAiClearKey');
+    var saveBtn = content.querySelector('#abAiSave');
+    var fetchBtn = content.querySelector('#abAiFetchModels');
+    var testBtn = content.querySelector('#abAiTest');
+
+    var models = [];   // 已拉取到的模型 id 列表
+
+    function say(text, kind) {
+      if (!msg) return;
+      msg.textContent = text || '';
+      msg.style.color = kind === 'err' ? 'var(--ab-danger, #d9534f)' : (kind === 'ok' ? 'var(--ab-ok, #4a9d5f)' : '');
+    }
+    function typedKey() { return String((apiKeyEl && apiKeyEl.value) || '').trim(); }
+    function typedBase() { return String((baseUrlEl && baseUrlEl.value) || '').trim(); }
+    function typedModel() { return String((modelEl && modelEl.value) || '').trim(); }
+
+    /* 渲染可点选的模型列表；当前填入输入框的那个高亮打勾 */
+    function renderModels() {
+      if (!listEl) return;
+      if (!models.length) { listEl.hidden = true; listEl.innerHTML = ''; return; }
+      var cur = typedModel();
+      var html = models.map(function (id) {
+        var active = id === cur;
+        return '<button type="button" class="ab-ai-model' + (active ? ' active' : '') + '"' +
+          ' data-model="' + esc(id) + '" title="' + esc(id) + '">' +
+          '<span class="ab-ai-model-name">' + esc(id) + '</span>' +
+          (active ? '<span class="ab-ai-model-tick">' + icon('check', 13) + '</span>' : '') +
+          '</button>';
+      }).join('');
+      listEl.innerHTML = html;
+      listEl.hidden = false;
+    }
+
+    function fill(d) {
+      if (!d) return;
+      if (enabledEl) enabledEl.checked = !!d.enabled;
+      if (publicEl) publicEl.checked = d.publicGenerate !== false;
+      if (baseUrlEl) baseUrlEl.value = d.baseUrl || '';
+      if (modelEl) modelEl.value = d.model || '';
+      if (clearEl) clearEl.checked = false;
+      if (apiKeyEl) {
+        apiKeyEl.value = '';
+        apiKeyEl.placeholder = d.hasApiKey ? t('admin.settings.aiKeyKeep') : t('admin.settings.aiKeyPlaceholder');
+      }
+      if (keyState) {
+        var srcKey = d.source === 'db' ? 'admin.settings.aiSourceDb'
+          : (d.source === 'env' ? 'admin.settings.aiSourceEnv' : 'admin.settings.aiSourceNone');
+        var parts = [d.hasApiKey ? t('admin.settings.aiKeyConfigured') : t('admin.settings.aiKeyEmpty')];
+        // 有密钥时把打码值也显示出来，方便确认当前生效的是哪一把
+        if (d.hasApiKey && d.apiKeyMasked) parts.push(d.apiKeyMasked);
+        parts.push(t(srcKey));
+        keyState.textContent = parts.join(' · ');
+      }
+      renderModels();   // 打码/模型回显后同步高亮
+    }
+
+    async function load() {
+      try { fill(await api('api/admin/ai')); }
+      catch (e) { say(t('admin.settings.aiLoadFail') + (e.message || e), 'err'); }
+    }
+
+    async function save() {
+      var payload = {
+        enabled: !!(enabledEl && enabledEl.checked),
+        publicGenerate: !!(publicEl && publicEl.checked),
+        baseUrl: typedBase(),
+        model: typedModel()
+      };
+      var k = typedKey();
+      if (k) payload.apiKey = k;                       // 留空 = 保持原密钥
+      if (clearEl && clearEl.checked) payload.clearApiKey = true;
+
+      saveBtn.disabled = true;
+      say(t('admin.settings.aiSaving'));
+      try {
+        var d = await api('api/admin/ai', { method: 'PUT', body: JSON.stringify(payload) });
+        fill(d);
+        say(t('admin.settings.aiSaved'), 'ok');
+        toast(t('admin.settings.aiSaved'), 'ok');
+      } catch (e) {
+        say(t('admin.settings.aiSaveFail') + (e.message || e), 'err');
+      } finally {
+        saveBtn.disabled = false;
+      }
+    }
+
+    async function fetchModels() {
+      fetchBtn.disabled = true;
+      say(t('admin.settings.aiFetching'));
+      try {
+        var body = { baseUrl: typedBase() };
+        var k = typedKey();
+        if (k) body.apiKey = k;                        // 允许「先填地址→拉取→再保存」
+        var d = await api('api/admin/ai/models', { method: 'POST', body: JSON.stringify(body) });
+        var list = ((d && d.models) || []).map(function (m) { return String((m && m.id) || m || ''); }).filter(Boolean);
+        if (!list.length) { models = []; renderModels(); if (modelCount) modelCount.textContent = t('admin.settings.aiModelHint'); say(t('admin.settings.aiModelEmpty'), 'err'); return; }
+        models = list;
+        if (modelCount) modelCount.textContent = t('admin.settings.aiModelGot') + '：' + list.length + ' · ' + t('admin.settings.aiModelPick');
+        // 当前模型为空时预设第一个（仍可在下方列表里改选）
+        if (modelEl && !typedModel()) modelEl.value = list[0];
+        renderModels();
+        say(t('admin.settings.aiModelGot') + '：' + list.length, 'ok');
+      } catch (e) {
+        say(t('admin.settings.aiFetchFail') + (e.message || e), 'err');
+      } finally {
+        fetchBtn.disabled = false;
+      }
+    }
+
+    async function test() {
+      testBtn.disabled = true;
+      say(t('admin.settings.aiTesting'));
+      try {
+        var body = { baseUrl: typedBase(), model: typedModel() };
+        var k = typedKey();
+        if (k) body.apiKey = k;
+        var d = await api('api/admin/ai/test', { method: 'POST', body: JSON.stringify(body) });
+        if (d && d.ok) {
+          say(t('admin.settings.aiTestOk') + ' ' + d.model + ' · ' + d.ms + 'ms' + (d.reply ? ' · ' + d.reply : ''), 'ok');
+        } else {
+          say(t('admin.settings.aiTestFail') + ((d && d.error) || ''), 'err');
+        }
+      } catch (e) {
+        say(t('admin.settings.aiTestFail') + (e.message || e), 'err');
+      } finally {
+        testBtn.disabled = false;
+      }
+    }
+
+    if (saveBtn) saveBtn.addEventListener('click', save);
+    if (fetchBtn) fetchBtn.addEventListener('click', fetchModels);
+    if (testBtn) testBtn.addEventListener('click', test);
+    // 点列表里的模型 → 填进输入框并高亮
+    if (listEl) listEl.addEventListener('click', function (e) {
+      var btn = e.target && e.target.closest ? e.target.closest('.ab-ai-model') : null;
+      if (!btn) return;
+      if (modelEl) modelEl.value = btn.getAttribute('data-model') || '';
+      renderModels();
+      say('');
+    });
+    // 手动改输入框也要同步高亮（手输的值不在列表里时全部取消高亮）
+    if (modelEl) modelEl.addEventListener('input', renderModels);
+    // 输入了密钥就自动取消「清除密钥」，避免两个意图打架
+    if (apiKeyEl && clearEl) apiKeyEl.addEventListener('input', function () { if (typedKey()) clearEl.checked = false; });
+    load();
+  }
+
   /** 通用链接可视化编辑器：底部导航 / 友情链接共用 */
   function renderLinkVisual(content, key, sel) {
     var wrap = content.querySelector(sel);
@@ -4848,13 +5768,19 @@
     var items = settingsDraft[key];
     if (!Array.isArray(items)) items = [];
     settingsDraft[key] = items;
-    wrap.innerHTML = (items.length ? '<div class="ab-link-list">' + items.map(function (it, i) {
-      return '<div class="ab-link-row">' +
+    var dragIdx = null;
+    function linkRowHTML(it, i) {
+      return '<div class="ab-link-row" data-lidx="' + i + '">' +
+        '<span class="ab-link-drag" draggable="true" data-ldrag="' + i + '">' + icon('grip', 13) + '</span>' +
         '<input class="ab-input ab-link-text" value="' + esc(it.text || '') + '" placeholder="' + t('admin.settings.linkText') + '">' +
         '<input class="ab-input ab-link-url" value="' + esc(it.url || '') + '" placeholder="' + t('admin.settings.linkUrl') + '">' +
         '<button class="ab-btn-icon danger" data-rmlink="' + i + '" title="' + t('admin.comments.delete') + '">' + icon('trash', 14) + '</button>' +
       '</div>';
-    }).join('') + '</div>' : '<div class="ab-hint">' + t('admin.settings.linkEmpty') + '</div>');
+    }
+    wrap.innerHTML = (items.length
+      ? '<div class="ab-nav-tip">' + icon('grip', 13) + ' ' + t('admin.settings.linkDragHint') + '</div>' +
+        '<div class="ab-link-list">' + items.map(linkRowHTML).join('') + '</div>'
+      : '<div class="ab-hint">' + t('admin.settings.linkEmpty') + '</div>');
     wrap.innerHTML += '<div class="ab-nav-actions" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">' +
       '<button class="ab-btn sm" id="abLinkAdd">' + icon('plus', 13) + ' ' + t('admin.settings.linkAdd') + '</button>' +
     '</div>';
@@ -4869,6 +5795,56 @@
       btn.addEventListener('click', function () {
         var idx = parseInt(btn.getAttribute('data-rmlink'), 10);
         settingsDraft[key].splice(idx, 1);
+        persist();
+        renderLinkVisual(content, key, sel);
+      });
+    });
+
+    /* 拖拽排序：与顶部导航同一套手势（⠿ 手柄 + 行内落点线）。
+     * 拖拽前先 collectLinksFromDom 把当前输入框的值收回草稿，避免重排时把刚输入的内容丢掉。 */
+    function clearLineMarks() {
+      wrap.querySelectorAll('.ab-link-row').forEach(function (r) { r.classList.remove('drop-before', 'drop-after'); });
+    }
+    function clearAllMarks() {
+      clearLineMarks();
+      wrap.querySelectorAll('.ab-link-row').forEach(function (r) { r.classList.remove('dragging'); });
+    }
+    wrap.querySelectorAll('[data-ldrag]').forEach(function (handle) {
+      handle.addEventListener('dragstart', function (e) {
+        dragIdx = parseInt(handle.getAttribute('data-ldrag'), 10);
+        var row = handle.closest ? handle.closest('.ab-link-row') : null;
+        if (row) row.classList.add('dragging');
+        try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(dragIdx)); } catch (err) {}
+      });
+      handle.addEventListener('dragend', function () { dragIdx = null; clearAllMarks(); });
+    });
+    wrap.querySelectorAll('.ab-link-row').forEach(function (row) {
+      row.addEventListener('dragover', function (e) {
+        if (dragIdx === null) return;
+        e.preventDefault();
+        try { e.dataTransfer.dropEffect = 'move'; } catch (err) {}
+        clearLineMarks();
+        var r = row.getBoundingClientRect();
+        row.classList.add((e.clientY - r.top) / (r.height || 1) < 0.5 ? 'drop-before' : 'drop-after');
+      });
+      row.addEventListener('dragleave', function () { row.classList.remove('drop-before', 'drop-after'); });
+      row.addEventListener('drop', function (e) {
+        if (dragIdx === null) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var from = dragIdx;
+        var target = parseInt(row.getAttribute('data-lidx'), 10);
+        var after = row.classList.contains('drop-after');
+        dragIdx = null;
+        clearLineMarks();
+        if (from === target) return;
+        collectLinksFromDom(content, key, sel);
+        var arr = settingsDraft[key];
+        if (!Array.isArray(arr) || from >= arr.length) return;
+        var pos = target + (after ? 1 : 0);
+        var moved = arr.splice(from, 1)[0];
+        if (from < pos) pos -= 1;
+        arr.splice(Math.max(0, Math.min(pos, arr.length)), 0, moved);
         persist();
         renderLinkVisual(content, key, sel);
       });
@@ -4892,6 +5868,7 @@
       },
       nav_menu: JSON.stringify(Array.isArray(settingsDraft.nav) ? settingsDraft.nav : []),
       nav_defaults_version: String(NAV_DEFAULTS_VERSION),
+      home_tags: JSON.stringify(Array.isArray(settingsDraft.homeTags) ? settingsDraft.homeTags : []),
       footer_nav: JSON.stringify(Array.isArray(settingsDraft.footerNav) ? settingsDraft.footerNav : []),
       friend_links: JSON.stringify(Array.isArray(settingsDraft.links) ? settingsDraft.links : []),
       moderate_comments: site.moderate ? '1' : '0',
@@ -4912,6 +5889,7 @@
         site_info: JSON.stringify(payload.site_info), profile: JSON.stringify(payload.profile),
         nav_menu: payload.nav_menu, footer_nav: payload.footer_nav, friend_links: payload.friend_links,
         nav_defaults_version: payload.nav_defaults_version,
+        home_tags: payload.home_tags,
         moderate_comments: payload.moderate_comments, features: payload.features
       });
       // 同步到前台全局变量，使站点名称/导航/页脚/友链等设置立即生效（无需刷新整页）
@@ -4925,57 +5903,137 @@
   /* ---------- 可视化导航编辑器 ----------
    * 直接读写内存 settingsDraft.nav 数组，无需 JSON 中转，保存时由 saveSettings 统一取用。
    * 保留 localStorage 临时草稿，刷新/切页不丢失未保存的导航编辑。 */
+  var settingsServerLoaded = false;
+  var navUserEdited = false;
   function navDraftKey() { return 'qingyu.settingsNavDraft'; }
   function loadNavDraft() {
     try { var v = JSON.parse(localStorage.getItem(navDraftKey()) || 'null'); if (Array.isArray(v)) return v; } catch (e) {}
     return null;
   }
+  /* 内置「发现」二级入口（按路径识别，兼容旧数据）：这几个默认出现在「发现」下拉里；「分类」已独立为一级导航，不在此列表。 */
+  var NAV_DISCOVER_PATHS = { '/tags': 1, '/history': 1, '/series': 1, '/popular': 1 };
+  function navKeyOf(u) {
+    var v = String(u == null ? '/' : u).replace(/^#/, '');
+    if (v.charAt(0) !== '/') return v;
+    return v.replace(/\/+$/, '') || '/';
+  }
+  /** 合并导航草稿：以服务端 nav_menu 为底，草稿只覆盖文案/地址/发现开关与新增项；
+   *  二级菜单 children 以服务端为准（服务端没有时才用草稿里的），
+   *  避免一份过期草稿把整个二级菜单抹掉、或草稿新增的自定义项丢失。 */
+  function mergeNavDraft(base, draft) {
+    var b = Array.isArray(base) ? base : [];
+    var d = Array.isArray(draft) ? draft : null;
+    if (!d || !d.length) return b;
+    var out = b.map(function (it) {
+      var hit = null;
+      d.forEach(function (di) { if (!hit && navUrlKey(di) === navUrlKey(it)) hit = di; });
+      var merged = {};
+      Object.keys(it || {}).forEach(function (k) { merged[k] = it[k]; });
+      if (hit) {
+        if (hit.text !== undefined) merged.text = hit.text;
+        if (hit.url !== undefined) merged.url = hit.url;
+        if (hit.discover !== undefined) merged.discover = hit.discover;
+      }
+      var kids = (it && it.children && it.children.length) ? it.children : (hit && hit.children);
+      if (kids && kids.length) merged.children = kids;
+      else delete merged.children;
+      return merged;
+    });
+    d.forEach(function (di) {
+      var k = navUrlKey(di);
+      if (out.some(function (o) { return navUrlKey(o) === k; })) return;
+      var copy = {};
+      Object.keys(di || {}).forEach(function (key) { copy[key] = di[key]; });
+      out.push(copy);
+    });
+    return out;
+  }
+  /** 编辑器当前该显示哪份导航：服务端数据未回来之前不读草稿（否则默认值会被当成用户数据
+   *  写进草稿并永久遮蔽真实导航）；数据回来后以服务端为底合并本地草稿。 */
+  function resolveNavItems() {
+    var saved = settingsServerLoaded ? loadNavDraft() : null;
+    return mergeNavDraft(settingsDraft.nav, saved);
+  }
+  function isDiscoverNav(it) {
+    if (!it) return false;
+    // 与前台保持一致：discover === false 表示用户明确移出「发现」，内置入口也不例外
+    if (it.discover === false) return false;
+    return !!NAV_DISCOVER_PATHS[navKeyOf(it.url)] || !!it.discover;
+  }
+
   function renderNavVisual(content) {
     var wrap = content.querySelector('#abNavVisual');
     if (!wrap) return;
-    var saved = loadNavDraft();
-    var items = saved ? saved : settingsDraft.nav;
+    var items = resolveNavItems();
     if (!Array.isArray(items) || !items.length) items = defaultNavItems();
     settingsDraft.nav = items;
 
-    wrap.innerHTML = (items.length ? '<div class="ab-nav-list">' + items.map(function (it, i) {
-      var children = (it.children || []).map(function (ch, ci) {
-        return '<div class="ab-nav-row child">' +
-          '<span class="ab-nav-ico">└</span>' +
+    var dragSrc = null;
+
+    function persist() { if (!settingsServerLoaded) return; try { localStorage.setItem(navDraftKey(), JSON.stringify(settingsDraft.nav)); } catch (e) {} }
+    function refresh() { persist(); renderNavVisual(content); }
+
+    function childRowsHtml(it, i) {
+      return (it.children || []).map(function (ch, ci) {
+        return '<div class="ab-nav-row child" data-idx="' + i + '" data-cidx="' + ci + '">' +
+          '<span class="ab-nav-drag" draggable="true" data-idx="' + i + '" data-cidx="' + ci + '" title="' + t('admin.settings.navDragHandle') + '">' + icon('grip', 14) + '</span>' +
           '<input class="ab-input ab-nav-text" data-idx="' + i + '" data-cidx="' + ci + '" value="' + esc(ch.text || '') + '" placeholder="' + t('admin.settings.subMenu') + '">' +
           '<input class="ab-input ab-nav-url" data-idx="' + i + '" data-cidx="' + ci + '" value="' + esc(ch.url || '') + '" placeholder="/path">' +
+          '<span class="ab-nav-slot"></span><span class="ab-nav-slot"></span>' +
           '<button class="ab-btn-icon danger" data-rmchild="' + i + '-' + ci + '" title="' + t('admin.comments.delete') + '">' + icon('trash', 14) + '</button>' +
         '</div>';
       }).join('');
-      return '<div class="ab-nav-row">' +
-        '<span class="ab-nav-ico">' + icon('list', 14) + '</span>' +
-        '<input class="ab-input ab-nav-text" data-idx="' + i + '" value="' + esc(it.text || '') + '" placeholder="' + t('admin.settings.newMenu') + '">' +
-        '<input class="ab-input ab-nav-url" data-idx="' + i + '" value="' + esc(it.url || '') + '" placeholder="/path">' +
-        '<button class="ab-btn-icon" data-addchild="' + i + '" title="' + t('admin.settings.subMenu') + '">' + icon('plus', 14) + '</button>' +
-        '<button class="ab-btn-icon danger" data-rmitem="' + i + '" title="' + t('admin.comments.delete') + '">' + icon('trash', 14) + '</button>' +
-      '</div>' + children;
-    }).join('') + '</div>' : '<div class="ab-hint">' + t('admin.settings.navEmpty') + '</div>');
+    }
+
+    wrap.innerHTML = '<div class="ab-nav-tip">' + icon('grip', 13) + ' ' + t('admin.settings.navDragHint') + '</div>' +
+      (items.length ? '<div class="ab-nav-list">' + items.map(function (it, i) {
+        var builtin = !!NAV_DISCOVER_PATHS[navKeyOf(it.url)];
+        var inDiscover = isDiscoverNav(it);
+        // 三态：'1' 明确放入 / '0' 明确移出（含内置入口）/ null 未设置（内置项保持默认在「发现」里）
+        var state = it.discover === true ? '1' : (it.discover === false ? '0' : null);
+        var badge = (builtin && inDiscover) ? '<span class="ab-nav-badge">' + t('admin.settings.navDiscoverBadge') + '</span>' : '';
+        var toggle = badge + '<button class="ab-btn-icon' + (inDiscover ? ' is-on' : '') + '" data-toggle-discover="' + i + '"'
+          + ' title="' + t(inDiscover ? 'admin.settings.navDiscoverRemove' : 'admin.settings.navDiscoverToggle') + '">' + icon('layers', 14) + '</button>';
+        return '<div class="ab-nav-group"><div class="ab-nav-row' + (inDiscover ? ' is-discover' : '') + '" data-idx="' + i + '"'
+          + (state === null ? '' : ' data-discover="' + state + '"') + '>' +
+          '<span class="ab-nav-drag" draggable="true" data-idx="' + i + '" title="' + t('admin.settings.navDragHandle') + '">' + icon('grip', 14) + '</span>' +
+          '<input class="ab-input ab-nav-text" data-idx="' + i + '" value="' + esc(it.text || '') + '" placeholder="' + t('admin.settings.newMenu') + '">' +
+          '<input class="ab-input ab-nav-url" data-idx="' + i + '" value="' + esc(it.url || '') + '" placeholder="/path">' +
+          '<span class="ab-nav-discover">' + toggle + '</span>' +
+          '<button class="ab-btn-icon" data-addchild="' + i + '" title="' + t('admin.settings.subMenu') + '">' + icon('plus', 14) + '</button>' +
+          '<button class="ab-btn-icon danger" data-rmitem="' + i + '" title="' + t('admin.comments.delete') + '">' + icon('trash', 14) + '</button>' +
+        '</div>' + childRowsHtml(it, i) + '</div>';
+      }).join('') + '</div>' : '<div class="ab-hint">' + t('admin.settings.navEmpty') + '</div>');
 
     wrap.innerHTML += '<div class="ab-nav-actions" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">' +
       '<button class="ab-btn sm" id="abNavAddItem">' + icon('plus', 13) + ' ' + t('admin.settings.addMenuItem') + '</button>' +
       '<button class="ab-btn sm ghost" id="abNavReset">' + icon('refresh', 13) + ' ' + t('admin.settings.resetDefault') + '</button>' +
     '</div>';
 
-    function persist() { try { localStorage.setItem(navDraftKey(), JSON.stringify(settingsDraft.nav)); } catch (e) {} }
-
-    wrap.querySelectorAll('input').forEach(function (inp) { inp.addEventListener('input', debounce(function () { collectNavFromDom(content); }, 250)); });
+    wrap.querySelectorAll('input').forEach(function (inp) {
+      inp.addEventListener('input', debounce(function () { collectNavFromDom(content); }, 250));
+    });
 
     wrap.querySelector('#abNavAddItem').addEventListener('click', function () {
       settingsDraft.nav.push({ text: t('admin.settings.newMenu'), url: '/' });
-      persist();
-      renderNavVisual(content);
+      refresh();
     });
 
     var resetBtn = wrap.querySelector('#abNavReset');
     if (resetBtn) resetBtn.addEventListener('click', function () {
       settingsDraft.nav = defaultNavItems();
-      persist();
-      renderNavVisual(content);
+      refresh();
+    });
+
+    wrap.querySelectorAll('[data-toggle-discover]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var idx = parseInt(btn.getAttribute('data-toggle-discover'), 10);
+        var it = settingsDraft.nav[idx];
+        if (!it) return;
+        // 再次点击即取消：内置入口（标签/历史/系列/热门）也能移出「发现」，回到一级导航
+        it.discover = isDiscoverNav(it) ? false : true;
+        refresh();
+      });
     });
 
     wrap.querySelectorAll('[data-addchild]').forEach(function (btn) {
@@ -4984,8 +6042,7 @@
         if (!settingsDraft.nav[idx]) return;
         if (!settingsDraft.nav[idx].children) settingsDraft.nav[idx].children = [];
         settingsDraft.nav[idx].children.push({ text: t('admin.settings.subMenu'), url: '/' });
-        persist();
-        renderNavVisual(content);
+        refresh();
       });
     });
 
@@ -4993,8 +6050,7 @@
       btn.addEventListener('click', function () {
         var idx = parseInt(btn.getAttribute('data-rmitem'), 10);
         settingsDraft.nav.splice(idx, 1);
-        persist();
-        renderNavVisual(content);
+        refresh();
       });
     });
 
@@ -5003,13 +6059,126 @@
         var parts = btn.getAttribute('data-rmchild').split('-');
         var idx = parseInt(parts[0], 10), cidx = parseInt(parts[1], 10);
         if (settingsDraft.nav[idx] && settingsDraft.nav[idx].children) settingsDraft.nav[idx].children.splice(cidx, 1);
-        persist();
-        renderNavVisual(content);
+        refresh();
+      });
+    });
+
+    /* ---------- 拖拽排序：一级项之间、一级与二级之间、二级之间都可拖动 ---------- */
+    function clearMarks() {
+      wrap.querySelectorAll('.ab-nav-row, .ab-nav-group').forEach(function (r) {
+        r.classList.remove('drop-before', 'drop-after', 'drop-into');
+      });
+    }
+    function applyDrop(src, row) {
+      if (!src || !row) return false;
+      var isChild = row.classList.contains('child');
+      // 父级行的落点标记画在整个分组（父级+子级）上，所以读标记要看分组
+      var mark = (!isChild && row.parentNode && row.parentNode.classList.contains('ab-nav-group')) ? row.parentNode : row;
+      if (src.kind === 'item' && isChild && parseInt(row.getAttribute('data-idx'), 10) === src.idx) return false; // 不能拖成自己的子级
+      var ridx = parseInt(row.getAttribute('data-idx'), 10);
+      if (src.kind === 'child') {
+        var parent = settingsDraft.nav[src.idx];
+        if (!parent || !parent.children || !parent.children[src.cidx]) return false;
+        var moving = parent.children.splice(src.cidx, 1)[0];
+        if (isChild && ridx === src.idx) {
+          var kids = settingsDraft.nav[src.idx].children;
+          var tc = parseInt(row.getAttribute('data-cidx'), 10);
+          var pos = tc + (mark.classList.contains('drop-after') ? 1 : 0);
+          if (mark.classList.contains('drop-into')) pos = kids.length;
+          kids.splice(Math.max(0, Math.min(pos, kids.length)), 0, moving);
+        } else if (isChild) {
+          var target = settingsDraft.nav[ridx];
+          if (!target) { parent.children.splice(src.cidx, 0, moving); return false; }
+          if (!target.children) target.children = [];
+          target.children.push(moving);
+        } else {
+          // 拖回一级：插到该行前面
+          var arr = settingsDraft.nav;
+          var pos2 = ridx + (mark.classList.contains('drop-after') ? 1 : 0);
+          if (pos2 > arr.length) pos2 = arr.length;
+          arr.splice(pos2, 0, moving);
+        }
+        return true;
+      }
+      var list = settingsDraft.nav;
+      if (!list[src.idx]) return false;
+      var item = list.splice(src.idx, 1)[0];
+      if (isChild) {
+        var host = settingsDraft.nav[ridx];
+        if (!host) { list.splice(Math.min(src.idx, list.length), 0, item); return false; }
+        if (!host.children) host.children = [];
+        var cpos = host.children.length;
+        if (mark.classList.contains('drop-after')) {
+          cpos = parseInt(row.getAttribute('data-cidx'), 10) + 1;
+        }
+        if (cpos > host.children.length) cpos = host.children.length;
+        host.children.splice(cpos, 0, item);
+      } else {
+        var pos = ridx + (mark.classList.contains('drop-after') ? 1 : 0);
+        if (pos > list.length) pos = list.length;
+        list.splice(pos, 0, item);
+      }
+      return true;
+    }
+
+    wrap.querySelectorAll('.ab-nav-drag').forEach(function (h) {
+      h.addEventListener('dragstart', function (e) {
+        var idx = parseInt(h.getAttribute('data-idx'), 10);
+        var cidx = h.getAttribute('data-cidx');
+        dragSrc = cidx === null ? { kind: 'item', idx: idx } : { kind: 'child', idx: idx, cidx: parseInt(cidx, 10) };
+        var row = h.closest ? h.closest('.ab-nav-row') : null;
+        if (row) row.classList.add('dragging');
+        // 父级：整组（父级 + 二级子级）一起高亮，让「成组拖拽」看得见
+        if (dragSrc.kind === 'item') {
+          var grp = h.closest ? h.closest('.ab-nav-group') : null;
+          if (grp) grp.classList.add('dragging');
+        }
+        try {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', String(idx));
+        } catch (err) {}
+      });
+      h.addEventListener('dragend', function () {
+        dragSrc = null;
+        clearMarks();
+        wrap.querySelectorAll('.ab-nav-row').forEach(function (r) { r.classList.remove('dragging'); });
+        wrap.querySelectorAll('.ab-nav-group').forEach(function (g) { g.classList.remove('dragging'); });
+      });
+    });
+
+    wrap.querySelectorAll('.ab-nav-row').forEach(function (row) {
+      row.addEventListener('dragover', function (e) {
+        if (!dragSrc) return;
+        e.preventDefault();
+        try { e.dataTransfer.dropEffect = 'move'; } catch (err) {}
+        clearMarks();
+        var r = row.getBoundingClientRect();
+        var ratio = (e.clientY - r.top) / (r.height || 1);
+        if (row.classList.contains('child')) {
+          // 子项行：靠上/靠中拖进该子项的父级，靠下插到它后面
+          if (ratio < 0.34) { row.classList.add('drop-into'); row.classList.remove('drop-after'); }
+          else { row.classList.add('drop-after'); row.classList.remove('drop-into'); }
+        } else {
+          // 父级：落点标记画在整个分组上（父级 + 所有子级一起移动）
+          var grp2 = row.parentNode && row.parentNode.classList.contains('ab-nav-group') ? row.parentNode : row;
+          grp2.classList.add(ratio < 0.5 ? 'drop-before' : 'drop-after');
+        }
+      });
+      row.addEventListener('dragleave', function () {
+        row.classList.remove('drop-before', 'drop-after', 'drop-into');
+        var gl = row.parentNode;
+        if (gl && gl.classList && gl.classList.contains('ab-nav-group')) gl.classList.remove('drop-before', 'drop-after');
+      });
+      row.addEventListener('drop', function (e) {
+        if (!dragSrc) return;
+        e.preventDefault();
+        e.stopPropagation();
+        clearMarks();
+        if (applyDrop(dragSrc, row)) { dragSrc = null; refresh(); }
+        else { dragSrc = null; }
       });
     });
   }
-
-
   /* ====================== 修改密码 ====================== */
   function openPasswordModal(onSuccess) {
     var mask = document.createElement('div');
@@ -5053,6 +6222,8 @@
     },
     _offline: { read: readOfflineQueue, queue: queueOfflinePost, flush: flushOfflineQueue, isNetworkFailure: isNetworkFailure },
     _list: { paginatePosts: paginatePosts },
+    _settingsTab: { key: settingsTabKey, read: readSettingsTab, remember: rememberSettingsTab, page: pageSettings },
+    _navDraft: { key: navDraftKey, load: loadNavDraft, merge: mergeNavDraft, resolve: resolveNavItems, setServerLoaded: function (v) { settingsServerLoaded = !!v; }, setDraft: function (items) { settingsDraft.nav = items; }, state: function () { return { serverLoaded: settingsServerLoaded, edited: navUserEdited }; } },
     _staticExport: { rebase: staticRebase, page: staticPageFromTemplate, postDir: staticPostDir },
     _editor: {
       draft: { key: editorDraftKey, read: readEditorDraft, write: writeEditorDraft, clear: clearEditorDraft },

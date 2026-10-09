@@ -55,9 +55,24 @@ const EnvSchema = z.object({
   DATA_DIR: z.string().trim().default('./data'),
   DATABASE_URL: z.string().trim().default(''),
   ADMIN_DIST_DIR: z.string().trim().default(''),
-  TRUST_PROXY: booleanish(true),
+  /* 新版 Vue 后台：默认关闭。
+   * /admin 默认交给上游原生后台（app/public/admin.js，保持上游 UI/布局/样式）；
+   * 置 1 才会在 /admin 上重新挂载 Vue SPA（用于对照排障，会遮住上游后台）。 */
+  ADMIN_SPA: booleanish(false),
+  /* 是否信任 X-Forwarded-For / X-Real-IP 里的客户端 IP。
+   * 默认**不信任**（2026-10-09 改为安全默认）：上游 Cloudflare 版明确不读 XFF
+   * （该头客户端可控，可绕过登录失败锁定、评论频控、点赞去重、webmention 限流），
+   * 自托管层若默认信任，任何「无反代直暴露」的部署都等于把 IP 级防护交给了客户端。
+   * 有反代（Caddy / Nginx）时才显式设 TRUST_PROXY=1。 */
+  TRUST_PROXY: booleanish(false),
   GEOIP_HEADER: z.string().trim().default('CF-IPCountry'),
   LOG_LEVEL: z.string().trim().default(''),
+
+  /* 后台操作日志（audit_log）保留策略：留空用内置默认（5000 条 / 90 天）。
+   * 裁剪逻辑在上游 app/functions/_lib/api-core.js 的 trimAuditLog()。
+   * AUDIT_MAX_ROWS 低于 100 会被忽略（防止误配置成 0 把审计全删了）。 */
+  AUDIT_MAX_ROWS: z.string().trim().default(''),
+  AUDIT_RETENTION_DAYS: z.string().trim().default(''),
 
   /* 管理员 */
   BLOG_ADMIN_SETUP_KEY: z.string().trim().default(''),
@@ -140,8 +155,10 @@ export interface AppConfig {
   readonly siteUrl: string;
   readonly siteDomain: string;
   readonly dataDir: string;
-  /** 新版后台的构建产物目录（不存在时自动回落到旧版后台）。 */
+  /** Vue 新版后台的构建产物目录（仅在 adminSpa 打开时使用）。 */
   readonly adminDistDir: string;
+  /** 是否在 /admin 上挂载 Vue 新版后台；默认 false —— /admin 用上游原生后台。 */
+  readonly adminSpa: boolean;
   readonly dbPath: string;
   readonly databaseUrl: string;
   readonly databaseDialect: 'sqlite' | 'postgres';
@@ -166,6 +183,8 @@ export interface AppConfig {
   readonly ai: { baseUrl: string; apiKey: string; model: string };
   readonly admin: { setupKey: string; writeToken: string; email: string };
   readonly flags: { aiEnabled: string; aiPublic: string };
+  /** 后台操作日志保留策略（空串 = 用上游内置默认）。 */
+  readonly audit: { maxRows: string; retentionDays: string };
   readonly extra: { commentBlocklist: string };
 }
 
@@ -241,6 +260,7 @@ export function loadConfig(): AppConfig {
     siteDomain: env.SITE_DOMAIN,
     dataDir,
     adminDistDir: path.resolve(ROOT, env.ADMIN_DIST_DIR || path.join('admin', 'dist')),
+    adminSpa: env.ADMIN_SPA,
     dbPath: path.join(dataDir, 'qingyu.db'),
     databaseUrl: env.DATABASE_URL,
     databaseDialect: env.DATABASE_URL ? 'postgres' : 'sqlite',
@@ -274,6 +294,7 @@ export function loadConfig(): AppConfig {
       email: env.BLOG_ADMIN_EMAIL
     },
     flags: { aiEnabled: env.BLOG_AI_ENABLED, aiPublic: env.BLOG_AI_PUBLIC },
+    audit: { maxRows: env.AUDIT_MAX_ROWS, retentionDays: env.AUDIT_RETENTION_DAYS },
     extra: { commentBlocklist: env.COMMENT_BLOCKLIST }
   });
 }

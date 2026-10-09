@@ -155,6 +155,19 @@ class RedisKVNamespace implements KVNamespaceLike {
   async delete(key: string): Promise<void> {
     await this.#client.del(String(key));
   }
+
+  /** 与 SQLite 版行为一致：返回匹配前缀的键名（升序）。
+   *  用 SCAN 分批而不是 KEYS —— KEYS 在大库上会阻塞整个 Redis 实例。 */
+  async list(prefix = ''): Promise<string[]> {
+    const out: string[] = [];
+    let cursor = '0';
+    do {
+      const [next, keys] = await this.#client.scan(cursor, 'MATCH', `${prefix}*`, 'COUNT', 500);
+      cursor = next;
+      out.push(...keys);
+    } while (cursor !== '0');
+    return out.sort();
+  }
 }
 
 export function createKV(db: AppDatabase, redisUrl = ''): KVNamespaceLike {
@@ -162,7 +175,19 @@ export function createKV(db: AppDatabase, redisUrl = ''): KVNamespaceLike {
   if (!redisUrl) return local;
   const redis = new RedisKVNamespace(redisUrl);
 
+  /* 合成实现必须覆盖 KVNamespaceLike 的全部方法：此前只转发了 get/put/delete，
+   * 漏了 list() —— 上游一旦调用 env.BLOG.list() 就会 TypeError。 */
   return {
+    async list(prefix) {
+      if (redis.isAvailable()) {
+        try {
+          return await redis.list(prefix ?? '');
+        } catch {
+          redis.markDead();
+        }
+      }
+      return local.list(prefix ?? '');
+    },
     async get(key, options) {
       if (redis.isAvailable()) {
         try {

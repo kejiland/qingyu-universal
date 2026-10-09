@@ -7,12 +7,18 @@
     <meta name="color-scheme" content="light dark" />
     <title>管理后台 · 轻语博客</title>
     <script>
-      // 尽早应用主题，避免深色模式首屏闪白
+      // 尽早应用明暗与主题色，避免首屏闪白 / 闪一下默认色
       (function () {
         try {
           var saved = localStorage.getItem('qingyu.admin.theme');
           var dark = saved === 'dark' || (saved !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
           document.documentElement.classList.toggle('dark', dark);
+        } catch (e) {}
+        // 主题色与前台博客共用 localStorage["qingyu.accent"]
+        try {
+          var accents = ['terra', 'indigo', 'bamboo', 'dusk'];
+          var accent = localStorage.getItem('qingyu.accent');
+          document.documentElement.setAttribute('data-accent', accents.indexOf(accent) >= 0 ? accent : 'terra');
         } catch (e) {}
       })();
     </script>

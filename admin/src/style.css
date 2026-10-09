@@ -12,7 +12,7 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --canvas: #faf8f5;
+  --canvas: #f7f4ee;
   --surface: #ffffff;
   --surface-2: #f4f0ea;
   --surface-3: #ece6dd;
@@ -23,15 +23,15 @@
   --ink-soft: #57534e;
   --ink-muted: #746b63;
 
-  --accent: #b15635;
-  --accent-hover: #9a4a2c;
+  --accent: #a85030;
+  --accent-hover: #96472a;
   --accent-ring: rgba(194, 94, 58, 0.32);
   --accent-fg: #ffffff; /* 主色实心底上的文字色 */
   --accent-soft: #fdf4ee;
 
   --success: #2d7e56;
   --success-soft: #eef8f2;
-  --warning: #9b671a;
+  --warning: #96621a;
   --warning-soft: #fdf8eb;
   --danger: #c53030;
   --danger-soft: #fdecec;
@@ -69,7 +69,7 @@
   --danger: #fc8181;
   --danger-soft: #2b1818;
   --info: #7cb3f0;
-  --info-soft: #16223200;
+  --info-soft: #162232;
 
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.38);
@@ -77,8 +77,63 @@
   --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5);
 }
 
-.dark {
-  --info-soft: #162232;
+/* ============================================================
+ * 主题色板（与前台博客的 qingyu.accent 共用同一份 localStorage）
+ * ------------------------------------------------------------
+ * 前台 app.js 把主题色写进 localStorage["qingyu.accent"]，前台与后台同源，
+ * 因此后台直接读同一个键并把 data-accent 打到 <html> 上：在博客里换了主题色，
+ * 后台的按钮、图表、选中态会跟着一起变。每套配色的取值都经过
+ * scripts/check-contrast.mjs 校验（正文 ≥ 4.5:1）。
+ * ============================================================ */
+[data-accent="terra"] {
+  --accent: #ac5334;
+  --accent-hover: #97492e;
+  --accent-soft: #f7eeeb;
+  --accent-ring: rgba(172, 83, 52, 0.28);
+}
+[data-accent="indigo"] {
+  --accent: #2a71ad;
+  --accent-hover: #256398;
+  --accent-soft: #eaf1f7;
+  --accent-ring: rgba(42, 113, 173, 0.28);
+}
+[data-accent="bamboo"] {
+  --accent: #497568;
+  --accent-hover: #40675c;
+  --accent-soft: #edf1f0;
+  --accent-ring: rgba(73, 117, 104, 0.28);
+}
+[data-accent="dusk"] {
+  --accent: #8b2671;
+  --accent-hover: #7a2163;
+  --accent-soft: #f3e9f1;
+  --accent-ring: rgba(139, 38, 113, 0.28);
+}
+
+/* 深色主题下主色更亮，主色实底上的文字改用深墨保证可读 */
+.dark[data-accent="terra"] {
+  --accent: #e08a63;
+  --accent-hover: #e49876;
+  --accent-soft: #30241f;
+  --accent-ring: rgba(224, 138, 99, 0.32);
+}
+.dark[data-accent="indigo"] {
+  --accent: #619ac3;
+  --accent-hover: #74a6ca;
+  --accent-soft: #232a31;
+  --accent-ring: rgba(97, 154, 195, 0.32);
+}
+.dark[data-accent="bamboo"] {
+  --accent: #1ba784;
+  --accent-hover: #36b293;
+  --accent-soft: #1c2722;
+  --accent-ring: rgba(27, 167, 132, 0.32);
+}
+.dark[data-accent="dusk"] {
+  --accent: #bd7dab;
+  --accent-hover: #c78db5;
+  --accent-soft: #2a2130;
+  --accent-ring: rgba(182, 118, 164, 0.32);
 }
 
 @theme inline {
@@ -96,6 +151,7 @@
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
   --color-accent-soft: var(--accent-soft);
+  --color-accent-fg: var(--accent-fg);
 
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
@@ -115,7 +171,7 @@
     "Hiragino Sans GB", "Microsoft YaHei", "Source Han Sans SC", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
 
-  --radius-card: 14px;
+  --radius-card: 16px;
 }
 
 @layer base {
@@ -426,5 +482,233 @@
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+}
+/* 侧边栏导航滚动条 */
+.admin-side-nav {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--accent) 55%, transparent) transparent;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 8px, #000 calc(100% - 10px), transparent 100%);
+}
+.admin-side-nav::-webkit-scrollbar { width: 6px; }
+.admin-side-nav::-webkit-scrollbar-track { background: transparent; }
+.admin-side-nav::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ink-muted) 35%, transparent);
+  border-radius: 99px; border: 2px solid transparent; background-clip: content-box;
+}
+.admin-side-nav::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--accent) 65%, transparent); background-clip: content-box;
+}
+
+/* ============================================================
+ * 上游旧版视觉对齐层 (v0.9-z3)
+ * ------------------------------------------------------------
+ * 目标：让 Vue 版后台的观感与 app/public/admin.css（旧版）一致，
+ * 消除「同一个站点两个后台」的割裂感。对齐的四件事：
+ *   1. 深色渐变侧栏 + 白字导航（旧版 --ab-sider-bg 系列）
+ *   2. 玻璃拟态卡片（半透明 + 细渐变描边 + 柔和阴影）
+ *   3. 内容区暖色底 + 两处主色光晕（旧版 --ab-bg 的 radial-gradient）
+ *   4. 16px 主圆角 + 更深一档的暖色阴影
+ * 所有取值直接抄自旧版 CSS 变量，保证两套后台同源。
+ * ============================================================ */
+
+:root {
+  /* 旧版 --ab-* 令牌，命名保持一致方便对照 */
+  --sider-w: 252px;
+  --sider-w-collapsed: 72px;
+  --header-h: 62px;
+  --radius-sm: 10px;
+  --radius-xs: 8px;
+
+  --sider-bg: linear-gradient(180deg, #23201a 0%, #191612 100%);
+  --sider-text: #e8e2d8;
+  --sider-muted: #8d8375;
+  --sider-hover: rgba(255, 255, 255, 0.06);
+  --sider-active: linear-gradient(90deg,
+    color-mix(in srgb, var(--accent) 28%, transparent), rgba(255, 255, 255, 0.04));
+
+  --glass-border: linear-gradient(160deg,
+    rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.25) 32%,
+    rgba(255, 255, 255, 0.1) 68%, rgba(255, 255, 255, 0.35));
+
+  --shadow-sm: 0 1px 2px rgba(40, 30, 20, 0.06);
+  --shadow-md: 0 2px 6px rgba(40, 30, 20, 0.06), 0 14px 34px rgba(40, 30, 20, 0.1);
+  --shadow-lg: 0 8px 20px rgba(40, 30, 20, 0.1), 0 30px 70px rgba(40, 30, 20, 0.2);
+
+  --shadow-card: 0 2px 6px rgba(40, 30, 20, 0.05), 0 14px 34px rgba(40, 30, 20, 0.08);
+  --ring-accent: 0 0 0 3px color-mix(in srgb, var(--accent) 26%, transparent);
+
+  --font-serif: "Source Han Serif SC", "Noto Serif SC", "Songti SC", "SimSun", serif;
+}
+
+.dark {
+  --sider-bg: linear-gradient(180deg, #1e1b17 0%, #15120f 100%);
+  --sider-text: #ded6ca;
+  --sider-muted: #84796c;
+  --sider-hover: rgba(255, 255, 255, 0.05);
+  --sider-active: linear-gradient(90deg,
+    color-mix(in srgb, var(--accent) 30%, transparent), rgba(255, 255, 255, 0.03));
+
+  --glass-border: linear-gradient(160deg,
+    rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.05) 40%,
+    rgba(255, 255, 255, 0.02) 65%, rgba(255, 255, 255, 0.08));
+
+  --shadow-card: 0 2px 6px rgba(0, 0, 0, 0.34), 0 14px 34px rgba(0, 0, 0, 0.44);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.35), 0 14px 34px rgba(0, 0, 0, 0.45);
+}
+
+/* ---------- 内容区：暖色底 + 主色光晕 ---------- */
+body {
+  background:
+    radial-gradient(1100px 520px at 88% -12%,
+      color-mix(in srgb, var(--accent) 9%, transparent), transparent 60%),
+    radial-gradient(900px 480px at -8% 108%,
+      color-mix(in srgb, var(--accent) 6%, transparent), transparent 55%),
+    var(--canvas);
+  background-attachment: fixed;
+}
+
+/* ---------- 侧边栏：深色渐变 ---------- */
+.adm-sider {
+  width: var(--sider-w);
+  flex: 0 0 var(--sider-w);
+  background: var(--sider-bg);
+  color: var(--sider-text);
+  border-right: 1px solid rgba(0, 0, 0, 0.25);
+  box-shadow: 8px 0 30px rgba(20, 12, 4, 0.08);
+}
+
+.adm-sider-head {
+  height: var(--header-h);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.adm-logo {
+  border-radius: 10px;
+  background: linear-gradient(135deg,
+    var(--accent), color-mix(in srgb, var(--accent) 55%, #b14e2c), var(--accent));
+  background-size: 220% 220%;
+  animation: admLogoFlow 5s ease-in-out infinite;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+@keyframes admLogoFlow {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.adm-brand-name { color: var(--sider-text); font-weight: 700; font-size: 14.5px; }
+.adm-brand-sub { color: var(--sider-muted); font-size: 11px; }
+
+.adm-group-title {
+  color: var(--sider-muted);
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.09em; text-transform: uppercase;
+}
+
+.adm-nav-item {
+  color: color-mix(in srgb, var(--sider-text) 78%, transparent);
+  border-radius: var(--radius-sm);
+  transition: background-color .16s ease, color .16s ease;
+}
+.adm-nav-item:hover { background: var(--sider-hover); color: var(--sider-text); }
+.adm-nav-item.is-active {
+  background: var(--sider-active);
+  color: #fff;
+  font-weight: 600;
+}
+.adm-nav-item svg { opacity: .82; }
+.adm-nav-item.is-active svg { opacity: 1; }
+
+.adm-nav-badge {
+  background: var(--danger);
+  color: #fff;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #000 30%, transparent);
+}
+
+.adm-sider-foot {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.adm-foot-item {
+  color: color-mix(in srgb, var(--sider-text) 72%, transparent);
+  border-radius: var(--radius-sm);
+  transition: background-color .16s ease, color .16s ease;
+}
+.adm-foot-item:hover { background: var(--sider-hover); color: var(--sider-text); }
+.adm-foot-item svg { opacity: .7; }
+.adm-foot-item:hover svg { opacity: 1; }
+
+.adm-sider-close { color: var(--sider-text); }
+.adm-sider-close:hover { background: var(--sider-hover); }
+
+/* ---------- 顶栏：玻璃拟态 ---------- */
+.adm-topbar {
+  height: var(--header-h);
+  background: color-mix(in srgb, var(--canvas) 72%, transparent);
+  backdrop-filter: saturate(180%) blur(14px);
+  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+/* ---------- 卡片：玻璃拟态 ---------- */
+.card,
+.adm-glass {
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  backdrop-filter: saturate(180%) blur(12px);
+  -webkit-backdrop-filter: saturate(180%) blur(12px);
+  border: 1px solid transparent;
+  background-clip: padding-box, border-box;
+  box-shadow: var(--shadow-card);
+  border-radius: var(--radius-card, 16px);
+  position: relative;
+}
+/* 渐变描边：用 mask 叠一层玻璃边，比 1px 纯色更有质感 */
+.card::before,
+.adm-glass::before {
+  content: "";
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--glass-border);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+.card:hover { box-shadow: var(--shadow-md); }
+
+/* ---------- 页面标题：品牌衬线，与前台同源 ---------- */
+.adm-page-title {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* ---------- 交互态统一 ---------- */
+.input:focus, .textarea:focus { box-shadow: var(--ring-accent); border-color: transparent; }
+.btn-primary { box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 38%, transparent); }
+.btn-primary:hover:not(:disabled) { box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 46%, transparent); }
+
+/* 侧栏高度策略
+   · 移动端（<1024）：fixed 抽屉，占满视口高度，transform 控制滑入滑出
+   · 桌面端（>=1024）：sticky + 100dvh，让内部 nav 真正可滚动。
+     之前用 fixed + lg:static，static 之后高度由内容决定（实测 scrollHeight
+     1015px > 视口 560px），侧栏会整体溢出视口而不是内部滚动。 */
+@media (max-width: 1023px) {
+  .adm-sider {
+    position: fixed;
+    inset: 0 auto 0 0;
+    height: 100vh;
+    height: 100dvh;
+    box-shadow: 8px 0 30px rgba(20, 12, 4, 0.28);
+  }
+}
+@media (min-width: 1024px) {
+  .adm-sider {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    height: 100dvh;
   }
 }

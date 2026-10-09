@@ -31,11 +31,13 @@ import {
   createPublicObjectHandler
 } from './routes/local-storage.js';
 import { registerApiRoutes, type ResponseValidation } from './api/registry.js';
+import { adminAiRoutes } from './api/routes/admin-ai.js';
+import { adminStorageRoutes } from './api/routes/admin-storage.js';
 import { adminRoutes } from './api/routes/admin.js';
 import { postRoutes } from './api/routes/posts.js';
 import { miscRoutes } from './api/routes/misc.js';
 import { createApiDocument } from './api/document.js';
-import { withEdgeHeaders } from './edge.js';
+import { resolveClientIp, withEdgeHeaders } from './edge.js';
 
 export interface AppDeps {
   config: AppConfig;
@@ -94,11 +96,14 @@ export function createApp(deps: AppDeps): Hono {
     {
       worker: deps.worker,
       env: deps.env,
+      db: deps.db,
+      appDir: config.appDir,
+      clientIp: (c) => resolveClientIp(c, config),
       withEdgeHeaders: (c) => withEdgeHeaders(c, config),
       validateResponses: deps.validateResponses ?? 'warn',
       logger
     },
-    [...postRoutes, ...adminRoutes, ...miscRoutes]
+    [...postRoutes, ...adminAiRoutes, ...adminStorageRoutes, ...adminRoutes, ...miscRoutes]
   );
 
   /* ---------- OpenAPI 文档 ---------- */
@@ -107,7 +112,10 @@ export function createApp(deps: AppDeps): Hono {
   /* ---------- 静态站导出（本地实现，不进契约） ---------- */
   app.get('/api/admin/export-static', createStaticExportHandler({ config, db: deps.db }));
 
-  /* ---------- 本地存储（仅在未配置对象存储时挂载） ---------- */
+  /* ---------- 本地磁盘对象（常驻挂载） ----------
+   * 以前只在本地模式挂载，导致切到对象存储后，库里相对地址的老文件全部 404。
+   * 现在始终挂载：新上传往哪走由 env.LOCAL_STORAGE 决定，而**读取**永远可以回本地磁盘取。
+   * 写入端点（/api/local-upload）需要 HMAC 签名，只有本地模式才会签发，因此常驻无安全隐患。 */
   if (deps.storage) {
     const upload = createLocalUploadHandler(deps.storage);
     const download = createLocalDownloadHandler(deps.storage);
@@ -132,11 +140,19 @@ export function createApp(deps: AppDeps): Hono {
     app.on(['GET', 'HEAD'], '/about', seo.about);
     app.on(['GET', 'HEAD'], '/links', seo.links);
     app.on(['GET', 'HEAD'], '/popular', seo.popular);
+    // 补齐此前缺失 SSR 的两个公开页（首屏不再空白等 app.js）
+    app.on(['GET', 'HEAD'], '/series', seo.series);
+    app.on(['GET', 'HEAD'], '/guestbook', seo.guestbook);
   }
 
-  /* ---------- 新版后台 ----------
-   * 构建产物存在才挂载；否则请求自然落到上游旧版后台，功能不中断。 */
-  if (adminAppAvailable(config.adminDistDir)) {
+  /* ---------- 后台 ----------
+   * 默认 **不挂载** Vue SPA：/admin 落到下面的兜底，由上游 worker 返回 SPA 外壳，
+   * 再经 app.js 的 ensureAdminBundle() 加载 app/public/admin.min.js（上游原生后台），
+   * 于是 /admin 保持上游的 UI / 布局 / 样式。
+   *
+   * 只有显式配置 ADMIN_SPA=1 时才挂载 Vue 版（构建产物需存在），
+   * 它会重新遮住 /admin，仅用于对照与排障。 */
+  if (config.adminSpa && adminAppAvailable(config.adminDistDir)) {
     const adminApp = createAdminAppHandler(config.adminDistDir);
     app.on(['GET', 'HEAD'], '/admin', adminApp.index);
     app.on(['GET', 'HEAD'], '/admin/*', adminApp.asset);

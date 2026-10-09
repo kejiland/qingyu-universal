@@ -15,10 +15,13 @@ import type { AppConfig } from '../config.js';
 import type { AppDatabase } from '../types.js';
 import {
   POPULAR_POSTS_SQL,
+  SERIES_POSTS_SQL,
   readSettingJson,
   renderAboutContent,
+  renderGuestbookContent,
   renderLinksContent,
   renderPopularContent,
+  renderSeriesContent,
   type FriendLink,
 } from '../ssr/pages.js';
 import {
@@ -33,7 +36,7 @@ import {
 import { injectAppContent, renderPostContent } from '../ssr/post.js';
 import { HOME_POSTS_SQL, renderHomeContent } from '../ssr/list.js';
 import { weakEtag } from '../etag.js';
-import { readChrome, wrapWithChrome, type ChromeData } from '../ssr/chrome.js';
+import { readChrome, wrapWithChrome, type ActiveState, type ChromeData } from '../ssr/chrome.js';
 import {
   ARCHIVE_POSTS_SQL,
   filterPosts,
@@ -49,6 +52,11 @@ export interface SeoDeps {
   securityHeaders?: () => Record<string, string>;
 }
 
+/** 当前请求的导航高亮状态：路径 + 首页 ?category= 选中的分类。 */
+function activeOf(c: Context): ActiveState {
+  const url = new URL(c.req.url);
+  return { path: url.pathname.replace(/\/+$/, '') || '/', category: url.searchParams.get('category') || '' };
+}
 function htmlResponse(c: Context, html: string, extra: Record<string, string>): Response {
   return new Response(c.req.method === 'HEAD' ? null : html, {
     status: 200,
@@ -82,6 +90,8 @@ export interface SeoHandlers {
   about: (c: Context) => Promise<Response>;
   links: (c: Context) => Promise<Response>;
   popular: (c: Context) => Promise<Response>;
+  series: (c: Context) => Promise<Response>;
+  guestbook: (c: Context) => Promise<Response>;
 }
 
 export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
@@ -95,6 +105,8 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
     const meta = buildHomeMeta(site, config.siteUrl);
 
     let withList = shell;
+    // ETag 指纹要在 try 外可见：列表查询失败时为空串，同样能算出一个稳定的 ETag。
+    let fingerprint = '';
     try {
       const url = new URL(c.req.url);
       const tag = url.searchParams.get('tag');
@@ -104,18 +116,24 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
         const all = await db.all<PostRow>(ARCHIVE_POSTS_SQL);
         posts = filterPosts(all, { tag, category }).slice(0, 10);
       }
+      fingerprint = posts.map((p) => `${p.id}:${p.updated_at ?? p.date ?? ''}`).join('|');
       if (posts.length) {
         const chrome = await readChrome(db, site.name);
-        withList = injectAppContent(shell, wrapWithChrome(chrome, renderHomeContent(posts, site), '/'));
+        withList = injectAppContent(shell, wrapWithChrome(chrome, renderHomeContent(posts, site), { path: '/', category: category || '' }));
       }
     } catch {
       /* 查询失败时回落到原始外壳，不影响页面可用性 */
     }
 
     const html = injectHead(withList, meta, renderHeadBlock(meta));
+    /* ETag 必须含内容指纹：此前只按 'home' + siteUrl 计算，是个常量，
+     * 于是「文章列表变了但 ETag 不变」 —— 违反 HTTP 语义。眼下首页没有走
+     * If-None-Match 协商（所以暂未表现为内容不更新），但一旦前面挂了
+     * CDN / 反向代理按 ETag 做缓存，新发布的文章就永远推不到访客和爬虫。
+     * 这里把列表里每篇的 id 与更新时间纳入指纹。 */
     return htmlResponse(c, html, {
       'Cache-Control': 'no-cache',
-      ETag: weakEtag('home', config.siteUrl),
+      ETag: weakEtag('home', config.siteUrl, fingerprint),
       ...security()
     });
   };
@@ -155,7 +173,7 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
     const content = renderPostContent(row, site);
     const chrome = await readChrome(db, site.name);
     const withBody = content
-      ? injectAppContent(shell, wrapWithChrome(chrome, content, new URL(c.req.url).pathname))
+      ? injectAppContent(shell, wrapWithChrome(chrome, content, activeOf(c)))
       : shell;
     const html = injectHead(withBody, meta, renderHeadBlock(meta));
     return htmlResponse(c, html, { 'Cache-Control': 'no-cache', ETag: etag, ...security() });
@@ -171,7 +189,7 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
         const chrome = await readChrome(db, site.name);
         withContent = injectAppContent(
           shell,
-          wrapWithChrome(chrome, render(posts, site), new URL(c.req.url).pathname)
+          wrapWithChrome(chrome, render(posts, site), activeOf(c))
         );
       } catch {
         /* 查询失败时回落到原始外壳 */
@@ -191,7 +209,7 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
       const chrome = await readChrome(db, site.name);
       let withContent = shell;
       try {
-        withContent = injectAppContent(shell, wrapWithChrome(chrome, await render(site, chrome), pagePath));
+        withContent = injectAppContent(shell, wrapWithChrome(chrome, await render(site, chrome), { path: pagePath, category: '' }));
       } catch {
         /* 查询失败时回落到原始外壳 */
       }
@@ -228,5 +246,15 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
     return renderPopularContent(posts);
   }, '/popular', '热门');
 
-  return { home, article, archive, tags, categories, about, links, popular };
+  // /series 与 /guestbook 此前没有 SSR：只返回空外壳，要等 app.js 延迟加载
+  // （实测 3~5s）才有内容，首屏长时间空白。补上后与其余公开页一致。
+  const series = makePage(async () => {
+    const posts = await db.all<PostRow>(SERIES_POSTS_SQL);
+    return renderSeriesContent(posts);
+  }, '/series', '系列');
+
+  const guestbook = makePage(async () => renderGuestbookContent(), '/guestbook', '留言板');
+
+  return { home, article, archive, tags, categories, about, links, popular, series, guestbook };
 }
+

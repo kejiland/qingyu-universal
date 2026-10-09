@@ -6,6 +6,8 @@
  * ============================================================ */
 import { VERSION } from '../config.js';
 import { buildOpenApiDocument } from './openapi.js';
+import { adminAiRoutes } from './routes/admin-ai.js';
+import { adminStorageRoutes } from './routes/admin-storage.js';
 import { adminRoutes } from './routes/admin.js';
 import { postRoutes } from './routes/posts.js';
 import { miscRoutes } from './routes/misc.js';
@@ -13,12 +15,15 @@ import { miscRoutes } from './routes/misc.js';
 export const API_TITLE = '轻语博客 API';
 
 export function createApiDocument(serverUrl: string): Record<string, unknown> {
-  return buildOpenApiDocument([...postRoutes, ...adminRoutes, ...miscRoutes], {
-    title: API_TITLE,
-    version: VERSION,
-    description:
-      '契约来自 src/api/routes/*.ts 的路由注册表：同一份 zod schema 同时驱动运行时校验、' +
-      '本文档与客户端类型生成。未列出的 /api/* 路径仍由上游提供，行为与 Cloudflare 版一致。',
-    serverUrl
-  });
+  return buildOpenApiDocument(
+    [...postRoutes, ...adminAiRoutes, ...adminStorageRoutes, ...adminRoutes, ...miscRoutes],
+    {
+      title: API_TITLE,
+      version: VERSION,
+      description:
+        '契约来自 src/api/routes/*.ts 的路由注册表：同一份 zod schema 同时驱动运行时校验、' +
+        '本文档与客户端类型生成。未列出的 /api/* 路径仍由上游提供，行为与 Cloudflare 版一致。',
+      serverUrl
+    }
+  );
 }

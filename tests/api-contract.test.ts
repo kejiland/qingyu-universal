@@ -10,6 +10,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startTestServer, type TestServer } from './helpers/server.js';
 import {
+  CommentCreateBodySchema,
   CommentCreateResponseSchema,
   CommentListResponseSchema,
   PostListResponseSchema,
@@ -168,6 +169,22 @@ describe('API 契约', () => {
     expect((data as { comment: { post_id?: unknown } }).comment.post_id).toBeUndefined();
   });
 
+  // 注意：评论有「同 IP 每分钟 5 条」的频控（COMMENT_CAPS.perMin，KV 计数），
+  // 整个文件共享这一分钟预算，新增评论用例必须把它算进去，否则后面的
+  // 用例会拿到 429 而不是期望的状态码。这里因此只多发 1 条真实评论，
+  it('POST /api/posts/:id/comments → parent_id 显式为 null 时按顶层评论处理', async () => {
+    const { status, data } = await call(`/api/posts/${postId}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // 公开站前端发表顶层评论时的真实报文（app/public/app.js 的 saveComment）：
+      // 未传 parentId 时会被归一化成 null 再发出。契约必须容忍它。
+      body: JSON.stringify({ author: '契约测试', content: '顶层评论（parent_id 为 null）', parent_id: null })
+    });
+    expect(status).toBe(201);
+    expectSchema(CommentCreateResponseSchema, data);
+    expect((data as { comment: { parent_id: string | null } }).comment.parent_id).toBeNull();
+  });
+
   it('留言板评论（gb-note）不依赖 posts 表也能发表', async () => {
     const created = await call('/api/posts/gb-note/comments', {
       method: 'POST',
@@ -229,11 +246,31 @@ describe('API 契约', () => {
       expectSchema(ErrorResponseSchema, data);
     });
 
-    it('400 参数校验失败（缺少 title）', async () => {
+    /* 缺少 title 由**上游**拒绝，契约层不越权。
+     *
+     * 这里以前断言的是「契约层 400 且文案含『校验失败』」—— 那恰恰是把 bug
+     * 固化成了预期：契约把 title 声明成 z.string().min(1) 比上游更严，
+     * 同一处收紧还顺带让后台「发布文章」直接 400（publishAt: null 被拒）。
+     * 契约层是只读校验，业务合法性归上游判定，它的文案也更贴近业务。 */
+    it('400 缺少 title（由上游拒绝，契约层不越权）', async () => {
       const { status, data } = await call('/api/posts', {
         method: 'POST',
         headers: jsonAuth(),
         body: JSON.stringify({ id: 'no-title' })
+      });
+      expect(status).toBe(400);
+      expectSchema(ErrorResponseSchema, data);
+      const error = (data as { error: string }).error;
+      expect(error).not.toContain('校验失败');
+      expect(error).toContain('缺少');
+    });
+
+    /* 契约层仍然会拦「类型明显不可能被上游转换」的请求（没有一味放宽）。 */
+    it('400 参数校验失败（tags 类型不可转换）', async () => {
+      const { status, data } = await call('/api/posts', {
+        method: 'POST',
+        headers: jsonAuth(),
+        body: JSON.stringify({ id: 'bad-tags', title: '标题', tags: { a: 1 } })
       });
       expect(status).toBe(400);
       expectSchema(ErrorResponseSchema, data);
@@ -506,5 +543,39 @@ describe('订阅 / Webmention / 统计 契约', () => {
     const { status, data } = await call('/api/admin/subscribers');
     expect(status).toBe(401);
     expectSchema(ErrorResponseSchema, data);
+  });
+});
+
+/* ============================================================
+ * 纯 schema 用例：不发请求，因此不消耗评论频控预算。
+ * 紧盯「请求体容许什么形状」这类回归——它们一旦收紧，集成用例
+ * 未必覆盖得到，但线上用户会立刻撞上 400。
+ * ============================================================ */
+describe('请求体契约：发表评论的 parent_id 形态', () => {
+  const base = { author: '契约测试', content: '一条评论' };
+
+  it('省略 parent_id（顶层评论）通过', () => {
+    expect(CommentCreateBodySchema.safeParse(base).success).toBe(true);
+  });
+
+  it('parent_id 显式为 null（前端的真实报文）通过', () => {
+    expect(CommentCreateBodySchema.safeParse({ ...base, parent_id: null }).success).toBe(true);
+  });
+
+  it('parent_id 为空字符串通过（上游按无父评论处理）', () => {
+    expect(CommentCreateBodySchema.safeParse({ ...base, parent_id: '' }).success).toBe(true);
+  });
+
+  it('parent_id 为评论 id 时通过', () => {
+    expect(CommentCreateBodySchema.safeParse({ ...base, parent_id: 'c-1' }).success).toBe(true);
+  });
+
+  it('缺少 author / content 仍然拒绝', () => {
+    expect(CommentCreateBodySchema.safeParse({ content: '缺昵称' }).success).toBe(false);
+    expect(CommentCreateBodySchema.safeParse({ author: '缺内容' }).success).toBe(false);
+  });
+
+  it('parent_id 传非字符串仍然拒绝', () => {
+    expect(CommentCreateBodySchema.safeParse({ ...base, parent_id: 123 }).success).toBe(false);
   });
 });

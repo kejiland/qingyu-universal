@@ -217,3 +217,93 @@ export const POPULAR_POSTS_SQL =
   'LEFT JOIN stats s ON s.post_id = p.id ' +
   "WHERE COALESCE(p.status, 'published') = 'published' " +
   'ORDER BY views DESC, p.date DESC LIMIT 20';
+
+/* ---------- 系列页 ----------
+ * 此前 /series 与 /guestbook 没有 SSR：服务端只返回空外壳（启动动画），
+ * 要等 app.js 延迟加载完毕（实测 3~5s）才有内容，首屏是长时间空白 ——
+ * 与其余公开页（首页/归档/标签/分类/关于/友链/热门）不一致。
+ * 这里补上，结构与 app.js 的 renderSeriesList() 对齐，接管后原地替换无跳动。 */
+export const SERIES_POSTS_SQL =
+  'SELECT id, title, date, cover, series FROM posts ' +
+  "WHERE COALESCE(status, 'published') = 'published' AND COALESCE(series, '') <> '' " +
+  'ORDER BY date DESC';
+
+export function renderSeriesContent(posts: PostRow[]): string {
+  const rows = Array.isArray(posts) ? posts : [];
+  const groups = new Map<string, PostRow[]>();
+  for (const post of rows) {
+    const name = String(post.series ?? '').trim();
+    if (!name) continue;
+    const bucket = groups.get(name);
+    if (bucket) bucket.push(post);
+    else groups.set(name, [post]);
+  }
+
+  if (!groups.size) {
+    return (
+      '<main class="container page-fade"><h2 class="page-title">系列</h2>' +
+      '<div class="empty"><p>还没有创建任何系列。</p></div></main>'
+    );
+  }
+
+  const cards = [...groups.entries()]
+    .map(function (entry, index) {
+      const name = entry[0];
+      const items = entry[1];
+      const preview = items
+        .slice(0, 4)
+        .map((p) => String(p.title ?? ''))
+        .join(' · ');
+      const first = items[0];
+      const thumb = first ? renderSeriesThumb(first, index) : '';
+      return (
+        '<a class="post-card" href="/series/' + encodeURIComponent(name) + '"><div class="post-card-main">' +
+        '<div class="meta"><span class="date">' + items.length + ' 篇</span>' +
+        '<span class="pin">系列</span></div>' +
+        '<h2>' + escapeHtml(name) + '</h2>' +
+        '<div class="excerpt">' + escapeHtml(preview) + '</div>' +
+        '<div class="mini-tags"><span>组成部分</span></div>' +
+        '</div>' + thumb + '</a>'
+      );
+    })
+    .join('');
+
+  return (
+    '<main class="container page-fade"><h2 class="page-title">系列</h2>' +
+    '<p class="admin-head-sub" style="margin:-8px 0 20px">按主题把长文串成系列，方便连续阅读。</p>' +
+    '<div class="list-container">' + cards + '</div></main>'
+  );
+}
+
+function renderSeriesThumb(post: PostRow, index: number): string {
+  const cover = String(post.cover ?? '').trim();
+  if (!cover) return '';
+  // 与 src/ssr/list.ts 的 renderThumb 同款保护：外链图床挂死时不能把破图留在首屏
+  const priority = index < 2 ? ' fetchpriority="high"' : ' fetchpriority="low" loading="lazy"';
+  return (
+    '<div class="post-thumb"><img src="' + escapeHtml(cover) + '" alt="" decoding="async"' +
+    priority + ' referrerpolicy="no-referrer" onerror="this.remove()"></div>'
+  );
+}
+
+/* ---------- 留言板 ----------
+ * 留言是实时数据（且要登录态/评论接口），SSR 只出**页面框架**：
+ * 标题 + 说明 + 分区切换 + 空列表容器。真实留言由 app.js 接管后拉取填充。
+ * 这样首屏不再是空白，也不必为实时数据做缓存策略。 */
+export function renderGuestbookContent(): string {
+  return (
+    '<main class="container page-fade">' +
+    '<div class="guestbook">' +
+    '<header class="guestbook-head">' +
+    '<div class="guestbook-head-icon"></div>' +
+    '<div><h2 class="page-title">留言板</h2>' +
+    '<p class="guestbook-sub">想说的话、发现的问题、对项目的建议，都可以留在这里。</p></div>' +
+    '</header>' +
+    '<div class="guestbook-tabs" id="gbTabs">' +
+    '<button class="gb-tab active" data-kind="note" type="button">留言</button>' +
+    '<button class="gb-tab" data-kind="idea" type="button">项目优化方案</button>' +
+    '</div>' +
+    '<div class="guestbook-list" id="gbList"></div>' +
+    '</div></main>'
+  );
+}

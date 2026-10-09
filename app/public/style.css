@@ -18,8 +18,8 @@
   --fg: #23201b;
   --muted: #6b655c;
   --border: #e6e2da;
-  --accent: #a95233;
-  --accent-soft: #f8ebe5;
+  --accent: #a65132;
+  --accent-soft: #f6e6df;
   --accent-2: #e28a56;
   --accent-fg: #fff;
   --code-bg: #f3f0ea;
@@ -75,7 +75,7 @@ html[data-theme="dark"] {
   --accent: #e08a63;
   --accent-soft: #3a2c22;
   --accent-2: #d97d4a;
-  --accent-fg: #171512; /* 深色主题按钮用深色字，保证 ≥4.5:1 */
+  --accent-fg: #1c1917;
   --code-bg: #2a2621;
   /* 深色模式下的语义别名（与浅色同源，仅跟随主题变量） */
   --text: var(--fg);
@@ -99,30 +99,30 @@ html[data-theme="dark"] {
  *   --accent-fg    主色填充面上的文字色
  *   --bg/--bg-soft/--card/--border  微调背景色温（“氛围”差异，非仅换主色）
  * 色值取自中国传统色（zhongguose.com），并按 WCAG 对比度校准：
- *   · 浅色模式主色在浅底 ≥4.5:1，适合链接/正文
+ *   · 浅色模式主色在浅底 ≥4.7:1，适合链接/正文
  *   · 深色模式主色在深底 ≥5.9:1；文字对比不足时用 --accent-fg 深色文字兜底 */
 :root[data-theme="light"][data-accent="terra"] {
-  --accent: #a95233; --accent-soft: #f8ebe5; --accent-2: #e28a56; --accent-fg: #fff;
+  --accent: #a65132; --accent-soft: #f6e6df; --accent-2: #e28a56; --accent-fg: #fff;
 }
 html[data-theme="dark"][data-accent="terra"] {
-  --accent: #e08a63; --accent-soft: #3a2c22; --accent-2: #d97d4a; --accent-fg: #171512;
+  --accent: #e08a63; --accent-soft: #3a2c22; --accent-2: #d97d4a; --accent-fg: #1c1917;
 }
 
 :root[data-theme="light"][data-accent="indigo"] {
-  --accent: #22689f; --accent-soft: #e1ecf7; --accent-2: #1b5c8f; --accent-fg: #fff;
+  --accent: #266694; --accent-soft: #d9e7f5; --accent-2: #1661ab; --accent-fg: #fff;
   --bg: #f6f8fb; --bg-soft: #eef2f7; --card: #ffffff; --border: #dde6ef;
 }
 html[data-theme="dark"][data-accent="indigo"] {
-  --accent: #619ac3; --accent-soft: #202d3f; --accent-2: #8fb2c9; --accent-fg: #101c2b;
+  --accent: #659dc5; --accent-soft: #223144; --accent-2: #8fb2c9; --accent-fg: #101c2b;
   --bg: #141a21; --bg-soft: #1b222b; --card: #1d242e; --border: #2f3945;
 }
 
 :root[data-theme="light"][data-accent="bamboo"] {
-  --accent: #436a5e; --accent-soft: #e8f0eb; --accent-2: #67846e; --accent-fg: #fff;
+  --accent: #477165; --accent-soft: #e2ece6; --accent-2: #6e8b74; --accent-fg: #fff;
   --bg: #f6f8f5; --bg-soft: #eef2ee; --card: #ffffff; --border: #dfe6dd;
 }
 html[data-theme="dark"][data-accent="bamboo"] {
-  --accent: #1ba784; --accent-soft: #1b3127; --accent-2: #40a070; --accent-fg: #0c241b;
+  --accent: #1fa986; --accent-soft: #1c3429; --accent-2: #40a070; --accent-fg: #0c241b;
   --bg: #141b16; --bg-soft: #1a231d; --card: #1d2620; --border: #2d3a32;
 }
 
@@ -131,7 +131,7 @@ html[data-theme="dark"][data-accent="bamboo"] {
   --bg: #faf7fa; --bg-soft: #f2ecf1; --card: #ffffff; --border: #e8dde6;
 }
 html[data-theme="dark"][data-accent="dusk"] {
-  --accent: #bd7fab; --accent-soft: #35253f; --accent-2: #d3a2c6; --accent-fg: #241a26;
+  --accent: #bc80aa; --accent-soft: #362640; --accent-2: #c98ab9; --accent-fg: #1c1917;
   --bg: #19141a; --bg-soft: #201a22; --card: #221c24; --border: #382b3a;
 }
 
@@ -227,15 +227,50 @@ a:hover { text-decoration: underline; }
   padding: 0 20px;
 }
 
+/* ---------- 主题切换过渡 ----------
+ * 明暗 / 主题色是「整页换肤」，直接换会显得生硬。
+  * 切换的那一瞬间给根节点挂一个 .theme-switching，只在这段时间内
+ * 让颜色类属性参与过渡，结束后立刻摘掉，免得常态下所有 hover 都变慢。
+ * 用 :root.has() 限定在确实挂了该class 的文档上，避免影响其他页面。 */
+:root.theme-switching,
+:root.theme-switching body,
+:root.theme-switching .card,
+:root.theme-switching .topbar,
+:root.theme-switching .post-card,
+:root.theme-switching .btn {
+  transition: background-color .28s cubic-bezier(.4, 0, .2, 1),
+              border-color .28s cubic-bezier(.4, 0, .2, 1),
+              color .28s cubic-bezier(.4, 0, .2, 1),
+              box-shadow .28s cubic-bezier(.4, 0, .2, 1) !important;
+}
+/* 无障碍：用户要求减少动效时，切换应当是瞬时的 */
+@media (prefers-reduced-motion: reduce) {
+  :root.theme-switching,
+  :root.theme-switching body,
+  :root.theme-switching .card,
+  :root.theme-switching .topbar,
+  :root.theme-switching .post-card,
+  :root.theme-switching .btn {
+    transition: none !important;
+  }
+}
+
 /* ---------- 顶栏 ---------- */
 .topbar {
   position: sticky;
   top: 0;
   z-index: 10;
   background: color-mix(in srgb, var(--bg) 86%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  border-bottom: 1px solid transparent;
+  transition: border-color .22s ease, box-shadow .22s ease, background .22s ease;
+}
+/* 滚动后顶栏才显出分隔线与浮起感：页面在最顶端时保持通透，不多余压一道线 */
+.topbar.is-scrolled {
+  border-bottom-color: var(--border);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--fg) 4%, transparent),
+              0 8px 24px -12px color-mix(in srgb, var(--fg) 22%, transparent);
 }
 
 .topbar-inner {
@@ -278,7 +313,21 @@ a:hover { text-decoration: underline; }
 .main-nav .nav-link:hover { color: var(--fg); background: var(--bg-soft); text-decoration: none; }
 .main-nav .nav-link.active { color: var(--accent); font-weight: 600; }
 .nav-item { position: relative; }
-.has-sub > .nav-link::after { content: "▾"; font-size: 10px; margin-left: 3px; opacity: 0.7; }
+
+/* 下拉箭头：顶栏与手机侧栏共用同一枚描边 chevron，颜色跟随主题，展开时统一翻转 */
+.nav-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--muted);
+  opacity: 0.8;
+  pointer-events: none;
+  transition: transform 0.18s ease;
+}
+.nav-caret svg { display: block; }
+.sidebar-nav-group.dropdown-open .nav-caret { transform: rotate(180deg); }
+.sidebar-dropdown-trigger .nav-caret { margin-left: auto; }
 .sub-menu {
   position: absolute;
   top: calc(100% + 8px);
@@ -298,7 +347,45 @@ a:hover { text-decoration: underline; }
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
 .has-sub:hover .sub-menu,
-.has-sub:focus-within .sub-menu { display: flex; opacity: 1; transform: translateY(0); }
+.has-sub:focus-within .sub-menu,
+.has-sub.dropdown-open > .sub-menu { display: flex; opacity: 1; transform: translateY(0); }
+/* 「发现」明确采用点击展开：未打开时即使鼠标悬停也不显示 */
+.main-nav .click-dropdown:not(.dropdown-open) > .sub-menu {
+  display: none !important;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+}
+.click-dropdown > .nav-dropdown-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  /* 只继承字体族，不要用 font 简写：简写会把字号重置为父级的 16px，
+     导致「发现」比同级导航小一圈。字号统一交给 .nav-link / .sidebar-link。 */
+  font-family: inherit;
+  cursor: pointer;
+}
+/* 右侧留出箭头位（用更高优先级，避免被窄屏的 padding 覆盖） */
+.main-nav .click-dropdown > .nav-dropdown-trigger { padding-right: 23px; }
+/* 选中下划线只覆盖文字宽度，避免因右侧留了箭头位而显得偏右 */
+.main-nav .click-dropdown > .nav-dropdown-trigger::after { right: 23px; }
+/* 下拉箭头统一定位：内置「发现」与后台自定义的一级下拉共用同一条规则，
+   任何在后台新增的一级导航都会自动与「发现」保持一致的风格 */
+.click-dropdown .nav-caret {
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.click-dropdown.dropdown-open .nav-caret {
+  transform: translateY(-50%) rotate(180deg);
+}
 .sub-menu a {
   color: var(--fg);
   font-size: 14px;
@@ -308,6 +395,86 @@ a:hover { text-decoration: underline; }
 }
 .sub-menu a:hover { background: var(--bg-soft); color: var(--accent); text-decoration: none; }
 .sub-menu a.active { color: var(--accent); font-weight: 600; }
+
+/* 下拉菜单项：不继承顶栏的下划线与字号，独立成一套左对齐的列表样式 */
+.main-nav .sub-menu {
+  min-width: 168px;
+  padding: 6px;
+}
+.main-nav .sub-menu a.nav-link {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 14.5px;
+  font-weight: 500;
+  text-align: left;
+  padding: 9px 12px 9px 14px;
+  border-radius: 8px;
+  border-left: 3px solid transparent;
+  color: var(--fg);
+}
+.main-nav .sub-menu a.nav-link::after { content: none; }
+.main-nav .sub-menu a.nav-link:hover {
+  background: var(--bg-soft);
+  color: var(--accent);
+}
+.main-nav .sub-menu a.nav-link.active {
+  color: var(--accent);
+  font-weight: 600;
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+}
+
+/* 带自定义二级的顶栏项：主链接可点击跳转，右侧独立箭头负责展开下拉 */
+.main-nav .nav-item.has-sub { display: flex; align-items: center; }
+.main-nav .nav-item.has-sub > .nav-link { padding-right: 23px; }
+.main-nav .nav-item.has-sub > .nav-link::after { right: 23px; }
+/* 箭头按钮的点击区覆盖在右侧内边距上，纯透明，不改变文字与箭头的间距 */
+.nav-sub-caret {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 26px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.main-nav .nav-item.has-sub > .nav-link.active ~ .nav-sub-caret { color: var(--accent); }
+.nav-item.has-sub:hover > .nav-sub-caret { color: var(--fg); }
+/* 展开时统一：内置「发现」与自定义下拉的触发区都变为强调色 */
+.main-nav .click-dropdown.dropdown-open > .nav-dropdown-trigger,
+.main-nav .click-dropdown.dropdown-open > .nav-sub-caret { color: var(--accent); }
+.main-nav .click-dropdown.dropdown-open > .nav-link { color: var(--accent); }
+
+/* 侧栏里带自定义二级的项：链接行 + 右侧展开箭头 */
+.sidebar-link-row { position: relative; }
+.sidebar-link-row > .sidebar-link { padding-right: 42px; }
+.sidebar-sub-caret {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.sidebar-link-row > .sidebar-link.active ~ .sidebar-sub-caret { color: var(--accent); }
+.sidebar-link-row:hover > .sidebar-sub-caret { color: var(--fg); }
+.sidebar-nav-group.dropdown-open > .sidebar-link-row > .sidebar-sub-caret { color: var(--accent); }
+.sidebar-nav-group.dropdown-open > .sidebar-link-row > .sidebar-link { color: var(--accent); }
 
 /* ---------- 汉堡按钮（默认隐藏，仅移动端显示） ---------- */
 .hamburger-btn {
@@ -406,6 +573,7 @@ a:hover { text-decoration: underline; }
 .sidebar-link {
   display: block;
   padding: 12px 24px;
+  font-family: inherit;
   font-size: 15px;
   color: var(--fg);
   text-decoration: none;
@@ -418,6 +586,36 @@ a:hover { text-decoration: underline; }
   font-weight: 600;
   background: var(--accent-soft);
   border-left-color: var(--accent);
+}
+.sidebar-nav-group { display: flex; flex-direction: column; }
+.sidebar-dropdown-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sidebar-submenu {
+  display: none;
+  background: color-mix(in srgb, var(--bg-soft) 72%, transparent);
+  border-left: 3px solid var(--accent);
+}
+.sidebar-nav-group.dropdown-open .sidebar-submenu { display: block; }
+.sidebar-link.sidebar-child {
+  padding-left: 40px;
+  font-size: 14px;
+  color: var(--muted);
+  border-left: 0;
+}
+.sidebar-link.sidebar-child.active {
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .sidebar-footer {
@@ -507,10 +705,10 @@ a:hover { text-decoration: underline; }
   line-height: 1.4;
   -webkit-appearance: none;
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b7280'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9.5l6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 6px center;
-  padding-right: 22px;
+  background-position: right 5px center;
+  padding-right: 24px;
 }
 .lang-switch:hover { border-color: var(--accent); }
 .lang-switch:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
@@ -582,11 +780,20 @@ button.btn { font-family: inherit; }
 /* ---------- 主区（flex 撑开，保证页脚贴底） ---------- */
 main { flex: 1 0 auto; width: 100%; padding: 34px 0 60px; }
 
-/* 视图切换过渡 */
-.page-fade { animation: pageFade 0.22s ease; }
+/* 视图切换过渡：纯透明度交叉淡入淡出，无位移 / 翻转，观感自然不翻书 */
+.page-fade { animation: pageFade 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) both; }
 @keyframes pageFade {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.page-leaving {
+  animation: none !important;
+  opacity: 0;
+  transition: opacity 0.13s cubic-bezier(0.4, 0, 1, 1) both;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-fade, .page-leaving { animation: none !important; transition: none !important; }
 }
 
 .page-title {
@@ -2980,8 +3187,6 @@ html[data-theme="dark"] body.scrolled .topbar {
 }
 .main-nav .nav-link:hover::after { transform: scaleX(0.55); opacity: 0.5; }
 .main-nav .nav-link.active::after { transform: scaleX(1); opacity: 1; }
-/* 含二级菜单的项已有 ▾ 标记，其下划线略收窄避免与箭头重叠 */
-.has-sub > .nav-link.active::after { right: 20px; }
 
 /* 顶栏圆形图标按钮：统一描边与悬浮态 */
 .icon-btn {
@@ -3282,3 +3487,132 @@ html[data-theme="dark"] body.scrolled .topbar {
 .author-info b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .author-count { font-size: 12.5px; color: var(--muted); }
 .meta-author { font-weight: 500; }
+
+/* ============================================================
+ * 「发现」下拉内的二级分组（分类下的自定义子分类）
+ * 就地展开的缩进子列表，不用绝对定位浮层，避免与外层菜单重叠。
+ * ============================================================ */
+.main-nav .sub-item-group { display: flex; flex-direction: column; }
+.main-nav .sub-item-row { position: relative; display: flex; align-items: center; }
+.main-nav .sub-menu .sub-item-row > a.nav-link { padding-right: 30px; }
+.main-nav .sub-item-row > .sub-caret {
+  position: absolute;
+  right: 0; top: 0; bottom: 0;
+  width: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; border: 0;
+  background: transparent; color: inherit;
+  cursor: pointer;
+}
+.main-nav .sub-item-row > .sub-caret .nav-caret {
+  position: static;
+  transform: none;
+  transition: transform .15s ease;
+}
+.main-nav .sub-item-group.dropdown-open .sub-caret .nav-caret { transform: rotate(180deg); }
+.main-nav .sub-item-group.dropdown-open .sub-item-row > a.nav-link { color: var(--accent); }
+.main-nav .sub-sub-menu {
+  position: static;
+  display: none;
+  min-width: 0;
+  margin: 2px 0 4px;
+  padding: 0 0 0 12px;
+  border: 0;
+  border-left: 2px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  opacity: 1;
+  transform: none;
+}
+.main-nav .sub-item-group.dropdown-open > .sub-sub-menu { display: flex; }
+
+/* 父级导航只是标题提示（点击展开下拉，不跳转），统一用手型光标 */
+.main-nav a.nav-link[data-nav-dropdown-trigger],
+.main-nav .sub-item-row > a[data-nav-dropdown-trigger],
+.sidebar-link[data-nav-dropdown-trigger] { cursor: pointer; }
+
+/* 手机端二级箭头统一定位：「发现」与后台自定义的二级导航共用同一条规则，
+   保证箭头横向位置、点击区域、旋转方向完全一致 */
+.sidebar-dropdown-trigger { position: relative; padding-right: 42px; }
+.sidebar-dropdown-trigger .nav-caret {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  margin-left: 0;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.sidebar-nav-group.dropdown-open .sidebar-dropdown-trigger .nav-caret {
+  transform: translateY(-50%) rotate(180deg);
+}
+.sidebar-dropdown-trigger:hover .nav-caret { color: var(--fg); }
+.sidebar-nav-group.dropdown-open > .sidebar-dropdown-trigger { color: var(--accent); }
+
+/* ---------- 轻提示 toast ---------- */
+.toast-wrap {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast-item {
+  padding: 9px 16px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--fg);
+  box-shadow: var(--shadow-hover);
+  font-size: 13px;
+  animation: toastIn 0.22s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.toast-ok { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); color: var(--accent); }
+.toast-err { border-color: #e2a0a0; color: #c05050; }
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) { .toast-item { animation: none; } }
+
+/* ============================================================
+ * 8. 列表错峰入场（stagger reveal）
+ *    纯 CSS 实现，不改动渲染逻辑：同一容器下的卡片依次淡入上浮，
+ *    只在前 12 项生效，避免长列表末尾等待过久。
+ * ============================================================ */
+@keyframes qyStaggerIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.995); }
+  to   { opacity: 1; transform: none; }
+}
+
+.stagger > * {
+  animation: qyStaggerIn 0.42s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.stagger > *:nth-child(1)  { animation-delay: 0.02s; }
+.stagger > *:nth-child(2)  { animation-delay: 0.06s; }
+.stagger > *:nth-child(3)  { animation-delay: 0.10s; }
+.stagger > *:nth-child(4)  { animation-delay: 0.14s; }
+.stagger > *:nth-child(5)  { animation-delay: 0.18s; }
+.stagger > *:nth-child(6)  { animation-delay: 0.21s; }
+.stagger > *:nth-child(7)  { animation-delay: 0.24s; }
+.stagger > *:nth-child(8)  { animation-delay: 0.26s; }
+.stagger > *:nth-child(9)  { animation-delay: 0.28s; }
+.stagger > *:nth-child(10) { animation-delay: 0.30s; }
+.stagger > *:nth-child(11) { animation-delay: 0.31s; }
+.stagger > *:nth-child(n + 12) { animation-delay: 0.32s; }
+
+/* 入场动画与 hover 抬升共存时，动画结束后交还给 hover 的 transform */
+.stagger > * { will-change: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .stagger > * { animation: none !important; }
+}

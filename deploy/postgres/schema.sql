@@ -90,6 +90,18 @@ CREATE TABLE IF NOT EXISTS site_settings (
   v TEXT NOT NULL
 );
 
+-- AI 助手配置：单独成表，不走公开的 /api/settings（那里含 API Key 会泄露）
+CREATE TABLE IF NOT EXISTS ai_config (
+  k TEXT PRIMARY KEY,
+  v TEXT NOT NULL
+);
+
+-- 对象存储配置：同上，含 S3 Secret Access Key，不能放进公开可读的 site_settings
+CREATE TABLE IF NOT EXISTS storage_config (
+  k TEXT PRIMARY KEY,
+  v TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS stats_daily (
   post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
   date    TEXT NOT NULL,

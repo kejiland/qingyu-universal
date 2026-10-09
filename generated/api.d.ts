@@ -164,6 +164,134 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/ai": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 读取 AI 助手配置
+         * @description 返回当前生效的 AI 配置。密钥只回传打码值（apiKeyMasked）与是否已配置（hasApiKey），明文永不出服务端。source 表示配置来自后台保存（db）还是环境变量兜底（env）。
+         */
+        get: operations["getApiAdminAi"];
+        /**
+         * 保存 AI 助手配置
+         * @description 部分更新：只写传入的字段。apiKey 留空表示保持原密钥不变（避免只改模型时把密钥清掉），需要清空请显式传 clearApiKey=true。保存后立即刷新运行时绑定，无需重启服务。
+         */
+        put: operations["putApiAdminAi"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 拉取上游可用模型列表
+         * @description 服务端代理请求 {baseUrl}/models（避免浏览器 CORS 与密钥外泄），兼容 OpenAI 的 {data:[{id}]}、Ollama 的 {models:[{name}]} 以及裸数组三种返回形态。baseUrl/apiKey 不传则使用当前已保存配置，便于「先填地址→拉取→再保存」。
+         */
+        post: operations["postApiAdminAiModels"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 测试 AI 连通性
+         * @description 用最小 token 数真实跑一次 chat/completions，可同时暴露地址、密钥、模型名三类问题。测试失败也返回 200（ok=false + error），因为它表达的是「连通性结论」而不是接口错误。
+         */
+        post: operations["postApiAdminAiTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 读取存储配置
+         * @description 返回当前生效的存储配置。Secret Access Key 只回传打码值（secretAccessKeyMasked）与是否已配置（hasSecretAccessKey），明文永不出服务端。degraded=true 表示已选择对象存储但配置不完整，当前正降级使用本机磁盘。
+         */
+        get: operations["getApiAdminStorage"];
+        /**
+         * 保存存储配置
+         * @description 部分更新：只写传入的字段。secretAccessKey 留空表示保持原密钥不变（避免只改桶名时把密钥清掉），需要清空请显式传 clearSecretAccessKey=true。保存后立即刷新运行时绑定，无需重启服务；MODE=local 表示新上传写入本机磁盘。
+         */
+        put: operations["putApiAdminStorage"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/storage/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 测试存储连通性
+         * @description 按 mode 决定测哪一圈：local 往上传目录写一个探针文件再删（能发现挂载点只读 / 磁盘满）；s3 用表单里的**候选值**（不传则用已保存值）真签一次 SigV4 并写删一个探针对象。测试失败也返回 200（ok=false + error），因为它表达的是「连通性结论」而不是接口错误。
+         */
+        post: operations["postApiAdminStorageTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/storage/migrate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 把本机磁盘上的文件迁移到对象存储
+         * @description 逐对象上传，并且**只有确认某个对象已进桶**才会把引用它的数据库行改写成云端外链，因此不会出现「库里指向云、云上没这个文件」的坏引用。默认保留本地副本（deleteLocal=false）——迁移中途失败或桶不可达时本地仍是兜底。本地读取路由 /media/* 常驻挂载，未迁移的老文件照常可访问，不存在中间态 404。
+         */
+        post: operations["postApiAdminStorageMigrate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/login": {
         parameters: {
             query?: never;
@@ -1218,6 +1346,29 @@ export interface components {
             content: string;
             enc: unknown;
         };
+        CreatePostBody: {
+            id: string | number;
+            title?: string | number | boolean | null;
+            date?: string | number | boolean | null;
+            excerpt?: string | number | boolean | null;
+            content?: string | number | boolean | null;
+            cover?: string | number | boolean | null;
+            ogImage?: string | number | boolean | null;
+            og_image?: string | number | boolean | null;
+            pinned?: boolean | number | string | null;
+            protected?: boolean | number | string | null;
+            enc?: unknown;
+            category?: string | number | boolean | null;
+            series?: string | number | boolean | null;
+            seriesOrder?: number | string | null;
+            series_order?: number | string | null;
+            author?: string | number | boolean | null;
+            status?: ("published" | "draft" | "scheduled") | null;
+            publishAt?: number | string | null;
+            publish_at?: number | string | null;
+            seo?: components["schemas"]["Seo"] | string | null;
+            tags?: unknown[] | string | null;
+        };
         PostRelationsResponse: {
             /** @constant */
             ok: true;
@@ -1251,6 +1402,29 @@ export interface components {
             /** @enum {string} */
             action: "views" | "like";
             ref?: string;
+        };
+        UpdatePostBody: {
+            title?: string | number | boolean | null;
+            date?: string | number | boolean | null;
+            excerpt?: string | number | boolean | null;
+            content?: string | number | boolean | null;
+            cover?: string | number | boolean | null;
+            ogImage?: string | number | boolean | null;
+            og_image?: string | number | boolean | null;
+            pinned?: boolean | number | string | null;
+            protected?: boolean | number | string | null;
+            enc?: unknown;
+            category?: string | number | boolean | null;
+            series?: string | number | boolean | null;
+            seriesOrder?: number | string | null;
+            series_order?: number | string | null;
+            author?: string | number | boolean | null;
+            status?: ("published" | "draft" | "scheduled") | null;
+            publishAt?: number | string | null;
+            publish_at?: number | string | null;
+            seo?: components["schemas"]["Seo"] | string | null;
+            tags?: unknown[] | string | null;
+            id?: string | number;
         };
         /** @description 仅表示操作成功 */
         OkResponse: {
@@ -1332,6 +1506,144 @@ export interface components {
             settings: {
                 [key: string]: string;
             };
+        };
+        /** @description AI 助手配置（密钥打码） */
+        AiConfigResponse: {
+            /** @constant */
+            ok: true;
+            enabled: boolean;
+            publicGenerate: boolean;
+            baseUrl: string;
+            model: string;
+            hasApiKey: boolean;
+            apiKeyMasked: string;
+            /** @enum {string} */
+            source: "db" | "env" | "none";
+            active: boolean;
+            envProvided: {
+                baseUrl: boolean;
+                apiKey: boolean;
+                model: boolean;
+            };
+        };
+        AiConfigUpdateBody: {
+            enabled?: boolean;
+            publicGenerate?: boolean;
+            baseUrl?: string;
+            model?: string;
+            apiKey?: string;
+            clearApiKey?: boolean;
+        };
+        /** @description 上游 /models 拉取结果 */
+        AiModelsResponse: {
+            /** @constant */
+            ok: true;
+            models: {
+                id: string;
+                ownedBy?: string;
+            }[];
+        };
+        AiModelsBody: {
+            baseUrl?: string;
+            apiKey?: string;
+        };
+        /** @description 连通性测试结果 */
+        AiTestResponse: {
+            ok: boolean;
+            model: string;
+            ms: number;
+            reply?: string;
+            error?: string;
+        };
+        AiTestBody: {
+            baseUrl?: string;
+            apiKey?: string;
+            model?: string;
+        };
+        /** @description 存储配置（密钥打码） */
+        StorageConfigResponse: {
+            /** @constant */
+            ok: true;
+            /** @enum {string} */
+            mode: "local" | "s3";
+            endpoint: string;
+            region: string;
+            accessKeyId: string;
+            hasSecretAccessKey: boolean;
+            secretAccessKeyMasked: string;
+            mediaBucket: string;
+            mediaPublicBase: string;
+            musicBucket: string;
+            musicPublicBase: string;
+            backupBucket: string;
+            /** @enum {string} */
+            source: "db" | "env" | "none";
+            s3Ready: boolean;
+            degraded: boolean;
+            uploadDir: string;
+            localCounts: components["schemas"]["StorageCounts"];
+            envProvided: {
+                endpoint: boolean;
+                accessKeyId: boolean;
+                secretAccessKey: boolean;
+                mediaBucket: boolean;
+                mediaPublicBase: boolean;
+            };
+        };
+        /** @description 本机磁盘上各类对象的数量 */
+        StorageCounts: {
+            media: number;
+            music: number;
+            og: number;
+            total: number;
+        };
+        StorageConfigUpdateBody: {
+            /** @enum {string} */
+            mode?: "local" | "s3";
+            endpoint?: string;
+            region?: string;
+            accessKeyId?: string;
+            secretAccessKey?: string;
+            clearSecretAccessKey?: boolean;
+            mediaBucket?: string;
+            mediaPublicBase?: string;
+            musicBucket?: string;
+            musicPublicBase?: string;
+            backupBucket?: string;
+        };
+        /** @description 存储连通性测试结果 */
+        StorageTestResponse: {
+            ok: boolean;
+            /** @enum {string} */
+            target: "local" | "s3";
+            bucket: string;
+            key: string;
+            ms: number;
+            error?: string;
+        };
+        StorageTestBody: components["schemas"]["StorageConfigUpdateBody"];
+        /** @description 本地文件迁移到对象存储的结果 */
+        StorageMigrateResponse: {
+            ok: boolean;
+            total: number;
+            migrated: number;
+            skipped: number;
+            failed: number;
+            rewroteRows: number;
+            deletedLocal: number;
+            details: components["schemas"]["StorageMigrateDetail"][];
+            error?: string;
+        };
+        StorageMigrateDetail: {
+            key: string;
+            /** @enum {string} */
+            status: "migrated" | "skipped" | "failed";
+            bytes?: number;
+            error?: string;
+        };
+        StorageMigrateBody: {
+            deleteLocal?: boolean;
+            limit?: number;
         };
         /** @description 登录成功返回会话 token */
         LoginResponse: {
@@ -1673,30 +1985,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    id: string;
-                    title: string;
-                    date?: string;
-                    excerpt?: string;
-                    content?: string;
-                    cover?: string;
-                    ogImage?: string;
-                    og_image?: string;
-                    pinned?: boolean | number;
-                    protected?: boolean | number;
-                    enc?: unknown;
-                    category?: string;
-                    series?: string;
-                    seriesOrder?: number | string;
-                    series_order?: number | string;
-                    author?: string;
-                    /** @enum {string} */
-                    status?: "published" | "draft" | "scheduled";
-                    publishAt?: number | string;
-                    publish_at?: number | string;
-                    seo?: components["schemas"]["Seo"];
-                    tags?: string[] | string;
-                };
+                "application/json": components["schemas"]["CreatePostBody"];
             };
         };
         responses: {
@@ -1780,30 +2069,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    title: string;
-                    date?: string;
-                    excerpt?: string;
-                    content?: string;
-                    cover?: string;
-                    ogImage?: string;
-                    og_image?: string;
-                    pinned?: boolean | number;
-                    protected?: boolean | number;
-                    enc?: unknown;
-                    category?: string;
-                    series?: string;
-                    seriesOrder?: number | string;
-                    series_order?: number | string;
-                    author?: string;
-                    /** @enum {string} */
-                    status?: "published" | "draft" | "scheduled";
-                    publishAt?: number | string;
-                    publish_at?: number | string;
-                    seo?: components["schemas"]["Seo"];
-                    tags?: string[] | string;
-                    id?: string;
-                };
+                "application/json": components["schemas"]["UpdatePostBody"];
             };
         };
         responses: {
@@ -2013,7 +2279,7 @@ export interface operations {
                 "application/json": {
                     author: string;
                     content: string;
-                    parent_id?: string;
+                    parent_id?: string | null;
                     hp?: string;
                     website?: string;
                     ts?: number | string;
@@ -2108,6 +2374,370 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+        };
+    };
+    getApiAdminAi: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前配置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiConfigResponse"];
+                };
+            };
+            /** @description 未授权或会话已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 仍需修改初始密码 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    putApiAdminAi: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiConfigUpdateBody"];
+            };
+        };
+        responses: {
+            /** @description 保存后的生效配置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiConfigResponse"];
+                };
+            };
+            /** @description 参数非法 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未授权或会话已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 仍需修改初始密码 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    postApiAdminAiModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiModelsBody"];
+            };
+        };
+        responses: {
+            /** @description 模型列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiModelsResponse"];
+                };
+            };
+            /** @description 缺少 Base URL */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未授权或会话已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 仍需修改初始密码 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 上游不可达或鉴权失败 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    postApiAdminAiTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiTestBody"];
+            };
+        };
+        responses: {
+            /** @description 测试结果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiTestResponse"];
+                };
+            };
+            /** @description 未授权或会话已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 仍需修改初始密码 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getApiAdminStorage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前配置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageConfigResponse"];
+                };
+            };
+            /** @description 未授权或会话已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 仍需修改初始密码 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    putApiAdminStorage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageConfigUpdateBody"];
+            };
+        };
+        responses: {
+            /** @description 保存后的生效配置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageConfigResponse"];
+                };
+            };
+            /** @description 参数非法 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未授权或会话已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 仍需修改初始密码 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    postApiAdminStorageTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageTestBody"];
+            };
+        };
+        responses: {
+            /** @description 测试结果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageTestResponse"];
+                };
+            };
+            /** @description 未授权或会话已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 仍需修改初始密码 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    postApiAdminStorageMigrate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageMigrateBody"];
+            };
+        };
+        responses: {
+            /** @description 迁移结果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageMigrateResponse"];
+                };
+            };
+            /** @description 未授权或会话已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 仍需修改初始密码 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

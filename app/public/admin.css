@@ -128,13 +128,13 @@
 
 /* 管理后台语言切换器 */
 .ab-lang-switch {
-  font-size: 12px; padding: 3px 4px; padding-right: 18px;
+  font-size: 12px; padding: 3px 4px; padding-right: 20px;
   border: 1px solid rgba(255,255,255,.14); border-radius: var(--ab-radius-xs);
   background: rgba(255,255,255,.06); color: var(--ab-sider-text);
   cursor: pointer; outline: none; line-height: 1.4;
   -webkit-appearance: none; appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23cfc6b8'/%3E%3C/svg%3E");
-  background-repeat: no-repeat; background-position: right 5px center;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23cfc6b8' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9.5l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 4px center;
 }
 .ab-lang-switch:hover { border-color: var(--ab-primary); }
 .ab-sider.collapsed .ab-lang-switch { display: none; }
@@ -150,9 +150,16 @@
 .ab-lang-pop-title { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ab-muted); padding: 4px 10px 8px; }
 .ab-lang-pop-options { display: flex; flex-direction: column; gap: 2px; }
 
-.ab-nav { flex: 1 1 auto; overflow-y: auto; padding: 14px 12px 10px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent; }
-.ab-nav::-webkit-scrollbar { width: 5px; }
-.ab-nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 3px; }
+.ab-nav {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  padding: 14px 12px 14px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.22) transparent;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 12px), transparent 100%);
+}
+.ab-nav::-webkit-scrollbar { width: 6px; }
+.ab-nav::-webkit-scrollbar-track { background: transparent; }
+.ab-nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,.16); border-radius: 99px; border: 2px solid transparent; background-clip: content-box; }
+.ab-nav::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--ab-primary) 60%, transparent); background-clip: content-box; }
 .ab-nav-group { margin-bottom: 4px; }
 .ab-nav-group-title {
   font-size: 11px; letter-spacing: .1em; color: var(--ab-sider-muted);
@@ -700,6 +707,69 @@ select.ab-select { cursor: pointer; padding-right: 30px; }
 .ab-link-row .ab-btn-icon, .ab-nav-row .ab-btn-icon { flex: 0 0 auto; }
 .ab-link-text, .ab-nav-text { flex: 1; min-width: 100px; }
 .ab-link-url, .ab-nav-url { flex: 1.5; min-width: 120px; }
+/* 导航编辑器：改用固定列网格，保证一级行与二级子行的输入框宽度完全一致 */
+.ab-nav-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1.5fr) 38px 38px 38px;
+  align-items: center;
+  gap: 6px;
+}
+.ab-nav-row .ab-nav-text, .ab-nav-row .ab-nav-url { min-width: 0; }
+.ab-nav-discover { position: relative; display: flex; align-items: center; justify-content: center; height: 38px; }
+.ab-nav-discover .ab-nav-badge { position: absolute; right: calc(100% + 4px); top: 50%; transform: translateY(-50%); white-space: nowrap; }
+.ab-nav-slot { display: block; width: 38px; height: 38px; }
+/* 子级行不再左缩进，改用底色区分层级，保证输入框与一级行等宽 */
+.ab-nav-row.child { padding-left: 0; background: var(--ab-hover); border-radius: 8px; }
+
+/* 顶部导航编辑器：拖拽排序 + 「发现 · 二级」标记 */
+.ab-nav-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ab-muted);
+  background: var(--ab-hover);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.ab-nav-tip svg { flex: none; opacity: .8; }
+.ab-nav-drag {
+  flex: none;
+  display: flex;
+  align-items: center;
+  color: var(--ab-muted);
+  opacity: .5;
+  cursor: grab;
+  padding: 4px 1px;
+  border-radius: 5px;
+  transition: opacity .15s ease, background .15s ease;
+}
+.ab-nav-drag:hover { opacity: 1; background: var(--ab-hover); }
+.ab-nav-drag:active { cursor: grabbing; }
+.ab-nav-row.dragging { opacity: .45; }
+.ab-nav-row.drop-before { box-shadow: inset 0 2px 0 var(--ab-primary); }
+.ab-nav-row.drop-after { box-shadow: inset 0 -2px 0 var(--ab-primary); }
+.ab-nav-row.drop-into {
+  background: var(--ab-primary-weak);
+  border-radius: 8px;
+}
+.ab-nav-badge {
+  flex: none;
+  font-size: 11.5px;
+  line-height: 1;
+  padding: 5px 8px;
+  border-radius: 999px;
+  color: var(--ab-primary);
+  background: var(--ab-primary-weak);
+  white-space: nowrap;
+  user-select: none;
+}
+.ab-btn-icon.is-on {
+  color: var(--ab-primary);
+  background: var(--ab-primary-weak);
+}
 
 /* ---------- 响应式 ---------- */
 @media (max-width: 1100px) {
@@ -896,3 +966,219 @@ select.ab-select { cursor: pointer; padding-right: 30px; }
 .ab-chart .line { stroke-linecap: round; stroke-linejoin: round; }
 .ab-chart .ylab { font-size: 10px; }
 .ab-chart .dot { transition: r .12s ease, fill .12s ease; }
+
+/* 导航编辑器层级感：父级 + 二级子级包成一组，用竖线 / 折角 / 节点点 + 底色表达从属关系
+   （只用绝对定位画连接线，不加内边距，保证一级与二级输入框宽度完全一致） */
+.ab-nav-group {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0;
+  border-radius: 12px;
+  background: var(--ab-hover);
+  background: color-mix(in srgb, var(--ab-primary) 5%, transparent);
+}
+.ab-nav-group::before {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 25px;
+  bottom: 25px;
+  border-left: 1.5px dashed var(--ab-line);
+  border-left-color: color-mix(in srgb, var(--ab-primary) 42%, transparent);
+}
+.ab-nav-group > .ab-nav-row:not(.child) { position: relative; }
+.ab-nav-group > .ab-nav-row:not(.child)::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--ab-primary);
+}
+.ab-nav-group > .ab-nav-row:not(.child) .ab-nav-text { font-weight: 600; }
+.ab-nav-row.child {
+  position: relative;
+  background: transparent;
+}
+.ab-nav-row.child::before {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  width: 13px;
+  border-top: 1.5px dashed var(--ab-line);
+  border-top-color: color-mix(in srgb, var(--ab-primary) 42%, transparent);
+}
+.ab-nav-row.child::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin-top: -2.5px;
+  border-radius: 50%;
+  background: var(--ab-primary);
+  opacity: .55;
+}
+
+/* 父子成组整体拖拽：拖动父级时整组一起变暗，落点线覆盖父级 + 全部二级 */
+.ab-nav-group.dragging { opacity: .5; }
+.ab-nav-group.dragging > .ab-nav-row.dragging { opacity: 1; }
+.ab-nav-group.drop-before { box-shadow: inset 0 2px 0 var(--ab-primary); }
+.ab-nav-group.drop-after { box-shadow: inset 0 -2px 0 var(--ab-primary); }
+.ab-nav-group.drop-into { background: var(--ab-primary-weak); }
+/* ---------- 首页标签选择器（后台「功能开关」内） ---------- */
+/* 可读性约束：明暗两套主题下文字对比都必须 ≥4.5:1。
+ * · 未选中底色用 --ab-hover（明暗主题都有定义）。此前引用的 --ab-bg-soft 从未定义，
+ *   会永远回退到近白 #f7f8fa——暗色模式下「近白底 + 近白字」完全不可读（实测 1.16:1）。
+ * · 选中态弃用「主色实底 + 白字」：深色模式主色本身是浅色（terra=#e08a63），
+ *   白字对比仅 2.63:1 且整块胶囊过亮。改用后台既有的「弱主色底 + 主色字 + 主色描边」
+ *   组合（与 .ab-nav-badge / .ab-btn-icon.is-on 同一套语汇），✓ 前缀强化选中语义。 */
+.ab-tagpick{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;min-height:34px;align-items:center}
+.ab-tagchip{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;
+  border:1px solid var(--ab-border,#e2e5ea);background:var(--ab-hover,#f2ede4);color:var(--ab-text,#333);
+  font-size:13px;line-height:1.5;cursor:pointer;transition:background .15s,border-color .15s,color .15s}
+.ab-tagchip:hover{border-color:var(--ab-primary,#3b82f6);color:var(--ab-primary,#3b82f6)}
+.ab-tagchip.on{background:var(--ab-primary-weak,#f7e7de);border-color:var(--ab-primary,#3b82f6);color:var(--ab-primary,#3b82f6);font-weight:600}
+/* 深色模式主色偏浅（dusk=#bc80aa 落在暖棕弱底上仅 4.44:1），向白色混 22% 提到 ≥4.5:1；
+   与前台 style.css 深色迷你标签的 color-mix 手法同源 */
+[data-theme="dark"] .ab-tagchip.on{color:color-mix(in srgb,var(--ab-primary) 78%,#fff 22%)}
+.ab-tagchip.on::before{content:"✓";font-size:11px;line-height:1;font-weight:700}
+.ab-tagchip-n{font-size:11px;opacity:.7}
+/* 选中态的计数徽标不再做透明度折损：弱底色上叠加透明度会把对比拉到 4.5 以下 */
+.ab-tagchip.on .ab-tagchip-n{opacity:1}
+@media (prefers-reduced-motion: reduce){.ab-tagchip{transition:none}}
+
+/* ============================================================
+ * 新站上手引导（Welcome Guide）
+ * ------------------------------------------------------------
+ * 首次进入后台时的五步清单：完善站点信息 / 写第一篇文章 / 上传图片 /
+ * 查看评论 / 确认定时备份。勾选状态与关闭记忆存 localStorage，
+ * 关闭后可从右上角头像菜单重新打开。
+ * 作为上游后台的自有增量，全部使用 --ab-* 变量，明暗主题自动适配。
+ * ============================================================ */
+.ab-welcome-mask {
+  position: fixed; inset: 0; z-index: 90;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px; background: rgba(24, 20, 16, .46);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  animation: abWelcomeFade .16s ease;
+}
+[data-theme="dark"] .ab-welcome-mask { background: rgba(0, 0, 0, .58); }
+@keyframes abWelcomeFade { from { opacity: 0 } to { opacity: 1 } }
+.ab-welcome-card {
+  width: min(620px, 100%); max-height: 88vh; overflow: auto; padding: 22px;
+  background: var(--ab-card-solid); border: 1px solid var(--ab-border);
+  border-radius: var(--ab-radius); box-shadow: var(--ab-shadow-lg);
+  animation: abWelcomeRise .18s cubic-bezier(.2, .8, .3, 1);
+}
+@keyframes abWelcomeRise { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
+.ab-welcome-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ab-welcome-title { display: flex; gap: 12px; align-items: flex-start; }
+.ab-welcome-badge {
+  display: grid; place-items: center; width: 34px; height: 34px; flex: 0 0 auto;
+  border-radius: var(--ab-radius-sm); color: var(--ab-primary); background: var(--ab-primary-weak);
+}
+.ab-welcome-title h2 { margin: 0; font-size: 17px; line-height: 1.4; color: var(--ab-text); }
+.ab-welcome-title p { margin: 2px 0 0; font-size: 12.5px; color: var(--ab-muted); }
+.ab-welcome-close {
+  display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 auto;
+  border: 0; border-radius: var(--ab-radius-xs); color: var(--ab-muted);
+  background: transparent; cursor: pointer;
+}
+.ab-welcome-close:hover { color: var(--ab-text); background: var(--ab-hover); }
+.ab-welcome-progress { display: flex; align-items: center; gap: 10px; margin: 16px 0 10px; }
+.ab-welcome-bar { flex: 1 1 auto; height: 7px; border-radius: 999px; background: var(--ab-hover); overflow: hidden; }
+.ab-welcome-bar > i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--ab-primary), var(--ab-primary-2)); transition: width .25s ease; }
+.ab-welcome-count { flex: 0 0 auto; font-size: 12px; color: var(--ab-muted); }
+.ab-welcome-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ab-welcome-list > li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border: 1px solid var(--ab-border); border-radius: var(--ab-radius-sm);
+  background: var(--ab-card-solid); transition: border-color .15s ease, background .15s ease;
+}
+.ab-welcome-list > li:hover { border-color: var(--ab-border-strong); background: var(--ab-hover); }
+.ab-welcome-list > li.done { background: color-mix(in srgb, var(--ab-primary) 7%, transparent); border-color: color-mix(in srgb, var(--ab-primary) 28%, transparent); }
+.ab-welcome-check {
+  display: grid; place-items: center; width: 20px; height: 20px; flex: 0 0 auto; padding: 0;
+  border: 1.5px solid var(--ab-border-strong); border-radius: 6px; background: transparent;
+  color: #fff; cursor: pointer; transition: background .15s ease, border-color .15s ease;
+}
+.ab-welcome-list > li.done .ab-welcome-check { background: var(--ab-primary); border-color: var(--ab-primary); }
+.ab-welcome-icon { flex: 0 0 auto; display: grid; place-items: center; width: 26px; color: var(--ab-muted); }
+.ab-welcome-list > li.done .ab-welcome-icon { color: var(--ab-primary); }
+.ab-welcome-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.ab-welcome-text strong { font-size: 13.5px; font-weight: 600; color: var(--ab-text); }
+.ab-welcome-list > li.done .ab-welcome-text strong { text-decoration: line-through; text-decoration-color: var(--ab-muted); }
+.ab-welcome-text small { font-size: 12px; color: var(--ab-muted); line-height: 1.5; }
+.ab-welcome-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
+.ab-welcome-site { font-size: 12px; color: var(--ab-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ab-welcome-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+@media (max-width: 560px) {
+  .ab-welcome-card { padding: 18px; }
+  .ab-welcome-list > li { flex-wrap: wrap; }
+  .ab-welcome-foot { flex-direction: column; align-items: stretch; }
+  .ab-welcome-actions { justify-content: flex-end; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ab-welcome-mask, .ab-welcome-card { animation: none; }
+  .ab-welcome-bar > i { transition: none; }
+}
+
+/* ---------- 页脚导航 / 友情链接：与顶部导航同一套拖拽排序 ----------
+ * 固定列网格（手柄 + 文字 + 链接 + 删除），保证加/删行时两个输入框始终对齐；
+ * 落点用行内上下两条主色线表示，与顶部导航一致。 */
+.ab-link-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1.5fr) 38px;
+  align-items: center;
+  gap: 6px;
+}
+.ab-link-row .ab-link-text, .ab-link-row .ab-link-url { min-width: 0; }
+.ab-link-drag {
+  flex: none; display: flex; align-items: center; justify-content: center;
+  color: var(--ab-muted); opacity: .5; cursor: grab;
+  padding: 4px 1px; border-radius: 5px;
+  transition: opacity .15s ease, background .15s ease;
+}
+.ab-link-drag:hover { opacity: 1; background: var(--ab-hover); }
+.ab-link-drag:active { cursor: grabbing; }
+.ab-link-row.dragging { opacity: .45; }
+.ab-link-row.drop-before { box-shadow: inset 0 2px 0 var(--ab-primary); }
+.ab-link-row.drop-after { box-shadow: inset 0 -2px 0 var(--ab-primary); }
+@media (prefers-reduced-motion: reduce) { .ab-link-drag { transition: none; } }
+
+/* ---------- 设置页 · AI 助手：可点选的模型列表 ----------
+ * 不用 <datalist>：浏览器会按输入框**当前值**过滤候选，
+ * 自动填入第一个模型之后点开就只剩它自己 —— 看起来像「没有列表」。
+ * 这里渲染成显式列表，点一下即填入，当前项打勾高亮。 */
+.ab-ai-models {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin-top: 10px; padding: 12px;
+  max-height: 212px; overflow-y: auto;
+  border: 1px solid var(--ab-border); border-radius: var(--ab-radius-sm);
+  background: var(--ab-hover);
+}
+.ab-ai-models[hidden] { display: none; }
+.ab-ai-model {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  padding: 7px 12px; border-radius: 999px;
+  border: 1px solid var(--ab-border-strong);
+  background: var(--ab-card-solid); color: var(--ab-text);
+  font-size: 13px; font-family: inherit; cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease, transform .1s ease;
+}
+.ab-ai-model:hover { border-color: var(--ab-primary); transform: translateY(-1px); }
+.ab-ai-model:active { transform: scale(.97); }
+.ab-ai-model.active {
+  border-color: transparent; color: #fff;
+  background: linear-gradient(135deg, var(--ab-primary), var(--ab-primary-2));
+}
+.ab-ai-model-name { overflow-wrap: anywhere; }
+.ab-ai-model-tick { display: inline-flex; flex: none; }
+@media (prefers-reduced-motion: reduce) { .ab-ai-model { transition: none; } }
