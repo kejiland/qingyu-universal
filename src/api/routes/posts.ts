@@ -26,9 +26,58 @@ import {
   SettingsResponseSchema,
   UpdatePostBodySchema
 } from '../contract/posts.js';
-import { proxyToUpstream, type ApiRoute } from '../registry.js';
+import { proxyToUpstream, type ApiContext, type ApiRoute } from '../registry.js';
+import { warmImageCache } from '../../lib/image-url.js';
 
 const PUBLIC_CACHE = '上游可能返回 public 缓存头；写操作一律 no-store';
+
+/* ------------------------------------------------------------
+ * 写成功后预热外链图片的反代缓存
+ * ------------------------------------------------------------
+ * 反代是「第一次抓、之后走本地缓存」。新发布的封面是个全新 URL，
+ * 若等读者触发，那第一位读者仍然是冷抓取（浏览器要等服务端去境外取），
+ * 也就是「发布一篇文章后第一次打开慢 2~3 秒」的成因。
+ * 写入成功即后台预热，作者自己打开时缓存通常已经热了。
+ *
+ * 只从**响应**里取地址：请求体已被 callUpstream() 读过，
+ * 再读会抛或让它拿到空 body。这里读的是 clone，原响应继续原样返回。
+ * ------------------------------------------------------------ */
+const MD_IMAGE = /!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/g;
+const TAG_IMAGE = /<img\b[^>]+src=["'](https?:\/\/[^"']+)["']/gi;
+
+/** 从写接口响应里挑出需要预热的外链图片地址。导出仅供测试。 */
+export function collectWarmableImages(body: unknown): string[] {
+  const post = (body as { post?: Record<string, unknown> } | null)?.post;
+  if (!post || typeof post !== 'object') return [];
+  const found: string[] = [];
+  const push = (url: string) => {
+    if (/^https?:\/\//i.test(url) && found.length < 6 && !found.includes(url)) found.push(url);
+  };
+  push(String(post.cover ?? '').trim());
+  const content = String(post.content ?? '');
+  if (content) {
+    for (const m of content.matchAll(MD_IMAGE)) push(m[1]);
+    for (const m of content.matchAll(TAG_IMAGE)) push(m[1]);
+  }
+  return found;
+}
+
+function withImageWarmup(base: (ctx: ApiContext) => Promise<Response>) {
+  return async (ctx: ApiContext): Promise<Response> => {
+    const response = await base(ctx);
+    if (response.status >= 200 && response.status < 300) {
+      void response
+        .clone()
+        .json()
+        .then(collectWarmableImages)
+        .then(warmImageCache)
+        .catch(() => {});
+    }
+    return response;
+  };
+}
+
+const writeWithWarmup = withImageWarmup(proxyToUpstream);
 
 export const postRoutes: ApiRoute[] = [
   {
@@ -62,7 +111,7 @@ export const postRoutes: ApiRoute[] = [
       401: { description: '未授权', schema: ErrorResponseSchema },
       409: { description: 'id 已存在', schema: ErrorResponseSchema }
     },
-    handler: proxyToUpstream
+    handler: writeWithWarmup
   },
   {
     method: 'GET',
@@ -139,7 +188,7 @@ export const postRoutes: ApiRoute[] = [
       400: { description: '缺少 title，或定时发布缺少发布时间', schema: ErrorResponseSchema },
       401: { description: '未授权', schema: ErrorResponseSchema }
     },
-    handler: proxyToUpstream
+    handler: writeWithWarmup
   },
   {
     method: 'DELETE',

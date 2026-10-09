@@ -14,6 +14,7 @@
  *
  * 契约路由与兜底路径共用同一份 withEdgeHeaders 实现，行为一致。
  * ============================================================ */
+import path from 'node:path';
 import { Hono } from 'hono';
 import type { AppConfig } from './config.js';
 import type { AppDatabase } from './types.js';
@@ -25,6 +26,8 @@ import { createConfigJsHandler } from './routes/config-js.js';
 import { adminAppAvailable, createAdminAppHandler } from './routes/admin-app.js';
 import { createSeoHandlers, type SeoDeps } from './routes/seo.js';
 import { createStaticExportHandler } from './routes/static-export.js';
+import { createImageProxyHandler } from './routes/image-proxy.js';
+import { configureImageProxy, hostOfUrl } from './lib/image-url.js';
 import {
   createLocalDownloadHandler,
   createLocalUploadHandler,
@@ -127,6 +130,25 @@ export function createApp(deps: AppDeps): Hono {
       app.on(['GET', 'HEAD'], prefix, publicObject);
     }
   }
+
+  /* ---------- 外链图片本地缓存反代（/api/img） ----------
+   * 首屏封面 / 头像原先要浏览器直连境外图床（实测 TLS 握手就 0.4~0.5s），
+   * 改为服务端抓取一次 + 落盘缓存，浏览器只连本站。
+   * SSR 侧（src/lib/image-url.ts）用同一份开关决定是否改写地址，
+   * 这样关闭反代时前后端行为一致，不会出现「一半走代理一半直连」。 */
+  configureImageProxy({
+    enabled: config.imageProxy.enabled,
+    selfHost: hostOfUrl(config.siteUrl)
+  });
+  const imageProxy = createImageProxyHandler({
+    cacheDir: path.join(config.dataDir, 'cache', 'img'),
+    enabled: config.imageProxy.enabled,
+    maxBytes: config.imageProxy.maxBytes,
+    cacheBytes: config.imageProxy.cacheBytes,
+    passthroughHosts: [hostOfUrl(config.siteUrl), hostOfUrl(config.s3.mediaPublicBase), hostOfUrl(config.s3.musicPublicBase)],
+    logger: (message) => logger.warn(message)
+  });
+  app.on(['GET', 'HEAD'], '/api/img', imageProxy);
 
   /* ---------- 服务端 SEO：文章页 / 首页 ---------- */
   if (deps.seo) {

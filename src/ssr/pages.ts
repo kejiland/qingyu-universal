@@ -10,6 +10,7 @@
  * ============================================================ */
 import type { AppDatabase } from '../types.js';
 import { escapeHtml, type PostRow, type SiteIdentity } from '../seo/meta.js';
+import { imageProxyUrl } from '../lib/image-url.js';
 import { renderMarkdown } from './post.js';
 
 function parseTags(raw: unknown): string[] {
@@ -276,7 +277,8 @@ export function renderSeriesContent(posts: PostRow[]): string {
 }
 
 function renderSeriesThumb(post: PostRow, index: number): string {
-  const cover = String(post.cover ?? '').trim();
+  // 同 src/ssr/list.ts：外链封面走本站反代，避免浏览器直连境外图床。
+  const cover = imageProxyUrl(String(post.cover ?? '').trim());
   if (!cover) return '';
   // 与 src/ssr/list.ts 的 renderThumb 同款保护：外链图床挂死时不能把破图留在首屏
   const priority = index < 2 ? ' fetchpriority="high"' : ' fetchpriority="low" loading="lazy"';

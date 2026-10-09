@@ -6,7 +6,7 @@
  * ============================================================================ */
 'use strict';
 
-var BLOG_VERSION = '2.10.104';
+var BLOG_VERSION = '2.10.105';
 
 /* i18n 兜底：万一 i18n.js 没加载成功（网络抖动 / 缓存缺失 / 被拦截），
  * 也必须保证 t() 可用 —— 否则整页会在第一个 t(...) 处抛 “t is not defined” 而白屏。 */
@@ -673,7 +673,7 @@ function inlineMd(s) {
   // 图片（过滤 javascript:/data: 等危险协议）
   t = t.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (m, alt, src) {
     if (/^\s*(javascript|data|vbscript):/i.test(String(src).trim())) return m;
-    return '<img src="' + src + '" alt="' + alt + '" loading="lazy" decoding="async" referrerpolicy="no-referrer">';
+    return '<img src="' + proxiedImg(src) + '" alt="' + alt + '" loading="lazy" decoding="async" referrerpolicy="no-referrer">';
   });
   // 链接（过滤 javascript:/data: 等危险协议）
   t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (m, txt, url) {
@@ -2754,8 +2754,20 @@ function renderCard(p, idx) {
  *   · decoding="async"：图片解码不阻塞主线程渲染；
  *   · onload 加 .thumb-in 类 → CSS 淡入（见 style.css），替代"啪地弹出"；
  *   · loading="lazy" + referrerpolicy 保留既有行为。 */
+/** 外链图片本地反代：把跨域图片改写成 /api/img?url=…（服务端抓取 + 落盘缓存）。
+ *  首屏封面 / 头像原先要浏览器直连境外图床（实测建连 0.4s+），改走本站后
+ *  首次也是同源请求，命中缓存后带 immutable 强缓存。
+ *  相对地址 / data: / 同源地址原样返回；服务端关闭反代时会 302 回原始地址。 */
+function proxiedImg(u) {
+  var s = String(u || '').trim();
+  if (!/^https?:\/\//i.test(s)) return s;
+  try {
+    if (new URL(s, location.href).host === location.host) return s;
+  } catch (e) {}
+  return '/api/img?url=' + encodeURIComponent(s);
+}
 function renderPostThumb(p, idx) {
-  var url = String((p && p.cover) || '').trim() || firstImageFrom(p && p.content);
+  var url = proxiedImg(String((p && p.cover) || '').trim() || firstImageFrom(p && p.content));
   var title = (p && p.title) || '';
   if (url) {
     var pri = (idx !== undefined && idx < 2) ? 'high' : 'low';
@@ -4034,7 +4046,7 @@ function renderAbout() {
   var profBio = prof.bio || '';
   if (profName || profAvatar || profBio) {
     html += '<div class="about-author card">';
-    if (profAvatar) html += '<img class="about-author-avatar" src="' + esc(profAvatar) + '" alt="' + esc(profName || 'avatar') + '" loading="lazy" decoding="async" referrerpolicy="no-referrer">';
+    if (profAvatar) html += '<img class="about-author-avatar" src="' + esc(proxiedImg(profAvatar)) + '" alt="' + esc(profName || 'avatar') + '" loading="lazy" decoding="async" referrerpolicy="no-referrer">';
     html += '<div class="about-author-info">';
     if (profName) html += '<div class="about-author-name">' + esc(profName) + '</div>';
     if (profBio) html += '<div class="about-author-bio">' + esc(profBio) + '</div>';
@@ -4603,7 +4615,7 @@ function updateSEO(path) {
     _setMeta('robots', 'noindex, nofollow');
     // favicon 仍需更新（后台也可能设置站点头像）
     var _fv = cfg.site && cfg.site.avatar;
-    if (_fv) { var _fl = document.querySelector('link[rel="icon"]'); if (_fl) _fl.setAttribute('href', _fv); }
+    if (_fv) { var _fl = document.querySelector('link[rel="icon"]'); if (_fl) _fl.setAttribute('href', proxiedImg(_fv)); }
     return;
   }
 
@@ -4634,7 +4646,7 @@ function updateSEO(path) {
   var siteAvatar = cfg.site && cfg.site.avatar;
   if (siteAvatar) {
     var faviconLink = document.querySelector('link[rel="icon"]');
-    if (faviconLink) faviconLink.setAttribute('href', siteAvatar);
+    if (faviconLink) faviconLink.setAttribute('href', proxiedImg(siteAvatar));
   }
 
   // JSON-LD structured data

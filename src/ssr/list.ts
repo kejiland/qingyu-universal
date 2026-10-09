@@ -6,6 +6,7 @@
  *   main.container.page-fade > .list-head + #homeBody > a.post-card
  * ============================================================ */
 import { escapeHtml, stripMarkdown, type PostRow, type SiteIdentity } from '../seo/meta.js';
+import { imageProxyUrl } from '../lib/image-url.js';
 import { formatDate } from './format.js';
 
 function parseTags(raw: unknown): string[] {
@@ -19,7 +20,9 @@ function parseTags(raw: unknown): string[] {
 }
 
 function renderThumb(post: PostRow, index: number): string {
-  const cover = String(post.cover ?? '').trim();
+  // 外链封面改走本站反代（/api/img）：浏览器不再直连境外图床，
+  // 首次加载省掉一次跨洋 DNS+TLS（实测 0.4~0.5s），命中缓存后是同源 immutable 字节。
+  const cover = imageProxyUrl(String(post.cover ?? '').trim());
   if (!cover) return '';
   // 前两张是首屏可视区，给高优先级；其余懒加载 + 低优先级
   const priority = index < 2 ? ' fetchpriority="high"' : ' fetchpriority="low" loading="lazy"';

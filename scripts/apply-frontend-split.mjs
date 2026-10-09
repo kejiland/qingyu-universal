@@ -443,6 +443,85 @@ function patchReadingScalePreset() {
   report.push('index.html -> 首屏阅读字号预设（避免接管时跳字号）');
 }
 
+/* 外链图片本地反代：把跨域图片地址改写成同源的 /api/img?url=…
+ * （服务端抓取一次 + 落盘缓存，见 src/routes/image-proxy.ts）。
+ * 原先首屏封面 / 头像由浏览器直连境外图床，实测仅 TLS 握手就要 0.4~0.5s，
+ * load 事件被拖到 2s 级。改走本站后首次也是同源请求，之后 immutable 命中。
+ *
+ * ⚠️ 必须与 src/lib/image-url.ts 的 imageProxyUrl() 保持同样的判定规则：
+ *    相对地址 / data: / 同源绝对地址原样返回，其余跨域 http(s) 才改写。
+ *    两边不一致会让 SSR 与前端接管后渲染出两个不同的 URL，
+ *    浏览器把同一张图各下一遍。tests/image-proxy.test.ts 有交叉断言。
+ * 幂等：已有 proxiedImg() 就跳过。 */
+function patchImageProxy(app) {
+  if (app.includes('function proxiedImg(')) {
+    report.push('[skip] 外链图片本地反代已存在');
+    return app;
+  }
+
+  const helper = [
+    '/** 外链图片本地反代：把跨域图片改写成 /api/img?url=…（服务端抓取 + 落盘缓存）。',
+    ' *  首屏封面 / 头像原先要浏览器直连境外图床（实测建连 0.4s+），改走本站后',
+    ' *  首次也是同源请求，命中缓存后带 immutable 强缓存。',
+    ' *  相对地址 / data: / 同源地址原样返回；服务端关闭反代时会 302 回原始地址。 */',
+    'function proxiedImg(u) {',
+    "  var s = String(u || '').trim();",
+    "  if (!/^https?:\\/\\//i.test(s)) return s;",
+    '  try {',
+    '    if (new URL(s, location.href).host === location.host) return s;',
+    '  } catch (e) {}',
+    "  return '/api/img?url=' + encodeURIComponent(s);",
+    '}',
+    ''
+  ].join('\n');
+
+  const anchor = 'function renderPostThumb(p, idx) {';
+  if (!app.includes(anchor)) throw new Error('未找到 renderPostThumb()，上游结构可能已变化');
+  let out = app.replace(anchor, helper + anchor);
+
+  const swaps = [
+    // 卡片 / 列表封面（含从正文提取的第一张图）
+    [
+      "var url = String((p && p.cover) || '').trim() || firstImageFrom(p && p.content);",
+      "var url = proxiedImg(String((p && p.cover) || '').trim() || firstImageFrom(p && p.content));",
+      '列表封面'
+    ],
+    // 正文 Markdown 图片
+    [
+      'return \'<img src="\' + src + \'" alt="\' + alt + \'" loading="lazy" decoding="async" referrerpolicy="no-referrer">\';',
+      'return \'<img src="\' + proxiedImg(src) + \'" alt="\' + alt + \'" loading="lazy" decoding="async" referrerpolicy="no-referrer">\';',
+      '正文图片'
+    ],
+    // 关于页博主头像
+    [
+      'if (profAvatar) html += \'<img class="about-author-avatar" src="\' + esc(profAvatar) + \'"',
+      'if (profAvatar) html += \'<img class="about-author-avatar" src="\' + esc(proxiedImg(profAvatar)) + \'"',
+      '博主头像'
+    ],
+    // 站点头像（后台 / 前台 favicon）
+    [
+      'if (_fl) _fl.setAttribute(\'href\', _fv); }',
+      'if (_fl) _fl.setAttribute(\'href\', proxiedImg(_fv)); }',
+      '后台 favicon'
+    ],
+    [
+      "if (faviconLink) faviconLink.setAttribute('href', siteAvatar);",
+      "if (faviconLink) faviconLink.setAttribute('href', proxiedImg(siteAvatar));",
+      '前台 favicon'
+    ]
+  ];
+
+  const applied = [];
+  for (const [from, to, what] of swaps) {
+    if (!out.includes(from)) throw new Error('外链图片反代：未找到改写点 —— ' + what);
+    out = out.split(from).join(to);
+    applied.push(what);
+  }
+
+  report.push('[ok]   外链图片本地反代 /api/img（' + applied.join('、') + '）');
+  return out;
+}
+
 function patchSwCacheStrategy() {
   let sw = read('sw.js');
   if (sw.includes('searchParams.has(\'v\')')) return;
@@ -482,6 +561,7 @@ if (app.includes('function ensureLegacyAdmin()')) {
 
 if (!fs.existsSync(path.join(PUB, 'boot.js'))) write('boot.js', BOOT_SOURCE);
 app = patchDisplayPolish(app);
+app = patchImageProxy(app);
 write('app.js', app);
 ensurePolishShell();
 patchCriticalCss();

@@ -74,6 +74,18 @@ const EnvSchema = z.object({
   AUDIT_MAX_ROWS: z.string().trim().default(''),
   AUDIT_RETENTION_DAYS: z.string().trim().default(''),
 
+  /* 外链图片本地缓存反代（/api/img）
+   * ------------------------------------------------------------
+   * 首屏封面 / 头像原先由浏览器直连境外图床，实测仅 TLS 握手就要 0.4~0.5s
+   * （CF 西雅图节点），首屏 load 事件被拖到 2s 级。改成「浏览器连本站、
+   * 服务端抓取一次并落盘缓存」后，第二次起就是同源 immutable 字节。
+   * 关闭（=0）后 /api/img 直接 302 回原始地址，行为与改动前一致。 */
+  IMAGE_PROXY: booleanish(true),
+  /** 单张图片上限（MB），超过直接 413，防止把磁盘写满。 */
+  IMAGE_PROXY_MAX_MB: z.coerce.number().int().min(1).max(100).default(15),
+  /** 缓存目录总容量（MB），超出后按最久未访问淘汰。 */
+  IMAGE_PROXY_CACHE_MB: z.coerce.number().int().min(16).max(10240).default(512),
+
   /* 管理员 */
   BLOG_ADMIN_SETUP_KEY: z.string().trim().default(''),
   BLOG_WRITE_TOKEN: z.string().trim().default(''),
@@ -185,6 +197,12 @@ export interface AppConfig {
   readonly flags: { aiEnabled: string; aiPublic: string };
   /** 后台操作日志保留策略（空串 = 用上游内置默认）。 */
   readonly audit: { maxRows: string; retentionDays: string };
+  /** 外链图片本地缓存反代（/api/img）。 */
+  readonly imageProxy: {
+    readonly enabled: boolean;
+    readonly maxBytes: number;
+    readonly cacheBytes: number;
+  };
   readonly extra: { commentBlocklist: string };
 }
 
@@ -295,6 +313,11 @@ export function loadConfig(): AppConfig {
     },
     flags: { aiEnabled: env.BLOG_AI_ENABLED, aiPublic: env.BLOG_AI_PUBLIC },
     audit: { maxRows: env.AUDIT_MAX_ROWS, retentionDays: env.AUDIT_RETENTION_DAYS },
+    imageProxy: {
+      enabled: env.IMAGE_PROXY,
+      maxBytes: env.IMAGE_PROXY_MAX_MB * 1024 * 1024,
+      cacheBytes: env.IMAGE_PROXY_CACHE_MB * 1024 * 1024
+    },
     extra: { commentBlocklist: env.COMMENT_BLOCKLIST }
   });
 }
