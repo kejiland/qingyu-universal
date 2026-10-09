@@ -119,4 +119,61 @@ describe('deploy/install.sh', () => {
     expect(s).toContain('post_install_guide');
     expect(s).toContain('接下来三件事');
   });
+
+  // ---------- 更新（update / check-update）----------
+  it('更新功能的关键函数都还在', () => {
+    const s = src();
+    for (const fn of ['remote_revision', 'compare_revision', 'show_pending_commits', 'cmd_update', 'cmd_check_update']) {
+      expect(s, `缺少函数 ${fn}()`).toMatch(new RegExp(`^${fn}\\(\\)\\s*\\{`, 'm'));
+    }
+  });
+
+  it('update / check-update 都接到了分发器', () => {
+    const s = src();
+    expect(s).toMatch(/^\s*update\)\s+cmd_update ;;$/m);
+    expect(s).toMatch(/^\s*check-update\)/m);
+  });
+
+  it('拿不到远端版本时绝不继续更新（不能把正在跑的版本换成别的）', () => {
+    const s = src();
+    const fn = s.slice(s.indexOf('cmd_update() {'));
+    const body = fn.slice(0, fn.indexOf('\n}\n'));
+    // compare_revision 失败（unknown）必须走 die，不能继续往下走备份/重建
+    expect(body).toContain('拿不到远端版本号');
+    const dieAt = body.indexOf('拿不到远端版本号');
+    const backupAt = body.indexOf('backup_now');
+    const buildAt = body.indexOf('compose up -d --build');
+    expect(dieAt, 'cmd_update 里找不到 unknown 分支的错误提示').toBeGreaterThan(-1);
+    expect(backupAt, 'cmd_update 里找不到 backup_now').toBeGreaterThan(-1);
+    expect(buildAt, 'cmd_update 里找不到 compose up -d --build').toBeGreaterThan(-1);
+    expect(dieAt).toBeLessThan(backupAt);
+    expect(dieAt).toBeLessThan(buildAt);
+  });
+
+  it('更新前一定先备份（代码能回滚，数据库迁移回滚不了）', () => {
+    const s = src();
+    const fn = s.slice(s.indexOf('cmd_update() {'));
+    const body = fn.slice(0, fn.indexOf('\n}\n'));
+    expect(body.indexOf('backup_now')).toBeLessThan(body.indexOf('update_source'));
+    expect(body.indexOf('update_source')).toBeLessThan(body.indexOf('compose up -d --build'));
+  });
+
+  it('比较版本的两端都拿得到 SHA 才敢判「已是最新」', () => {
+    const s = src();
+    const fn = s.slice(s.indexOf('compare_revision() {'));
+    const body = fn.slice(0, fn.indexOf('\n}\n'));
+    expect(body).toContain('UPDATE_CUR="$(resolve_revision_full)"');
+    expect(body).toContain('UPDATE_REMOTE="$(remote_revision)"');
+    // 本地读不出来也要算 unknown —— refs_equal 空值会返回 1，
+    // 若不显式拦掉就会被误判成「有新版」，白重建一次还可能降级
+    expect(body).toMatch(/if \[ -z "\$UPDATE_CUR" \]/);
+    expect(body).toContain('UPDATE_STATE="unknown"');
+  });
+
+  it('只检查的命令不装 git（纯只读，不该动系统包管理器）', () => {
+    const s = src();
+    const fn = s.slice(s.indexOf('cmd_check_update() {'));
+    const body = fn.slice(0, fn.indexOf('\n}\n'));
+    expect(body).not.toContain('ensure_git');
+  });
 });

@@ -9,8 +9,9 @@
 #     curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh | bash -s -- --domain blog.example.com
 #
 # 常用子命令：
-#     install（默认） | upgrade | backup | restore <file> | logs | status | info
-#     start | stop | restart | rollback | uninstall
+#   install（默认） | update | check-update | upgrade | rollback
+#   backup | restore <file> | logs | status | info | doctor
+#   start | stop | restart | uninstall | autobackup | migrate
 #
 # 设计原则：可重复执行；已存在的 .env 与数据库绝不覆盖。
 # ============================================================
@@ -64,6 +65,11 @@ WIZ_DISTRO=""        # 系统名称
 WIZ_ARCH=""          # CPU 架构
 WIZ_DISK=""          # 可用磁盘 MB
 UPGRADE_FROM=""      # 升级前的版本（用于升级后对比）
+# update / check-update 的比对结果（脚本开了 set -u，先占位）
+UPDATE_CUR=""        # 本地当前版本（完整 SHA）
+UPDATE_REMOTE=""     # 远端最新版本（完整 SHA）
+UPDATE_STATE=""      # latest | behind | unknown
+CHECK_ONLY=0         # --check：只查有没有新版，不做任何改动
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
@@ -223,6 +229,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     install|upgrade|backup|restore|logs|status|info|start|stop|restart|rollback|uninstall|help) COMMAND="$1"; COMMAND_SET=1 ;;
     doctor)                 COMMAND="$1"; COMMAND_SET=1 ;;
+    update|check-update)    COMMAND="$1"; COMMAND_SET=1 ;;
     autobackup|migrate)     COMMAND="$1"; COMMAND_SET=1 ;;
     --domain)   DOMAIN="${2:-}"; shift ;;
     --email)    EMAIL="${2:-}"; shift ;;
@@ -258,6 +265,7 @@ while [ $# -gt 0 ]; do
     --skip-preflight) SKIP_PREFLIGHT=1 ;;
     --no-doctor)     SKIP_DOCTOR=1 ;;
     --reset|--fresh) RESET_STATE=1 ;;
+    --check)          CHECK_ONLY=1 ;;
     --no-autobackup) NO_AUTOBACKUP=1 ;;
     -h|--help)  COMMAND="help" ;;
     *)          ARGS+=("$1") ;;
@@ -319,7 +327,9 @@ usage() {
 
   install                 安装并启动（默认）
                           （已部署过且不带子命令运行时，改为弹出数字菜单）
-  upgrade                 拉取新版本并重建（保留数据）
+  update                  检查远端有新代码就更新部署（先备份再重建，没有新版就什么都不做）
+  check-update            只看远端有没有新代码，不改动任何东西（适合放进定时任务）
+  upgrade                 无条件拉新代码并重建（保留数据）；已有新版时不如 update 合适
   rollback                回滚到上一个版本（回滚前自动备份）
   backup                  生成数据库快照到 data/backups
   autobackup              安装定时备份（每天自动快照，只保留最近 7 份）
@@ -349,6 +359,7 @@ usage() {
   --email  <邮箱>         ACME 证书通知邮箱（可选）
   --dir    <目录>         安装目录，默认 /opt/qingyu-universal
   --ref    <分支/标签>     下载的代码版本，默认 main
+  --check                 update 时只检查、不改动（等同 check-update）
   --repo   <owner/repo>    从哪个 GitHub 仓库取代码，默认 kejiland/qingyu-universal
   --image  <镜像>         使用预构建镜像而不是本地构建
   --no-mirror             关闭国内加速（升级时想改回官方源用）
@@ -2214,6 +2225,178 @@ cmd_install() {
   post_install_guide
 }
 
+# ---------- 更新：先查远端有没有新代码，有才动 ----------
+# 远端最新 commit 的完整 SHA。
+# git 检出优先用 `git ls-remote`（直连仓库、能拿到分支真实 HEAD）；
+# 没有 git 就退回 Atom feed 里的第一条（压缩包安装的老路径）。
+# 两个来源都试过还拿不到 → 返回空，调用方要能区分「已是最新」和「查不到」。
+remote_revision() {
+  local ref="${1:-$REF}" sha="" u
+  [ -n "$ref" ] || return 0
+  if have git; then
+    while IFS= read -r u; do
+      sha="$(git ls-remote "$u" "refs/heads/$ref" 2>/dev/null | awk 'NR==1{print $1}')" || sha=""
+      [ -n "$sha" ] && break
+    done < <(git_clone_urls)
+  fi
+  [ -n "$sha" ] || sha="$(atom_revision "$ref")"
+  printf '%s' "$sha"
+}
+
+# 比对本地与远端，把结论写进 UPDATE_STATE / UPDATE_CUR / UPDATE_REMOTE。
+# UPDATE_STATE: latest（已是最新）| behind（有新版）| unknown（查不到，别乱动）
+compare_revision() {
+  UPDATE_CUR="$(resolve_revision_full)"
+  UPDATE_REMOTE="$(remote_revision)"
+  if [ -z "$UPDATE_REMOTE" ]; then
+    UPDATE_STATE="unknown"
+    return 1
+  fi
+  # 本地版本读不出来也算 unknown：这时若贸然「更新」，可能把正在跑的版本换成别的
+  if [ -z "$UPDATE_CUR" ]; then
+    UPDATE_STATE="unknown"
+    return 1
+  fi
+  if refs_equal "$UPDATE_CUR" "$UPDATE_REMOTE"; then
+    UPDATE_STATE="latest"
+    return 1
+  fi
+  UPDATE_STATE="behind"
+  return 0
+}
+
+# 列出「本地 → 远端」之间的提交，让人知道这次更新会带来什么。
+# 必须先 fetch：远端的新 commit 对象本地根本没有，直接 rev-list 会失败
+# （fetch 只更新远端引用，不动工作区与 HEAD，对「只检查」是安全的）。
+# 压缩包安装没有本地 git 历史，只能报一句「无法列出」。
+show_pending_commits() {
+  local n
+  if [ -d "$INSTALL_DIR/.git" ] && have git; then
+    # 拿不到就算了，绝不因为列不出提交就中断检查。
+    # 不写 remote 名：用默认的 origin，若安装目录是别处克隆来的（如 gitclone 镜像）
+    # origin 不存在时这条会失败，但已被 || true 兜住，最多退化成「不显示明细」。
+    git -C "$INSTALL_DIR" fetch --quiet --tags >/dev/null 2>&1 || true
+    n="$(git -C "$INSTALL_DIR" rev-list --count "${UPDATE_CUR}..${UPDATE_REMOTE}" 2>/dev/null || true)"
+    case "$n" in ''|*[!0-9]*) n="" ;; esac
+    if [ -n "$n" ] && [ "$n" != "0" ]; then
+      echo "    远端比本地多 ${n} 个提交："
+      git -C "$INSTALL_DIR" log --oneline --no-decorate "${UPDATE_CUR}..${UPDATE_REMOTE}" 2>/dev/null \
+        | head -n 10 | sed 's/^/      /' || true
+      [ "$n" -gt 10 ] && echo "      …… 还有 $((n - 10)) 个"
+      return 0
+    fi
+  fi
+  echo "    （拿不到提交明细，不影响更新）"
+}
+
+# 只检查：不动任何东西。退出码 0 = 有新版，1 = 已是最新 / 查不到。
+cmd_check_update() {
+  [ -d "$INSTALL_DIR" ] || die "未找到安装目录：$INSTALL_DIR
+  提示：如果装在别处，用 --dir <目录> 指定。"
+  resolve_mirror
+  ensure_curl
+  # 故意不装 git：检查是只读的，git 缺失时 remote_revision 会自动退回 Atom feed。
+  # 而装 git 可能要动系统包管理器 —— 一个「只查一下」的命令不该有这种副作用。
+  have git || warn "未检测到 git，改用 GitHub Atom feed 判断版本（结果同样准确）"
+
+  log "正在检查 $REPO@$REF 是否有新代码…"
+  if ! compare_revision; then
+    if [ "$UPDATE_STATE" = "latest" ]; then
+      log "当前已是最新版本（$(printf '%.7s' "$UPDATE_CUR")），无需更新"
+      return 0
+    fi
+    warn "拿不到远端版本号，没法判断有没有新版"
+    echo "  可能原因：网络不通 / 代理配错 / 仓库或分支名写错了"
+    echo "  可以试试：$0 check-update --mirror --repo <owner/repo> --ref <分支>"
+    return 1
+  fi
+
+  echo
+  log "有新版！本地 $(printf '%.7s' "$UPDATE_CUR") → 远端 $(printf '%.7s' "$UPDATE_REMOTE")"
+  show_pending_commits
+  echo
+  log "执行更新：$0 update"
+  return 0
+}
+
+# 更新：先查，有新版才备份 + 拉代码 + 重建 + 等健康；没有就什么都不做。
+# 与 upgrade 的区别是「没新版就不白重建一次」—— 升级是无条件的，这个是幂等的，
+# 适合放进 cron 每天跑（没新版时零开销、零风险）。
+cmd_update() {
+  need_root
+  [ -d "$INSTALL_DIR" ] || die "未找到安装目录：$INSTALL_DIR
+  提示：如果装在别处，用 --dir <目录> 指定。"
+  resolve_docker
+  resolve_mirror
+  ensure_curl
+  have git || ensure_git
+
+  log "正在检查 $REPO@$REF 是否有新代码…"
+  if ! compare_revision; then
+    if [ "$UPDATE_STATE" = "latest" ]; then
+      log "当前已是最新版本（$(printf '%.7s' "$UPDATE_CUR")），无需更新"
+      log "想强制重建容器（比如基础镜像更新了）：$0 upgrade"
+      return 0
+    fi
+    die "拿不到远端版本号，为安全起见不做任何改动
+  可以试试加 --mirror（国内网络加速），或用 --repo / --ref 确认仓库和分支是否正确"
+  fi
+
+  # --check：只报结果就走，和 cmd_check_update 同义
+  if [ "$CHECK_ONLY" = "1" ]; then
+    log "有新版！本地 $(printf '%.7s' "$UPDATE_CUR") → 远端 $(printf '%.7s' "$UPDATE_REMOTE")"
+    show_pending_commits
+    return 0
+  fi
+
+  # 没新版但明确要求 --check 时，上面已处理；走到这里一定是 behind
+  echo
+  log "版本变化：$(printf '%.7s' "$UPDATE_CUR") → $(printf '%.7s' "$UPDATE_REMOTE")"
+  show_pending_commits
+
+  if [ "$ASSUME_YES" != "1" ]; then
+    if ! can_ask; then
+      die "当前不是交互环境，确认无误后加 -y 执行：$0 update -y"
+    fi
+    ask "确认更新到最新版本？" "y"
+    case "$REPLY" in
+      y|Y|yes|YES) ;;
+      *) log "已取消更新"; return 0 ;;
+    esac
+  fi
+
+  STEP_TOTAL=4
+  step_begin "备份当前数据"
+  # 更新前先留个快照：代码可以回滚，数据库迁移过的表结构回滚不了
+  backup_now || warn "备份失败，继续更新 —— 请自行确认数据安全"
+  step_end
+
+  step_begin "拉取最新代码"
+  UPGRADE_FROM="$UPDATE_CUR"
+  update_source
+  step_end
+
+  step_begin "重建容器并等待服务就绪"
+  # 注入构建版本（git 短 SHA），让 /healthz 能回答「更新到底生效没有」
+  BUILD_REVISION="$(resolve_revision)"
+  [ -n "$BUILD_REVISION" ] || BUILD_REVISION=unknown
+  export BUILD_REVISION
+  log "重建容器…（版本 $BUILD_REVISION）"
+  compose pull --ignore-pull-failures 2>/dev/null || true
+  compose up -d --build
+  wait_healthy
+  step_end
+
+  step_begin "复查防火墙放行"
+  ensure_firewall_open
+  step_end
+
+  STEP_TOTAL=0
+  log "更新完成（版本 $BUILD_REVISION）"
+  log "站点：$(env_value SITE_URL)"
+  echo "  万一有问题，一条命令退回：$0 rollback"
+}
+
 # 升级前先把「从哪个版本升到哪个版本」说清楚，中间隔了多少个提交也一并列出
 show_version_diff() {
   local after
@@ -3167,40 +3350,42 @@ maybe_show_menu() {
     printf '\033[1;36m==> \033[0m%s\n' "检测到 ${INSTALL_DIR} 已经部署过，你想做什么？"
     [ -n "$site" ] && printf '    当前站点：\033[1m%s\033[0m\n' "$site"
     echo
-    echo "  1) 升级到最新版    拉新代码并重建，数据保留"
-    echo "  2) 一键体检        Docker / 容器 / 端口 / 防火墙 / 公网逐项检查"
-    echo "  3) 查看部署信息    访问地址、初始化密钥、版本、文章数"
-    echo "  4) 查看运行状态    容器与健康检查"
-    echo "  5) 备份数据        数据库快照到 data/backups"
-    echo "  6) 查看日志        实时输出应用日志（Ctrl+C 退出）"
-    echo "  7) 重启服务        改完 .env 之后用它生效"
-    echo "  8) 停止服务        配置和数据都保留"
-    echo "  9) 启动服务        把停过的服务再拉起来"
-    echo " 10) 回滚到上一版    升级出问题时退回"
-    echo " 11) 卸载            删除容器（数据卷保留）"
-    echo " 12) 定时备份        每天自动快照，只保留最近 7 份"
-    echo " 13) 打包迁移        打成 tar.gz，方便搬到新服务器"
+    echo "  1) 更新到最新版    先查有没有新代码，有才备份+重建，数据保留"
+    echo "  2) 只检查更新      看远端有没有新代码，不改动任何东西"
+    echo "  3) 一键体检        Docker / 容器 / 端口 / 防火墙 / 公网逐项检查"
+    echo "  4) 查看部署信息    访问地址、初始化密钥、版本、文章数"
+    echo "  5) 查看运行状态    容器与健康检查"
+    echo "  6) 备份数据        数据库快照到 data/backups"
+    echo "  7) 查看日志        实时输出应用日志（Ctrl+C 退出）"
+    echo "  8) 重启服务        改完 .env 之后用它生效"
+    echo "  9) 停止服务        配置和数据都保留"
+    echo " 10) 启动服务        把停过的服务再拉起来"
+    echo " 11) 回滚到上一版    更新出问题时退回"
+    echo " 12) 卸载            删除容器（数据卷保留）"
+    echo " 13) 定时备份        每天自动快照，只保留最近 7 份"
+    echo " 14) 打包迁移        打成 tar.gz，方便搬到新服务器"
     echo "  0) 退出"
     echo
-    echo "  提示：改端口 / 站点地址 → 编辑 ${INSTALL_DIR}/.env 后选 7 生效"
+    echo "  提示：改端口 / 站点地址 → 编辑 ${INSTALL_DIR}/.env 后选 8 生效"
   } > /dev/tty 2>/dev/null || return 0
   ask "请输入数字" "0"
   case "$REPLY" in
-    1)  COMMAND="upgrade" ;;
-    2)  COMMAND="doctor" ;;
-    3)  COMMAND="info" ;;
-    4)  COMMAND="status" ;;
-    5)  COMMAND="backup" ;;
-    6)  COMMAND="logs" ;;
-    7)  COMMAND="restart" ;;
-    8)  COMMAND="stop" ;;
-    9)  COMMAND="start" ;;
-    10) COMMAND="rollback" ;;
-    11) COMMAND="uninstall" ;;
-    12) COMMAND="autobackup" ;;
-    13) COMMAND="migrate" ;;
+    1)  COMMAND="update" ;;
+    2)  COMMAND="check-update" ;;
+    3)  COMMAND="doctor" ;;
+    4)  COMMAND="info" ;;
+    5)  COMMAND="status" ;;
+    6)  COMMAND="backup" ;;
+    7)  COMMAND="logs" ;;
+    8)  COMMAND="restart" ;;
+    9)  COMMAND="stop" ;;
+    10) COMMAND="start" ;;
+    11) COMMAND="rollback" ;;
+    12) COMMAND="uninstall" ;;
+    13) COMMAND="autobackup" ;;
+    14) COMMAND="migrate" ;;
     0)  log "已退出（再次运行本脚本可重新打开菜单）"; exit 0 ;;
-    *)  warn "没看懂这个选择（请输入 0-13），先退出"; exit 1 ;;
+    *)  warn "没看懂这个选择（请输入 0-14），先退出"; exit 1 ;;
   esac
 }
 
@@ -3215,6 +3400,8 @@ case "$COMMAND" in
   help) usage ;;
   install) cmd_install ;;
   upgrade) cmd_upgrade ;;
+  update)  cmd_update ;;
+  check-update) if [ "$CHECK_ONLY" = "1" ]; then cmd_update; else cmd_check_update; fi ;;
   backup)    cmd_backup; prune_backups "$KEEP_N" ;;
   autobackup) cmd_autobackup ;;
   migrate)   cmd_migrate ;;
