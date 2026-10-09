@@ -119,6 +119,35 @@ BASE_URL=http://localhost:8787 SETUP_KEY=... npm run smoke
 并相应修改了 `index.html`、`sw.js`、`_headers`。`npm run sync:upstream` 已串联 `apply-frontend-split.mjs`，
 上游覆盖回单文件形态时会幂等重新拆分，并在必要时递增补丁版本。
 
+原生后台的自有增量（**同步时最容易被冲掉，务必核对**）：`/admin` 默认使用上游原生后台
+（`app/public/admin.js` + `admin.css`），本项目在它内部补齐了 Vue 新版后台独有的能力。
+`cp -a /tmp/upstream/public app/public` 会整文件覆盖这两个文件，因此
+`npm run sync:upstream` 结束时会跑一次自检并在报告中列出缺失项。增量清单与判定标记：
+
+| 功能 | 标记（admin.js） | 样式标记（admin.css） |
+| --- | --- | --- |
+| 新站上手引导 | `WELCOME_DISMISS_KEY` | `.ab-welcome-card` |
+| 顶栏主题色选择器（与前台联动） | `abAccentToggle` / `accentSwatchesMarkup` | 复用前台的 `.accent-*` |
+| 编辑器 AI「标签建议」 | `data-abai="tags"` | — |
+| 页脚 / 友链拖拽排序 | `ab-link-drag` | `.ab-link-drag` |
+| 高级设置 JSON 模式 | `data-sjson` / `openJsonModal` | — |
+| 设置页「AI 助手」配置 | `bindAiSettings` / `ab-ai-model` | `.ab-ai-model` |
+| 设置页「存储」配置（媒体/音乐放哪） | `bindStorageSettings` / `abStMode` | 复用既有 `.ab-field` 等 |
+| 侧边栏切页保留滚动位置 | `navScrollTop` | — |
+| 媒体复制链接补全为完整地址 | `function absUrl` | — |
+| 对应文案 | `admin.welcome.*` / `admin.settings.json*` / `admin.settings.ai*` / `admin.settings.storage*` | 见 `locales/*.json` |
+
+后端的自有增量（`src/` 与 `app/migrations/` 不受上游同步影响，但同样纳入自检，
+防止误删或手工回滚）：`ai_config` / `storage_config` 两张表、
+`src/bindings/{ai-config,storage-config,object-ops,object-migrate}.ts`、
+`src/api/{admin-auth,audit}.ts` 与 `src/api/routes/{admin-ai,admin-storage}.ts`、
+`worker-env.ts` 里 `env.AI` 与 `env.R2_*` / `env.LOCAL_STORAGE` 的动态 getter。
+`npm run sync:upstream` 的 `checkAdminIncrements()` 会逐项核对这些标记。
+
+> Vue 后台（`admin/`）**不再默认挂载**：`/admin` 交给上游原生后台，
+> 只有 `ADMIN_SPA=1` 时 `src/app.ts` 才重新挂载 Vue SPA。
+> 因此同步上游后要确认的是「原生后台的增量还在」，而不是「admin/dist 还在」。
+
 视觉打磨（自有改动）：外观改进**不写进上游 `style.css`**，全部放在独立的 `app/public/polish.css`，
 由构建产出 `polish.min.css` 并在主样式后加载。同步脚本同样幂等补回 `index.html` 的样式引用、
 `sw.js` 缓存清单与 `_headers` 规则；同时以 `function fmtDate` 是否存在为标记，重新应用
