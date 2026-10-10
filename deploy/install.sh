@@ -25,7 +25,13 @@ IP_ADDR=""
 APP_PORT=""
 ASSUME_YES=0
 EMAIL="${ACME_EMAIL:-}"
+# 预构建镜像：发布新版本时改这一行就够了（脚本里所有提示都引用它）
+PREBUILT_IMAGE="${QINGYU_PREBUILT_IMAGE:-ghcr.io/kejiland/qingyu-universal:latest}"
 IMAGE="${QINGYU_IMAGE:-}"
+# 选了 --image 但没给镜像名 → 用上面这个默认的预构建镜像（等价于 --prebuilt）
+IMAGE_SET=0
+# 低内存构建模式：auto（按内存自动判断，默认） / on / off（等价于 --lowmem / --no-lowmem）
+LOWMEM="${QINGYU_LOWMEM:-auto}"
 # 国内网络加速（--mirror）：GitHub 代码 / Docker Hub 镜像 / npm 依赖。
 # 留空 = 先看 .env 里是否记着上次的选择，保证升级时自动沿用。
 MIRROR="${QINGYU_MIRROR:-}"
@@ -383,7 +389,17 @@ while [ $# -gt 0 ]; do
     --database-url) DATABASE_URL_OPT="${2:-}"; shift ;;
     -y|--yes)   ASSUME_YES=1 ;;
     --ip)       IP_ADDR="${2:-}"; shift ;;
-    --image)    IMAGE="${2:-}"; shift ;;
+    --image)
+      # 后面没跟镜像名、或跟的是别的选项 → 用脚本内置的默认预构建镜像
+      if [ -z "${2:-}" ] || [ "${2#-}" != "$2" ]; then
+        IMAGE="$PREBUILT_IMAGE"; IMAGE_SET=1
+      else
+        IMAGE="$2"; IMAGE_SET=1; shift
+      fi ;;
+    --prebuilt) IMAGE="$PREBUILT_IMAGE"; IMAGE_SET=1 ;;
+    --local-build) IMAGE=""; IMAGE_SET=1 ;;
+    --lowmem)    LOWMEM=on ;;
+    --no-lowmem) LOWMEM=off ;;
     --mirror)         MIRROR=1 ;;
     --no-mirror)      MIRROR=0 ;;
     --github-proxy)   GITHUB_PROXY="${2:-}"; MIRROR=1; shift ;;
@@ -500,9 +516,6 @@ usage() {
       curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh | bash
       （或在本仓库里执行： bash deploy/install.sh）
 
-  默认行为：不提问、不需要任何配置。
-  自动完成「装 Docker → 取代码 → 建库 → 启动」，装完直接给你一个能打开的网址，
-  管理员密码、站名、AI 摘要、邮件、图床等全部进后台「设置」里填即可。
 
   想自动 HTTPS（有域名时）：加 --domain 你的域名
   想换端口：              加 --port 8080
@@ -528,7 +541,11 @@ usage() {
     --email      <邮箱>     证书到期通知邮箱
     --repo       <owner/repo>  代码仓库，默认 kejiland/qingyu-universal
     --ref        <分支/标签>  代码版本，默认 main
-    --image      <镜像>     用预构建镜像，不在本机构建
+    --image      [<镜像>]     用预构建镜像，不在本机构建
+    --prebuilt             同上，直接用脚本内置的默认镜像（小内存机器装法一条路）
+    --local-build          强制本地构建（并清掉 .env 里的镜像设置）
+    --lowmem               本地构建时走低内存模式（两个 npm 构建串行）
+                              内存 < 1200 MB 时自动开启，可用 --no-lowmem 关闭
 
   AI 摘要（也可在后台「设置 → AI」填）
     --ai-base-url <地址> --ai-key <密钥> --ai-model <模型>
@@ -2197,8 +2214,12 @@ check_resources() {
       warned=1
     elif [ "$mem_total_kb" -lt 1048576 ]; then
       warn "内存 $((mem_total_kb / 1024)) MB 偏小，构建镜像时可能被杀进程（OOM）"
-      warn "  两个省内存的办法：① 用现成镜像 --image ghcr.io/kejiland/qingyu-universal:v0.8.0（不本地构建）"
-      warn "                   ② 先在本地构建好镜像再传上来"
+      if lowmem_mode; then
+        warn "  已自动启用低内存构建：两个 npm 构建改为串行执行 + 压住 Node 堆上限"
+      fi
+      warn "  更省的两个办法：① 用现成镜像（不本地构建）："
+      warn "                   $0 install --prebuilt"
+      warn "                 ② 先在本地 / 大内存机器构建好镜像再传上来"
       warned=1
     fi
     # 内存小又没有 swap：构建时更容易被 OOM Killer 直接干掉
@@ -2292,6 +2313,101 @@ compose() {
   cd "$INSTALL_DIR"
   if [ -n "$IMAGE" ]; then export QINGYU_IMAGE="$IMAGE"; fi
   ${DOCKER:-docker} compose "$@"
+}
+
+# ----------------------------------------------------------
+# 构建策略：省内存地构建 / 部署镜像
+# ----------------------------------------------------------
+# 1G / 512M 的小机器上直接 `compose up -d --build` 很容易被 OOM 杀掉：
+# 后台 SPA 构建和服务端 tsc 构建是两个互不依赖的 stage，BuildKit 会【并行】跑它们，
+# 两个 npm build 一起抢内存，峰值远高于机器的物理内存（你的日志里两个 build 同时跑了 149 秒）。
+# 这里给两条省内存的走法，compose_build() 按参数自动挑：
+#   ① --image <镜像>：完全跳过本地构建，只拉预构建镜像 —— 资源占用最低
+#   ② --lowmem       ：仍然本地构建，但把两个重 stage 拆成串行，并压住 Node 堆上限
+
+# 是否启用低内存构建。LOWMEM=auto 时按物理内存自动判断（< 1200 MB 视为小机器）。
+lowmem_mode() {
+  case "${LOWMEM:-auto}" in
+    on|1|yes|true)  return 0 ;;
+    off|0|no|false) return 1 ;;
+  esac
+  local kb
+  kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || true)"
+  [ -n "$kb" ] || return 1
+  [ "$kb" -lt 1228800 ]
+}
+
+# 低内存时的 Node 堆上限：压到 384 MB，让 V8 更早回收而不是无限增长到被内核杀掉。
+LOWMEM_NODE_OPTIONS="--max-old-space-size=384"
+
+# 串行构建：先用 --target 分别把两个重 stage 跑一遍（只写构建缓存，不产出镜像），
+# 再做一次完整构建组装最终镜像 —— 这一步会直接命中刚才的缓存，几乎不耗 CPU。
+# 关键点：--target 把 BuildKit 的并行图拆成两次调用，两个 npm build 就变成先后执行，
+# 内存峰值从「两个加起来」降到「单个」。
+build_staged() {
+  local d="${DOCKER:-docker}"
+  local tag="${IMAGE:-}"
+  [ -n "$tag" ] || tag="$(env_value QINGYU_IMAGE)"
+  [ -n "$tag" ] || tag="qingyu-universal:local"
+  local reg rev cacheonly
+  reg="$(env_value NPM_REGISTRY)"
+  rev="${BUILD_REVISION:-}"
+  # 老版本 Docker 没有 cacheonly 输出类型，退化成普通构建（仍然只多花一次时间）
+  cacheonly=()
+  if "$d" build --help 2>/dev/null | grep -q -- '--output'; then
+    cacheonly=(--output type=cacheonly)
+  fi
+
+  cd "$INSTALL_DIR"
+
+  log "  · 1/3 单独构建后台 SPA（admin）…"
+  "$d" build -f deploy/Dockerfile \
+    --build-arg "NPM_REGISTRY=$reg" \
+    --build-arg "BUILD_REVISION=$rev" \
+    --build-arg "NODE_OPTIONS=$LOWMEM_NODE_OPTIONS" \
+    --target admin-build "${cacheonly[@]}" . \
+    || warn "admin 预构建没成功（不影响继续，最后一步会重跑这一段）"
+
+  log "  · 2/3 单独构建服务端（server）…"
+  "$d" build -f deploy/Dockerfile \
+    --build-arg "NPM_REGISTRY=$reg" \
+    --build-arg "BUILD_REVISION=$rev" \
+    --build-arg "NODE_OPTIONS=$LOWMEM_NODE_OPTIONS" \
+    --target server-build "${cacheonly[@]}" . \
+    || warn "server 预构建没成功（不影响继续，最后一步会重跑这一段）"
+
+  log "  · 3/3 组装最终镜像（命中缓存，这一轮很快）…"
+  "$d" build -f deploy/Dockerfile \
+    --build-arg "NPM_REGISTRY=$reg" \
+    --build-arg "BUILD_REVISION=$rev" \
+    --build-arg "NODE_OPTIONS=$LOWMEM_NODE_OPTIONS" \
+    -t "$tag" . \
+    || die "镜像构建失败。
+    内存不够的话：加 1G swap（fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile），
+    或改用预构建镜像：$0 install --prebuilt"
+}
+
+# 所有需要「构建并启动」的地方都走这里，取代裸的 compose up -d --build
+compose_build() {
+  # ① 预构建镜像：只 pull，完全不本地构建（最省内存，1G 机器首选）
+  if [ -n "$IMAGE" ]; then
+    log "使用预构建镜像，跳过本地构建：$IMAGE"
+    env_set QINGYU_IMAGE "$IMAGE" || true
+    compose pull app 2>/dev/null || compose pull --ignore-pull-failures 2>/dev/null || true
+    compose up -d --no-build
+    return 0
+  fi
+  # --local-build：显式要求本地构建，把 .env 里记着的预构建镜像设置清掉
+  if [ "${IMAGE_SET:-0}" = "1" ]; then env_set QINGYU_IMAGE "" || true; fi
+  # ② 低内存机器：串行构建
+  if lowmem_mode; then
+    log "内存偏紧：改用串行构建（两个 npm build 不再抢内存）"
+    build_staged
+    compose up -d --no-build
+    return 0
+  fi
+  # ③ 常规机器：默认并行构建，最快
+  compose up -d --build
 }
 
 wait_healthy() {
@@ -2392,7 +2508,7 @@ install_step_build() {
   [ -n "$BUILD_REVISION" ] || BUILD_REVISION=unknown
   export BUILD_REVISION
   log "构建并启动容器…（版本 $BUILD_REVISION）"
-  compose up -d --build
+  compose_build
   wait_healthy
 }
 
@@ -2640,7 +2756,7 @@ cmd_update() {
   export BUILD_REVISION
   log "重建容器…（版本 $BUILD_REVISION）"
   compose pull --ignore-pull-failures 2>/dev/null || true
-  compose up -d --build
+  compose_build
   wait_healthy
   step_end
 
@@ -2713,7 +2829,7 @@ cmd_upgrade() {
   export BUILD_REVISION
   log "重建容器…（版本 $BUILD_REVISION）"
   compose pull --ignore-pull-failures 2>/dev/null || true
-  compose up -d --build
+  compose_build
   wait_healthy
   step_end
 
@@ -2809,7 +2925,7 @@ cmd_rollback() {
   [ -n "$BUILD_REVISION" ] || BUILD_REVISION=unknown
   export BUILD_REVISION
   log "回滚到 ${BUILD_REVISION}，重建容器…"
-  compose up -d --build
+  compose_build
   wait_healthy
   log "回滚完成（版本 $BUILD_REVISION）。再执行一次 rollback 可回到回滚前的版本。"
 }

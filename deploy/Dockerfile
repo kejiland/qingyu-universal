@@ -11,6 +11,12 @@ FROM node:24-alpine AS admin-build
 ARG NPM_REGISTRY=""
 WORKDIR /app/admin
 
+# 小内存机器（1G VPS）专用：压住 V8 堆上限，让 GC 提前发生，
+# 避免 vite / tsc 构建到一半被内核 OOM Killer 直接杀掉。
+# 常规机器留空即可（用 Node 默认堆大小）。
+ARG NODE_OPTIONS=""
+ENV NODE_OPTIONS=$NODE_OPTIONS
+
 COPY admin/package.json admin/package-lock.json ./
 RUN if [ -n "$NPM_REGISTRY" ]; then npm config set registry "$NPM_REGISTRY"; fi \
  && npm ci --no-audit --no-fund
@@ -29,6 +35,11 @@ ARG NPM_REGISTRY=""
 # 打进镜像后由 /healthz 与启动横幅输出 —— 用于确认「升级到底生效没有」。
 ARG BUILD_REVISION=""
 ENV BUILD_REVISION=$BUILD_REVISION
+# 小内存机器（1G VPS）专用：压住 V8 堆上限，让 GC 提前发生，
+# 避免 vite / tsc 构建到一半被内核 OOM Killer 直接杀掉。
+# 常规机器留空即可（用 Node 默认堆大小）。
+ARG NODE_OPTIONS=""
+ENV NODE_OPTIONS=$NODE_OPTIONS
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -44,7 +55,7 @@ RUN npm run build \
  && npm prune --omit=dev --no-audit --no-fund
 
 # ------------------------------------------------------------
-FROM node:24-alpine
+FROM node:24-alpine AS runtime
 # 运行阶段还要装 postgresql-client（PostgreSQL 模式首次建表用），
 # 而 Alpine 官方源 dl-cdn.alpinelinux.org 在部分网络下不可达。
 # 传 ALPINE_MIRROR（如 https://mirrors.aliyun.com/alpine）即可换源；留空走官方源。
