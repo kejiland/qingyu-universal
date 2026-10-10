@@ -208,7 +208,7 @@ main.container { padding-top: 34px; }
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 12px;
   font-size: 13px;
   color: var(--muted);
 }
@@ -227,7 +227,6 @@ main.container { padding-top: 34px; }
   background: color-mix(in srgb, var(--accent) 9%, transparent);
   color: var(--accent);
 }
-.post-header .meta-dot { opacity: 0.5; }
 
 .reading-tools {
   gap: 7px;

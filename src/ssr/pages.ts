@@ -254,7 +254,7 @@ export function renderSeriesContent(posts: PostRow[]): string {
       const preview = items
         .slice(0, 4)
         .map((p) => String(p.title ?? ''))
-        .join(' · ');
+        .join(' / ');
       const first = items[0];
       const thumb = first ? renderSeriesThumb(first, index) : '';
       return (

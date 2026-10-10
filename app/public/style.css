@@ -1689,7 +1689,6 @@ kbd {
 
 /* ---------- 详情页 meta ---------- */
 .post-header .meta .meta-date { letter-spacing: 0.3px; }
-.post-header .meta .meta-dot { opacity: 0.5; }
 
 /* ---------- 归档页 ---------- */
 .archive-year {
@@ -1967,13 +1966,16 @@ kbd {
   max-width: 100%;
 }
 .featured-card:hover .featured-card-title { color: var(--accent); }
+/* 三个指标之间只留间距，不使用 · 分隔符 */
 .featured-card-meta {
   font-size: 12px;
   color: var(--muted);
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 12px;
+  flex-wrap: wrap;
 }
+.featured-card-meta > span { display: inline-flex; align-items: center; gap: 4px; }
 .featured-card-meta svg { flex-shrink: 0; }
 .featured-loading {
   grid-column: 1 / -1;

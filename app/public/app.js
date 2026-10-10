@@ -6,7 +6,7 @@
  * ============================================================================ */
 'use strict';
 
-var BLOG_VERSION = 'b0b3503da';
+var BLOG_VERSION = 'be3e41f96';
 
 /* i18n 兜底：万一 i18n.js 没加载成功（网络抖动 / 缓存缺失 / 被拦截），
  * 也必须保证 t() 可用 —— 否则整页会在第一个 t(...) 处抛 “t is not defined” 而白屏。 */
@@ -288,7 +288,7 @@ function accentSwatchesHTML() {
     var active = p.id === cur;
     var label = (lang && lang.indexOf('en') === 0) ? p.en : p.zh;
     return '<button type="button" class="accent-swatch' + (active ? ' active' : '') + '" data-accent="' + p.id + '"'
-      + ' title="' + esc(p.en + ' · ' + p.zh) + '" aria-label="' + esc(p.zh) + '" aria-pressed="' + active + '">'
+      + ' title="' + esc(p.en + ' / ' + p.zh) + '" aria-label="' + esc(p.zh) + '" aria-pressed="' + active + '">'
       + '<span class="accent-dot" style="background:' + accentSwatchColor(p.id) + '"></span>'
       + '<span class="accent-name">' + esc(label) + '</span></button>';
   }).join('');
@@ -1297,7 +1297,7 @@ async function fetchCloudSearchPage(query, page) {
 }
 function searchResultHtml(post, query) {
   var snip = searchSnippet(post, query);
-  var tags = Array.isArray(post.tags) ? post.tags.join(' · ') : String(post.tags || '');
+  var tags = Array.isArray(post.tags) ? post.tags.join(' / ') : String(post.tags || '');
   var qLow = String(query || '').toLowerCase();
   var tagLine = tags && tags.toLowerCase().indexOf(qLow) >= 0
     ? '<div class="sh-tags">' + highlightQuery(tags, query) + '</div>'
@@ -1610,7 +1610,7 @@ function loadFeaturedPosts(excludeId) {
     grid.innerHTML = items.map(function (p, idx) {
       return '<div class="featured-card" data-idx="' + idx + '">'
         + '<div class="featured-card-title">' + esc(p.title) + '</div>'
-        + '<div class="featured-card-meta">' + svgIcon('eye', 12) + ' ' + p.views + ' · ' + svgIcon('heart', 12) + ' ' + p.likes + ' · ' + svgIcon('quote', 12) + ' ' + p.comments
+        + '<div class="featured-card-meta">' + '<span>' + svgIcon('eye', 12) + ' ' + p.views + '</span>' + '<span>' + svgIcon('heart', 12) + ' ' + p.likes + '</span>' + '<span>' + svgIcon('quote', 12) + ' ' + p.comments + '</span>'
         + '</div></div>';
     }).join('');
     // 用 div + click 直接跳转
@@ -1648,7 +1648,7 @@ function renderPopularList(items) {
     return;
   }
   box.innerHTML = items.map(function (p, index) {
-    var tags = normalizeTags(p).slice(0, 3).join(' · ');
+    var tags = normalizeTags(p).slice(0, 3).join(' / ');
     return '<a class="popular-card" href="' + esc(href(postUrl(p.id))) + '">'
       + '<span class="popular-rank">' + (index + 1) + '</span>'
       + '<div class="popular-main"><div class="popular-card-title">' + esc(p.title || t('post.untitled')) + '</div>'
@@ -3071,7 +3071,7 @@ function renderRelationsHtml(relations) {
   if (related.length) {
     html += '<section class="relations-section related-posts"><div class="relations-title">' + svgIcon('link', 15) + ' ' + esc(t('post.related')) + '</div><div class="related-grid">';
     related.forEach(function (p) {
-      var tags = normalizeTags(p).slice(0, 2).join(' · ');
+      var tags = normalizeTags(p).slice(0, 2).join(' / ');
       html += '<a class="related-card" href="' + esc(href(postUrl(p.id))) + '"><div class="related-card-title">' + esc(p.title || t('post.untitled')) + '</div><div class="related-card-meta">' + esc(tags || fmtDate(p.date) || '') + '</div></a>';
     });
     html += '</div></section>';
@@ -3203,7 +3203,7 @@ async function renderPost(id) {
   var tags = normalizeTags(post).map(function (t) { return '<a href="' + esc(href('/', { tag: t })) + '" data-tag-link>' + esc(t) + '</a>'; }).join('');
   var minutes = Math.max(1, Math.ceil((stripMd(content || '').length / 400)));
   var seriesMeta = post.series ? '<a class="pin" href="' + esc(href(seriesUrl(post.series))) + '">' + svgIcon('list', 13) + ' ' + esc(post.series) + '</a>' : '';
-  html += '<div class="post-header"><h1>' + esc(post.title || '') + '</h1><div class="meta"><span class="meta-date">' + esc(fmtDate(post.date) || '') + '</span>' + (post.author ? '<span class="meta-dot">·</span><span class="meta-author">' + esc(post.author) + '</span>' : '') + '<span class="meta-dot">·</span><span>' + minutes + ' ' + t('post.minRead') + '</span><span class="meta-dot">·</span><span class="meta-views">' + svgIcon('eye', 14) + ' <span id="viewCount">0</span> ' + t('post.views') + '</span>' + seriesMeta + (post.pinned ? '<span class="pin">' + svgIcon('pin', 13) + ' ' + t('post.pin') + '</span>' : '') + '</div></div>';
+  html += '<div class="post-header"><h1>' + esc(post.title || '') + '</h1><div class="meta"><span class="meta-date">' + esc(fmtDate(post.date) || '') + '</span>' + (post.author ? '<span class="meta-author">' + esc(post.author) + '</span>' : '') + '<span>' + minutes + ' ' + t('post.minRead') + '</span><span class="meta-views">' + svgIcon('eye', 14) + ' <span id="viewCount">0</span> ' + t('post.views') + '</span>' + seriesMeta + (post.pinned ? '<span class="pin">' + svgIcon('pin', 13) + ' ' + t('post.pin') + '</span>' : '') + '</div></div>';
   html += '<div class="reading-tools"><span class="rt-label">' + t('post.fontSize') + '</span>' +
     '<button type="button" class="rt-btn" data-rs="-1" aria-label="' + t('post.fontSmaller') + '" title="' + t('post.fontSmaller') + '">A−</button>' +
     '<button type="button" class="rt-btn" data-rs="0" aria-label="' + t('post.fontReset') + '" title="' + t('post.fontReset') + '">A</button>' +
@@ -3224,7 +3224,7 @@ async function renderPost(id) {
   }
   // 仅打印时显示的页脚：站点名 + 原文链接（便于纸质/PDF 溯源）
   var printBase = getConfig().siteUrl || (typeof location !== 'undefined' ? location.origin : '');
-  html += '<div class="print-only print-foot">' + esc(getSiteName()) + ' · ' + esc(String(printBase).replace(/\/+$/, '') + postUrl(post.id)) + '</div>';
+  html += '<div class="print-only print-foot">' + esc(getSiteName()) + ' ' + esc(String(printBase).replace(/\/+$/, '') + postUrl(post.id)) + '</div>';
   if (toc) {
     html += '<button type="button" class="toc-fab" id="tocFab" aria-label="' + t('toc.open') + '">' + svgIcon('list', 18) + '</button>' +
       '<div class="toc-sheet" id="tocSheet" hidden><div class="toc-sheet-head"><span>' + t('toc.title') + '</span>' +
@@ -3927,8 +3927,8 @@ async function renderPreviewPage(token) {
     var tocRes = buildToc(bodyHtml);
     var html = renderNav('/');
     html += '<main class="container page-fade"><div class="post-body">';
-    html += '<div class="preview-banner">' + svgIcon('eye', 14) + ' ' + t('preview.banner') + ' · ' + esc(post.title || t('post.untitled')) + '</div>';
-    html += '<div class="post-header"><h1>' + esc(post.title || t('post.untitled')) + '</h1><div class="meta"><span class="meta-date">' + esc(fmtDate(post.date) || '') + '</span>' + (post.tags && post.tags.length ? '<span class="meta-dot">·</span><span>' + post.tags.map(function (x) { return esc(x); }).join(' / ') + '</span>' : '') + '</div></div>';
+    html += '<div class="preview-banner">' + svgIcon('eye', 14) + ' ' + t('preview.banner') + ' / ' + esc(post.title || t('post.untitled')) + '</div>';
+    html += '<div class="post-header"><h1>' + esc(post.title || t('post.untitled')) + '</h1><div class="meta"><span class="meta-date">' + esc(fmtDate(post.date) || '') + '</span>' + (post.tags && post.tags.length ? '<span>' + post.tags.map(function (x) { return esc(x); }).join(' / ') + '</span>' : '') + '</div></div>';
     html += tocRes.html;
     if (post.enc) {
       html += '<div class="post-lock"><div class="post-lock-ico">' + svgIcon('lock', 26) + '</div><p class="post-lock-title">' + t('post.lockedTitle') + '</p><p class="post-lock-desc">' + t('post.lockedDesc') + '</p></div>';
@@ -4096,7 +4096,7 @@ function renderSeriesList() {
       var first = g.posts[0] || {};
       html += '<a class="post-card" href="' + esc(href(seriesUrl(g.name))) + '"><div class="post-card-main">' +
         '<div class="meta"><span class="date">' + esc(t('series.count', { count: g.posts.length })) + '</span><span class="pin">' + svgIcon('list', 13) + ' ' + esc(t('series.label')) + '</span></div>' +
-        '<h2>' + esc(g.name) + '</h2><div class="excerpt">' + esc(g.posts.slice(0, 4).map(function (p) { return p.title || ''; }).join(' · ')) + '</div>' +
+        '<h2>' + esc(g.name) + '</h2><div class="excerpt">' + esc(g.posts.slice(0, 4).map(function (p) { return p.title || ''; }).join(' / ')) + '</div>' +
         '<div class="mini-tags"><span>' + esc(t('series.part')) + '</span></div></div>' + renderPostThumb(first, idx) + '</a>';
     });
     html += '</div>';
@@ -4605,13 +4605,13 @@ function updateSEO(path) {
     pageTitle = n + ' · ' + t('site.subtitle');
   } else if (path === '/archive') {
     pageTitle = t('archive.title') + ' · ' + n;
-    pageDesc = t('archive.title') + ' - ' + siteDesc;
+    pageDesc = t('archive.title') + ' · ' + siteDesc;
   } else if (path === '/tags') {
     pageTitle = t('tags.title') + ' · ' + n;
-    pageDesc = t('tags.title') + ' - ' + siteDesc;
+    pageDesc = t('tags.title') + ' · ' + siteDesc;
   } else if (path === '/history') { pageTitle = t('history.title') + ' · ' + n; } else if (path === '/links') { pageTitle = t('links.title') + ' · ' + n; } else if (path === '/categories') {
     pageTitle = t('categories.title') + ' · ' + n;
-    pageDesc = t('categories.title') + ' - ' + siteDesc;
+    pageDesc = t('categories.title') + ' · ' + siteDesc;
   } else if (path === '/about') {
     pageTitle = t('about.title') + ' · ' + n;
     pageDesc = t('about.desc');
