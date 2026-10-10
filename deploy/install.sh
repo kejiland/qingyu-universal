@@ -41,7 +41,7 @@ PURGE=0
 # ---- 安装向导 / 配置档 / 演练 / 断点续跑 ----
 DRY_RUN=0            # --dry-run：只打印将要做什么，不实际改动系统
 WIZARD_FORCE=0       # --wizard：即使已有参数也强制走一次问答向导
-NO_WIZARD=0          # --no-wizard：全新安装也不提问，全用默认值
+NO_WIZARD=1          # 默认零配置不提问；--wizard 才走问答向导（--no-wizard 保留为兼容写法）
 SKIP_PREFLIGHT=0     # --skip-preflight：跳过起飞前检查
 SKIP_DOCTOR=0        # --no-doctor：安装后不做自动体检
 RESET_STATE=0        # --reset：清除断点续跑进度，从头执行
@@ -53,6 +53,19 @@ SMTP_PORT_OPT=""
 SMTP_USER_OPT=""
 SMTP_PASS_OPT=""
 SMTP_FROM_OPT=""
+ADMIN_EMAIL_OPT=""   # --admin-email：管理员邮箱（通知 / 找回密码用）
+DATA_DIR_OPT=""      # --data-dir：数据目录（上传、SQLite、备份都放这儿）
+LOG_LEVEL_OPT=""     # --log-level：日志级别 error|warn|info|debug
+REDIS_OPT=""         # --redis <连接串>：Redis / Valkey（留空 = 用数据库 KV）
+AI_BASE_OPT=""       # --ai-base-url / --ai-key / --ai-model：AI 摘要（留空 = 之后在后台配）
+AI_KEY_OPT=""
+AI_MODEL_OPT=""
+S3_ENDPOINT_OPT=""   # --s3-*：S3 / R2 兼容对象存储（留空 = 存本地磁盘）
+S3_REGION_OPT=""
+S3_KEY_ID_OPT=""
+S3_SECRET_OPT=""
+S3_BUCKET_OPT=""
+S3_PUBLIC_BASE_OPT=""
 NO_AUTOBACKUP=0      # --no-autobackup：不安装定时备份
 WIZ_BACKUP=0         # 向导里选了「要自动备份」
 WIZARD_DONE=0        # 本次已经走过向导（用于让 interact_* 不再重复提问）
@@ -71,9 +84,113 @@ UPDATE_REMOTE=""     # 远端最新版本（完整 SHA）
 UPDATE_STATE=""      # latest | behind | unknown
 CHECK_ONLY=0         # --check：只查有没有新版，不做任何改动
 
-log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
-die()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
+# ---------- 终端排版原语 ----------
+# 一套 UI 元素贯穿全脚本，避免各处手工拼 ╭─╮ 盒子导致风格不统一。
+# 非终端（重定向到文件、CI）或设了 NO_COLOR 时自动去掉颜色，只留结构。
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != "dumb" ]; then
+  C_RESET=$'\033[0m'; C_B=$'\033[1m'; C_DIM=$'\033[2m'
+  C_CYAN=$'\033[1;36m'; C_GREEN=$'\033[1;32m'; C_YELLOW=$'\033[1;33m'
+  C_RED=$'\033[1;31m'; C_BLUE=$'\033[1;34m'; C_GREY=$'\033[90m'
+else
+  C_RESET=''; C_B=''; C_DIM=''
+  C_CYAN=''; C_GREEN=''; C_YELLOW=''; C_RED=''; C_BLUE=''; C_GREY=''
+fi
+# 终端不是 UTF-8（老 LANG=C 的 ssh、部分精简系统）时换成 ASCII 图形，
+# 否则方块 / 对勾会显示成一串乱码。
+ui_utf8() {
+  local cs=""
+  cs="$(locale charmap 2>/dev/null || true)"
+  if [ -z "$cs" ]; then
+    cs="$(printf '%s' "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" | sed -n 's/.*\.\(UTF-?8\).*/\1/ip')"
+  fi
+  printf '%s' "$cs" | grep -qi 'utf-\?8'
+}
+if ui_utf8; then
+  G_FULL="█"; G_EMPTY="░"; G_OK="✓"; G_WARN="!"; G_FAIL="x"; G_SECT="▌"; G_RULE="─"
+else
+  G_FULL="#"; G_EMPTY="-"; G_OK="v"; G_WARN="!"; G_FAIL="x"; G_SECT=">"; G_RULE="-"
+fi
+# 终端太窄（<72 列）时自动去掉边框，避免折行糊成一片
+UI_W=72
+[ -t 1 ] && UI_W="$( (tput cols 2>/dev/null || echo 72) )"
+[ "$UI_W" -lt 60 ] 2>/dev/null && UI_W=60
+[ "$UI_W" -gt 78 ] 2>/dev/null && UI_W=78
+
+log()  { printf '%s==>%s %s\n' "$C_CYAN" "$C_RESET" "$*"; }
+ok()   { printf '%s  %s%s %s\n' "$C_GREEN" "$G_OK" "$C_RESET" "$*"; }
+warn() { printf '%s[!]%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
+die()  { printf '%s[x]%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
+
+# 细分隔线：用于把长输出切成几段，读起来不累
+ui_rule() { printf '%s%s%s\n' "$C_GREY" "$(printf '%*s' "$UI_W" '' | tr ' ' "$G_RULE")" "$C_RESET"; }
+
+# 显示宽度：中文 / 全角字符按 2 列算，否则中英混排的框线会歪。
+# 交给 awk 数（它按字符而非字节遍历），bash 的 ${#s} 在非 UTF-8 locale 下会数错。
+ui_width() {
+  # 三字节 UTF-8（\340-\357）按 2 列算：宽 = 字符数 + 双宽字符数。
+  printf '%s' "$1" | LC_ALL=C awk '
+    {
+      wide = gsub(/[\340-\357]/, "&")
+      print length($0) - 2 * wide + wide
+    }' 2>/dev/null || printf '%s' "${#1}"
+}
+
+# 带右边框的一行（按显示宽度自动补齐，中文按 2 列算）
+ui_box_line() {
+  local color="$1" text="$2" pad
+  pad=$(( UI_W - 4 - $(ui_width "$text") ))
+  [ "$pad" -lt 0 ] && pad=0
+  printf '%s│%s %s%*s %s│%s\n' "$color" "$C_RESET" "$text" "$pad" "" "$color" "$C_RESET"
+}
+
+# 标题横幅：整个脚本只在最开头和关键节点用一次，避免刷屏
+ui_banner() {
+  local bar; bar="$(printf '%*s' "$UI_W" '' | tr ' ' "${G_RULE:-─}")"
+  echo
+  printf '%s+%s+%s\n' "$C_CYAN" "$bar" "$C_RESET"
+  ui_box_line "$C_CYAN" "$C_B$1$C_RESET"
+  [ -n "${2:-}" ] && ui_box_line "$C_CYAN" "$C_DIM$2$C_RESET"
+  printf '%s+%s+%s\n' "$C_CYAN" "$bar" "$C_RESET"
+  return 0
+}
+
+# 小节标题：一条短横线 + 标题，比整块盒子轻
+ui_section() {
+  echo
+  printf '%s%s %s%s\n' "$C_BLUE" "$G_SECT" "$1" "$C_RESET"
+  return 0
+}
+
+# 键值对齐行：ui_kv "访问地址" "https://xxx"
+ui_kv() {
+  printf '  %s%-12s%s %s\n' "$C_DIM" "$1" "$C_RESET" "$2"
+  return 0
+}
+
+# 提示行（次要说明）
+ui_hint() { printf '  %s%s%s\n' "$C_GREY" "$*" "$C_RESET"; return 0; }
+
+# 编号选项：ui_opt 1 "标题" "说明"
+ui_opt() {
+  printf '  %s%2s)%s %s%s%s' "$C_B" "$1" "$C_RESET" "$C_B" "$2" "$C_RESET"
+  [ -n "${3:-}" ] && printf '  %s%s%s' "$C_GREY" "$3" "$C_RESET"
+  printf '\n'
+  return 0
+}
+
+# 进度条：ui_bar 3 6 → ███░░░
+ui_bar() {
+  local cur="$1" total="$2" w=24 filled head tail
+  case "$cur$total" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$total" -gt 0 ] || return 0
+  filled=$(( cur * w / total ))
+  [ "$filled" -gt "$w" ] && filled=$w
+  head="$(printf '%*s' "$filled" '' | tr ' ' "$G_FULL")"
+  tail="$(printf '%*s' "$((w - filled))" '' | tr ' ' "$G_EMPTY")"
+  printf '%s%s%s%s%s %s%d/%d%s\n' \
+    "$C_GREEN" "$head" "$C_GREY" "$tail" "$C_RESET" "$C_DIM" "$cur" "$total" "$C_RESET"
+  return 0
+}
 
 # 安装过程分步显示：让第一次用脚本的人知道「现在到哪一步了、还剩几步」。
 STEP_NO=0
@@ -81,12 +198,14 @@ STEP_TOTAL=0
 step_begin() {
   [ -n "$STEP_TOTAL" ] || return 0
   STEP_NO=$((STEP_NO + 1))
-  printf '\n\033[1;35m┌─ 第 %d/%d 步\033[0m  \033[1m%s\033[0m\n' "$STEP_NO" "$STEP_TOTAL" "$*"
+  echo
+  printf '%s▌ 第 %d/%d 步%s  %s%s%s\n' "$C_BLUE" "$STEP_NO" "$STEP_TOTAL" "$C_RESET" "$C_B" "$*" "$C_RESET"
+  ui_bar "$STEP_NO" "$STEP_TOTAL"
   STEP_NAME="$*"
 }
 step_end() {
   [ -n "$STEP_TOTAL" ] || return 0
-  printf '\033[1;35m└─ 第 %d/%d 步完成\033[0m\n' "$STEP_NO" "$STEP_TOTAL"
+  printf '%s  %s 第 %d/%d 步完成%s\n' "$C_GREEN" "$G_OK" "$STEP_NO" "$STEP_TOTAL" "$C_RESET"
 }
 
 on_error() {
@@ -273,6 +392,20 @@ while [ $# -gt 0 ]; do
     --reset|--fresh) RESET_STATE=1 ;;
     --check)          CHECK_ONLY=1 ;;
     --no-autobackup) NO_AUTOBACKUP=1 ;;
+    # ---- 站点与运行参数（都能写进配置档，一键复现）----
+    --admin-email)  ADMIN_EMAIL_OPT="${2:-}"; shift ;;
+    --data-dir)     DATA_DIR_OPT="${2:-}"; DIR_SET=1; shift ;;
+    --log-level)    LOG_LEVEL_OPT="${2:-}"; shift ;;
+    --redis)        REDIS_OPT="${2:-}"; shift ;;
+    --ai-base-url)  AI_BASE_OPT="${2:-}"; shift ;;
+    --ai-key)       AI_KEY_OPT="${2:-}"; shift ;;
+    --ai-model)     AI_MODEL_OPT="${2:-}"; shift ;;
+    --s3-endpoint)  S3_ENDPOINT_OPT="${2:-}"; shift ;;
+    --s3-region)    S3_REGION_OPT="${2:-}"; shift ;;
+    --s3-key-id)    S3_KEY_ID_OPT="${2:-}"; shift ;;
+    --s3-secret)    S3_SECRET_OPT="${2:-}"; shift ;;
+    --s3-bucket)    S3_BUCKET_OPT="${2:-}"; shift ;;
+    --s3-public-base) S3_PUBLIC_BASE_OPT="${2:-}"; shift ;;
     -h|--help)  COMMAND="help" ;;
     *)          ARGS+=("$1") ;;
   esac
@@ -310,6 +443,19 @@ load_config_file() {
       EMAIL)        [ -n "$EMAIL" ]         || EMAIL="$val" ;;
       IP)           [ -n "$IP_ADDR" ]       || IP_ADDR="$val" ;;
       TIMEZONE)     [ -n "$TIMEZONE" ]      || TIMEZONE="$val" ;;
+      ADMIN_EMAIL)  [ -n "$ADMIN_EMAIL_OPT" ] || ADMIN_EMAIL_OPT="$val" ;;
+      DATA_DIR)     [ "$DIR_SET" = "1" ]    || DATA_DIR_OPT="$val" ;;
+      LOG_LEVEL)    [ -n "$LOG_LEVEL_OPT" ] || LOG_LEVEL_OPT="$val" ;;
+      REDIS)        [ -n "$REDIS_OPT" ]    || REDIS_OPT="$val" ;;
+      AI_BASE_URL)  [ -n "$AI_BASE_OPT" ]   || AI_BASE_OPT="$val" ;;
+      AI_API_KEY)   [ -n "$AI_KEY_OPT" ]    || AI_KEY_OPT="$val" ;;
+      AI_MODEL)     [ -n "$AI_MODEL_OPT" ]  || AI_MODEL_OPT="$val" ;;
+      S3_ENDPOINT)  [ -n "$S3_ENDPOINT_OPT" ] || S3_ENDPOINT_OPT="$val" ;;
+      S3_REGION)    [ -n "$S3_REGION_OPT" ]   || S3_REGION_OPT="$val" ;;
+      S3_KEY_ID)    [ -n "$S3_KEY_ID_OPT" ]   || S3_KEY_ID_OPT="$val" ;;
+      S3_SECRET)    [ -n "$S3_SECRET_OPT" ]   || S3_SECRET_OPT="$val" ;;
+      S3_BUCKET)    [ -n "$S3_BUCKET_OPT" ]   || S3_BUCKET_OPT="$val" ;;
+      S3_PUBLIC_BASE) [ -n "$S3_PUBLIC_BASE_OPT" ] || S3_PUBLIC_BASE_OPT="$val" ;;
       SMTP_HOST)    [ -n "$SMTP_HOST_OPT" ] || SMTP_HOST_OPT="$val" ;;
       SMTP_PORT)    [ -n "$SMTP_PORT_OPT" ] || SMTP_PORT_OPT="$val" ;;
       SMTP_USER)    [ -n "$SMTP_USER_OPT" ] || SMTP_USER_OPT="$val" ;;
@@ -331,79 +477,102 @@ usage() {
   cat <<'EOF'
 轻语博客 · 自托管通用版 一键部署
 
-  install                 安装并启动（默认）
-                          （已部署过且不带子命令运行时，改为弹出数字菜单）
-  update                  检查远端有新代码就更新部署（先备份再重建，没有新版就什么都不做）
-  check-update            只看远端有没有新代码，不改动任何东西（适合放进定时任务）
-  upgrade                 无条件拉新代码并重建（保留数据）；已有新版时不如 update 合适
-  rollback                回滚到上一个版本（回滚前自动备份）
-  backup                  生成数据库快照到 data/backups
-  autobackup              安装定时备份（每天自动快照，只保留最近 7 份）
-  migrate                 打包整站（含数据），用于迁移到新服务器
-  restore <快照文件>       从快照恢复（请先 docker compose stop app）
-  start                   启动服务（停过之后再拉起来）
-  stop                    停止服务（配置和数据都保留）
-  restart                 重启应用（改完 .env 后用它生效）
-  logs                    查看应用日志
-  status                  查看容器与健康状态
-  info                    查看部署信息（访问地址、初始化密钥、版本、文章数…）
-  doctor                  一键体检：Docker/容器/端口/防火墙/公网地址/磁盘/错误日志
-  uninstall               停止并删除容器（数据卷保留，需手动删除）
+  最简单的用法：什么都不填，跑完就能打开网站
+      curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh | bash
+      （或在本仓库里执行： bash deploy/install.sh）
 
-选项：
-  --domain <域名>         对外域名，启用 Caddy + Let's Encrypt 自动 HTTPS
-                          （不填则用 http://<服务器IP>:<端口> 直接访问，无证书）
-  --port   <端口>         直接对外暴露该端口，走纯 HTTP、不启动 Caddy。
-                          80/443 被占用（母鸡开出来的小鸡）时用它，
-                          也等于「无域名 / 自定义端口」模式（默认 8080）
-  --db     <数据库>       sqlite（默认，单文件备份最省心）
-                          | postgres（脚本自动装好内置容器，数据放独立卷）
-  --database-url <连接串> 用你自己的云数据库（阿里云 RDS / 腾讯云 / Supabase…），
-                          等价于 --db postgres 的「外部数据库」模式
-  --ip     <地址>         无域名模式下写入 SITE_URL 的地址（默认自动探测公网 IP）
-  -y, --yes               不提问，全部使用默认值（自动化 / CI 用）
-  --email  <邮箱>         ACME 证书通知邮箱（可选）
-  --dir    <目录>         安装目录，默认 /opt/qingyu-universal
-  --ref    <分支/标签>     下载的代码版本，默认 main
-  --check                 update 时只检查、不改动（等同 check-update）
-  --repo   <owner/repo>    从哪个 GitHub 仓库取代码，默认 kejiland/qingyu-universal
-  --image  <镜像>         使用预构建镜像而不是本地构建
-  --no-mirror             关闭国内加速（升级时想改回官方源用）
-  --mirror            国内网络加速：GitHub 代码、Docker 镜像、npm 依赖都走国内源
-                      （国内服务器 / 网络卡时加它；选择会记进 .env，下次升级自动沿用）
-  --github-proxy <前缀> 指定自己的 GitHub 加速前缀，例如 https://ghfast.top
-  --keep   <份数>        定时备份保留最近几份（默认 7）
-  --at     <HH:MM>       定时备份每天几点执行（默认 03:30）
-  --off                  关闭定时备份
-  --out    <文件>        migrate 生成的 tar.gz 保存路径
-  --purge                uninstall 时连数据卷一起删干净
+  默认行为：不提问、不需要任何配置。
+  自动完成「装 Docker → 取代码 → 建库 → 启动」，装完直接给你一个能打开的网址，
+  管理员密码、站名、AI 摘要、邮件、图床等全部进后台「设置」里填即可。
 
-新手向导 / 可配置：
-  （全新安装且没给任何参数时，默认会先走一遍问答向导；加 -y 则全程不提问）
-  --wizard              强制走一遍问答向导（即使已经给了参数）
-  --no-wizard           不提问，全部用默认值
-  --config <配置档>      从文件读取选项，照着它装（见 --save-config）
-  --save-config <文件>   把本次的选择写成配置档，之后可 --config 复现
-  --dry-run             只打印「将要做什么」，不装 Docker、不写 .env、不启容器
-  --timezone <时区>      设置系统时区，例如 Asia/Shanghai（定时备份按它执行）
-  --smtp-host <地址>     邮件通知（都留空 = 不配置，之后可在后台「设置 → 邮件」里补）
-  --smtp-port <端口>
-  --smtp-user <用户名>
-  --smtp-pass <密码>
-  --smtp-from <发件人>
-  --no-autobackup       安装后不装定时备份
-  --skip-preflight      跳过起飞前检查（端口 / 域名 / 防火墙）
-  --no-doctor           安装后不做自动体检
-  --reset, --fresh       清除「安装进度记录」，从头执行（断点续跑用）
-  -h, --help             查看全部参数
+  想自动 HTTPS（有域名时）：加 --domain 你的域名
+  想换端口：              加 --port 8080
+  想手动确认每一步：      加 --wizard
 
-  配置档示例（KEY=VALUE，# 开头是注释）：
+────────────────────────────────────────────────────────────────────────
+【可选配置】全部不填也能正常跑；以下只是「懒得进后台时」的一次性替代
+────────────────────────────────────────────────────────────────────────
+
+  访问方式
+    --domain <域名>         对外域名，自动申请 HTTPS 证书
+    --port   <端口>         直接对外端口，纯 HTTP（默认 8080）
+    --ip     <地址>         无域名时写入站点地址的 IP（默认自动探测）
+    --db     <数据库>       sqlite（默认）| postgres（脚本自动起内置容器）
+    --database-url <连接串> 用自己的云数据库（RDS / Supabase 等）
+
+  站点与运行
+    --dir        <目录>     安装目录，默认 /opt/qingyu-universal
+    --data-dir   <目录>     数据目录，默认 <安装目录>/data
+    --admin-email <邮箱>    管理员邮箱
+    --log-level  <级别>     error | warn | info | debug
+    --redis      <连接串>   Redis / Valkey（留空 = 用数据库自带 KV）
+    --email      <邮箱>     证书到期通知邮箱
+    --repo       <owner/repo>  代码仓库，默认 kejiland/qingyu-universal
+    --ref        <分支/标签>  代码版本，默认 main
+    --image      <镜像>     用预构建镜像，不在本机构建
+
+  AI 摘要（也可在后台「设置 → AI」填）
+    --ai-base-url <地址> --ai-key <密钥> --ai-model <模型>
+
+  对象存储（也可在后台「设置 → 存储」填；留空 = 存本地磁盘）
+    --s3-endpoint --s3-region --s3-key-id --s3-secret --s3-bucket --s3-public-base
+
+  备份
+    --keep <份数>           定时备份保留几份（默认 7）
+    --at   <HH:MM>          每天几点备份（默认 03:30）
+    --off                   不装定时备份
+    --no-autobackup          同 --off（安装后不装定时备份）
+
+  网络加速（国内机器建议加 --mirror）
+    --mirror               GitHub / Docker / npm 全走国内源
+    --no-mirror            关闭加速
+    --github-proxy <前缀>  自定义 GitHub 加速前缀
+
+  邮件通知（也可在后台「设置 → 邮件」填）
+    --smtp-host --smtp-port --smtp-user --smtp-pass --smtp-from
+
+────────────────────────────────────────────────────────────────────────
+【日常运维】
+────────────────────────────────────────────────────────────────────────
+  install（默认）      安装并启动；已部署过时直接弹出数字菜单
+  update               有新代码就更新（先备份再重建，没有新版什么都不做）
+  check-update         只看有没有新代码，不改动任何东西
+  upgrade              强制拉最新代码并重建（保留数据）
+  rollback             回滚到上一版（回滚前自动备份）
+  restart              重启（改完 .env 后用它生效）
+  start / stop         启动 / 停止（配置和数据都保留）
+  logs                 查看应用日志
+  status               容器与健康状态
+  info                 部署信息（访问地址、初始化密钥、版本、文章数…）
+  doctor               一键体检：Docker / 容器 / 端口 / 防火墙 / 公网 / 磁盘
+  backup               立刻生成一份数据库快照
+  autobackup           安装每日定时备份
+  restore <快照文件>    从快照恢复（先 stop）
+  migrate              打包整站（含数据），用于换服务器
+  uninstall            删除容器（数据卷保留）
+
+────────────────────────────────────────────────────────────────────────
+【高级】
+────────────────────────────────────────────────────────────────────────
+  -y, --yes            全程不提问（自动化 / CI）
+  --wizard             手动问答向导（默认不向导）
+  --no-wizard          不提问（默认行为，保留为兼容写法）
+  --config <文件>       照着配置档装
+  --save-config <文件>  把本次选择存成配置档
+  --dry-run            只打印「将要做什么」，什么都不改
+  --timezone <时区>     设置系统时区，如 Asia/Shanghai
+  --out <文件>         migrate 生成的 tar.gz 保存路径
+  --purge              uninstall 时连数据卷一起删
+  --skip-preflight     跳过起飞前检查
+  --no-doctor          安装后不做自动体检
+  --check              update 时只检查不改动
+  --reset, --fresh     清除安装进度记录，从头执行
+  -h, --help           显示本帮助
+
+  配置档示例（KEY=VALUE，# 开头是注释；命令行参数优先级更高）：
       DOMAIN=blog.example.com
       DB=sqlite
       TIMEZONE=Asia/Shanghai
-      AUTOBACKUP=1
-      AT=03:30
-      KEEP=7
 
   断点续跑：安装中途失败不用重来，原样再跑一次同一条命令即可，
             已完成并记录的步骤会自动跳过（想从头来就加 --reset）。
@@ -1054,7 +1223,7 @@ PORT=8787
 HOST=0.0.0.0
 SITE_URL=$site_url
 SITE_DOMAIN=$DOMAIN
-DATA_DIR=./data
+DATA_DIR=${DATA_DIR_OPT:-./data}
 # 数据库：留空使用 SQLite 文件；填写连接串则切换到 PostgreSQL
 # 数据库类型由 deploy/install.sh 决定（--db sqlite|postgres 或交互选择）
 DATABASE_URL=$database_url
@@ -1063,23 +1232,27 @@ POSTGRES_DB=$postgres_db
 POSTGRES_USER=$postgres_user
 POSTGRES_PASSWORD=$postgres_password
 # 可选：Redis / Valkey 限流与去重；留空使用数据库 KV
-REDIS_URL=
+REDIS_URL=$REDIS_OPT
 APP_BIND=$app_bind
 COMPOSE_PROFILES=$compose_profiles
 TRUST_PROXY=$trust_proxy
 
+# 管理员邮箱（通知 / 找回密码；留空可之后在后台补）
+BLOG_ADMIN_EMAIL=$ADMIN_EMAIL_OPT
+# 日志级别 error|warn|info|debug（留空 = 默认）
+LOG_LEVEL=$LOG_LEVEL_OPT
 # 首次打开 /admin 时需要填写的安装密钥
 BLOG_ADMIN_SETUP_KEY=$setup_key
 # 脚本 / CI 长期写入令牌
 BLOG_WRITE_TOKEN=$write_token
 
 # 对象存储（留空 = 本地磁盘）
-S3_ENDPOINT=
-S3_REGION=auto
-S3_ACCESS_KEY_ID=
-S3_SECRET_ACCESS_KEY=
-S3_MEDIA_BUCKET=
-S3_MEDIA_PUBLIC_BASE=
+S3_ENDPOINT=$S3_ENDPOINT_OPT
+S3_REGION=${S3_REGION_OPT:-auto}
+S3_ACCESS_KEY_ID=$S3_KEY_ID_OPT
+S3_SECRET_ACCESS_KEY=$S3_SECRET_OPT
+S3_MEDIA_BUCKET=$S3_BUCKET_OPT
+S3_MEDIA_PUBLIC_BASE=$S3_PUBLIC_BASE_OPT
 S3_MUSIC_BUCKET=
 S3_MUSIC_PUBLIC_BASE=
 S3_BACKUP_BUCKET=
@@ -1094,9 +1267,9 @@ RESEND_API_KEY=
 BLOG_MAIL_FROM=${SMTP_FROM_OPT}
 
 # AI（留空 = 关闭）
-AI_BASE_URL=
-AI_API_KEY=
-AI_MODEL=
+AI_BASE_URL=$AI_BASE_OPT
+AI_API_KEY=$AI_KEY_OPT
+AI_MODEL=$AI_MODEL_OPT
 # 国内网络加速（deploy/install.sh --mirror 生成；1 = 启用）
 QINGYU_MIRROR=$mirror_flag
 # 构建镜像时 npm 使用的源，留空 = 官方源
@@ -1205,7 +1378,9 @@ port_in_use_pair() {
 interact_mode() {
   # 参数已指定 / 非升级场景已在 resolve_mode 里处理，这里只在「全新安装且未给参数」时提问
   # 走过安装向导后所有选项都已定下来，不再重复问一遍
+  # 默认零配置：只有显式 --wizard 才提问，其余一律走自动决策
   [ "$WIZARD_DONE" = "1" ] && return 0
+  [ "$WIZARD_FORCE" != "1" ] && return 0
   [ -n "$DOMAIN" ] && return 0
   [ -n "$APP_PORT" ] && return 0
   [ -f "$INSTALL_DIR/.env" ] && return 0
@@ -1216,33 +1391,32 @@ interact_mode() {
   arch="$(uname -m 2>/dev/null || echo '未知')"
   ip="$(detect_ip)"
 
-  echo
-  log "环境检查"
-  echo "    系统          ${distro} / ${arch}"
-  echo "    公网 IP       ${ip}"
-  echo "    curl          $(have curl && echo '已安装' || echo '未安装，将自动安装')"
-  echo "    Docker        $(docker_ready && echo '已就绪' || echo '未安装，将自动安装')"
+  ui_section "环境检查"
+  ui_kv "系统"     "${distro} / ${arch}"
+  ui_kv "公网 IP"  "${ip}"
+  ui_kv "curl"     "$(have curl && echo '已安装' || echo '未安装，将自动安装')"
+  ui_kv "Docker"   "$(docker_ready && echo '已就绪' || echo '未安装，将自动安装')"
   local avail
   avail=$(df -Pk / 2>/dev/null | awk 'NR==2 {print $4}')
-  [ -n "$avail" ] && echo "    可用磁盘      $((avail / 1024)) MB"
+  [ -n "$avail" ] && ui_kv "可用磁盘" "$((avail / 1024)) MB"
 
   # ---- 端口检测 ----
   local ports_free=1
   port_in_use 80 && ports_free=0
   port_in_use 443 && ports_free=0
   if [ "$ports_free" -eq 1 ]; then
-    echo "    端口 80/443   空闲（可启用自动 HTTPS）"
+    ui_kv "端口 80/443" "空闲（可启用自动 HTTPS）"
   else
-    echo "    端口 80/443   已被占用"
+    ui_kv "端口 80/443" "已被占用"
   fi
 
   can_ask || {
     # 非交互：沿用自动决策，只说明会怎么做
     echo
     if [ "$ports_free" -eq 1 ]; then
-      log "非交互模式：未指定域名，将按 IP + 端口部署"
+      log "未指定域名，将按 IP + 端口部署（之后可在后台改站点地址）"
     else
-      log "非交互模式：80/443 被占用，将按自定义端口部署"
+      log "80/443 被占用，将按自定义端口部署"
     fi
     return 0
   }
@@ -1250,8 +1424,8 @@ interact_mode() {
   echo
   if [ "$ports_free" -eq 1 ]; then
     log "请选择部署方式"
-    echo "    1) 域名 + 自动 HTTPS   （推荐；需要域名解析到 ${ip}）"
-    echo "    2) IP + 端口           （无需域名，纯 HTTP）"
+    ui_opt 1 "域名 + 自动 HTTPS" "推荐；需要域名解析到 ${ip}"
+    ui_opt 2 "IP + 端口" "无需域名，纯 HTTP"
     ask "选择" "1"
 
     if [ "$REPLY" = "1" ]; then
@@ -1289,14 +1463,16 @@ interact_mode() {
 # 和部署模式一样，curl|bash 时 stdin 是脚本本身，必须从 /dev/tty 读。
 interact_database() {
   # 已用参数指定 → 尊重参数；已部署过 → 不打扰现有配置；走过向导 → 已经问过了
+  # 默认零配置：数据库直接用 SQLite，其余交给后台设置
   [ "$WIZARD_DONE" = "1" ] && return 0
+  [ "$WIZARD_FORCE" != "1" ] && return 0
   [ -n "$DB_KIND" ] && return 0
   [ -n "$DATABASE_URL_OPT" ] && return 0
   [ -f "$INSTALL_DIR/.env" ] && return 0
 
   if ! can_ask; then
-    log "数据库：默认 SQLite（可用 --db postgres 改用 PostgreSQL，或 --database-url 接自己的云数据库）"
     DB_KIND="sqlite"
+    log "数据库：默认 SQLite（需要换 PostgreSQL 可加 --db postgres）"
     return 0
   fi
 
@@ -1365,7 +1541,7 @@ run_step() {
 # 面向第一次用的人：先探测环境，再用大白话问几个问题，每个都给好推荐答案，
 # 直接回车就是推荐方案；输入 b 回到上一题，输入 q 放弃。
 # 所有问题只在「全新安装 + 能交互」时出现，CI / curl|bash / -y 一律不打扰。
-WIZ_STEPS=(access domain db backup mail confirm)
+WIZ_STEPS=(access domain db backup mail extra confirm)
 
 wizard_probe() {
   WIZ_DISTRO="$(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-未知}")" || WIZ_DISTRO="未知"
@@ -1397,7 +1573,7 @@ wiz_access() {
   # 命令行已经给了 --domain 或 --port → 不再问
   if [ -n "$DOMAIN" ] || [ -n "$APP_PORT" ]; then WIZ_ACT=next; return 0; fi
   echo
-  echo "  ── 第 1 问：别人怎么访问你的博客？"
+  ui_section "第 1 问 · 别人怎么访问你的博客？"
   if [ "$WIZ_PORTS" = "1" ]; then
     echo "    1) 域名 + 自动 HTTPS  【推荐】"
     echo "       需要一个已经解析到本机的域名；证书脚本自动申请、自动续期。"
@@ -1425,7 +1601,7 @@ wiz_domain() {
   [ "$WIZ_MODE" = "domain" ] || { WIZ_ACT=next; return 0; }
   [ -n "$DOMAIN" ] && { WIZ_ACT=next; return 0; }
   echo
-  echo "  ── 第 2 问：域名是什么？"
+  ui_section "第 2 问 · 域名是什么？"
   echo "    只写域名本身，不要带 http://，例如 blog.example.com"
   echo "    请确认它已解析到 ${WIZ_IP}（还没解析也可以先填，之后补上即可）"
   local tries=0 d
@@ -1485,7 +1661,7 @@ wiz_db() {
 wiz_backup() {
   [ "$NO_AUTOBACKUP" = "1" ] && { WIZ_ACT=next; return 0; }
   echo
-  echo "  ── 第 4 问：要不要每天自动备份？"
+  ui_section "第 4 问 · 要不要每天自动备份？"
   echo "    1) 要  【推荐】每天自动快照，只保留最近几份，服务器坏了能救回来。"
   echo "    2) 不要，我自己手动备份"
   ask "选 1 还是 2" "1"
@@ -1511,7 +1687,7 @@ wiz_backup() {
 wiz_mail() {
   [ -n "$SMTP_HOST_OPT" ] && { WIZ_ACT=next; return 0; }
   echo
-  echo "  ── 第 5 问：配置邮件通知吗？（文章订阅 / 评论提醒）"
+  ui_section "第 5 问 · 配置邮件通知吗？（文章订阅 / 评论提醒）"
   echo "    直接回车跳过 —— 之后随时可以在后台「设置 → 邮件」里配。"
   ask "SMTP 服务器地址（留空跳过）" ""
   [ -z "${REPLY:-}" ] && { WIZ_ACT=next; return 0; }
@@ -1520,6 +1696,26 @@ wiz_mail() {
   ask "SMTP 用户名（通常是邮箱地址）" "";             SMTP_USER_OPT="${REPLY:-}"
   ask "SMTP 密码 / 授权码" "";                        SMTP_PASS_OPT="${REPLY:-}"
   ask "发件人地址（如 noreply@example.com）" "$SMTP_USER_OPT"; SMTP_FROM_OPT="${REPLY:-}"
+  WIZ_ACT=next
+}
+
+# 第 6 问：AI 摘要与对象存储。都可留空跳过（留空 = 之后在后台「设置」里补）。
+wiz_extra() {
+  if [ -n "$AI_BASE_OPT" ] && [ -n "$AI_KEY_OPT" ]; then WIZ_ACT=next; return 0; fi
+  ui_section "第 6 问 · 现在配 AI 摘要吗？（可留空跳过）"
+  ui_hint "AI 用来自动生成文章摘要；留空也能用，之后到后台「设置 → AI」随时补。"
+  ask "AI 接口地址（留空跳过，例如 https://api.deepseek.com/v1）" ""
+  [ -z "${REPLY:-}" ] && { WIZ_ACT=next; return 0; }
+  AI_BASE_OPT="$REPLY"
+  ask "API Key" ""
+  AI_KEY_OPT="${REPLY:-}"
+  if [ -z "$AI_KEY_OPT" ]; then
+    warn "没填 Key，AI 暂不启用（之后可在后台补）"
+    WIZ_ACT=next
+    return 0
+  fi
+  ask "模型名" "deepseek-chat"
+  AI_MODEL_OPT="${REPLY:-deepseek-chat}"
   WIZ_ACT=next
 }
 
@@ -1545,14 +1741,15 @@ wizard_summary() {
   fi
   if [ -n "$SMTP_HOST_OPT" ]; then mail="${SMTP_HOST_OPT}:${SMTP_PORT_OPT}（发件人 ${SMTP_FROM_OPT:-未填}）"
   else mail="未配置（之后可在后台「设置 → 邮件」里补）"; fi
-  echo
-  echo "    访问方式    ${mode}"
-  echo "    数据库      ${db}"
-  echo "    定时备份    ${backup}"
-  echo "    邮件通知    ${mail}"
-  echo "    安装目录    ${INSTALL_DIR}"
-  echo "    代码版本    ${REPO}@${REF}"
-  [ -n "$TIMEZONE" ] && echo "    系统时区    ${TIMEZONE}"
+  ui_kv "访问方式" "${mode}"
+  ui_kv "数据库"   "${db}"
+  ui_kv "定时备份" "${backup}"
+  ui_kv "邮件通知" "${mail}"
+  ui_kv "安装目录" "${INSTALL_DIR}"
+  ui_kv "代码版本" "${REPO}@${REF}"
+  [ -n "$TIMEZONE" ] && ui_kv "系统时区" "${TIMEZONE}"
+  [ -n "$AI_BASE_OPT" ] && [ -n "$AI_KEY_OPT" ] && ui_kv "AI 摘要" "${AI_MODEL_OPT:-未指定模型}（${AI_BASE_OPT}）"
+  [ -n "$S3_ENDPOINT_OPT" ] && ui_kv "对象存储" "S3 ${S3_ENDPOINT_OPT}"
   # 必须以 0 结束：上面那行是 `[ ... ] && ...`，条件为假时整条语句返回 1，
   # 函数返回值就变成 1 —— 在 set -e 下会把调用方直接打断（向导走到复核页就静默退出）。
   return 0
@@ -1560,11 +1757,11 @@ wizard_summary() {
 
 wiz_confirm() {
   echo
-  echo "  ── 最后一步：确认一下"
+  ui_section "最后一步 · 确认一下"
   wizard_summary
   echo
-  echo "    回车 = 开始安装      b = 改上一题"
-  echo "    1 = 改访问方式   2 = 改数据库   3 = 改备份   4 = 改邮件     q = 放弃"
+  echo "    回车 = 开始安装      b = 改上一题      q = 放弃"
+  echo "    1 = 访问方式   2 = 数据库   3 = 备份   4 = 邮件   5 = AI / 存储"
   ask "你的选择" ""
   case "${REPLY:-}" in
     q|Q)      die "已放弃安装（随时可以重新运行本脚本）" ;;
@@ -1573,6 +1770,7 @@ wiz_confirm() {
     2)        WIZ_ACT="jump:2" ;;
     3)        WIZ_ACT="jump:3" ;;
     4)        WIZ_ACT="jump:4" ;;
+    5)        WIZ_ACT="jump:5" ;;
     *)        WIZ_ACT=next ;;
   esac
 }
@@ -1580,16 +1778,13 @@ wiz_confirm() {
 run_wizard() {
   wizard_probe
   {
+    ui_banner "安装向导" "轻语博客 · 自托管通用版"
+    ui_kv "这台机器" "${WIZ_DISTRO} / ${WIZ_ARCH}"
+    ui_kv "可用磁盘" "${WIZ_DISK} MB"
+    ui_kv "公网 IP"  "${WIZ_IP}"
     echo
-    echo "  ┌──────────────────────────────────────────────────────────┐"
-    echo "  │  轻语博客 · 安装向导                                      │"
-    echo "  └──────────────────────────────────────────────────────────┘"
-    echo
-    echo "    这台机器：${WIZ_DISTRO} / ${WIZ_ARCH}   可用磁盘 ${WIZ_DISK} MB"
-    echo "    公网 IP ：${WIZ_IP}"
-    echo
-    echo "    接下来几个问题，每个都给好了推荐答案 —— 直接回车就是推荐方案。"
-    echo "    输入 b 回到上一题，输入 q 放弃安装。"
+    ui_hint "接下来几个问题，每个都给好了推荐答案 —— 直接回车就是推荐方案。"
+    ui_hint "输入 b 回到上一题，输入 q 放弃安装。"
   } > /dev/tty 2>/dev/null || true
 
   local i=0 n=${#WIZ_STEPS[@]}
@@ -1625,22 +1820,20 @@ wizard_maybe() {
 # 演练模式 / 时区 / 配置档导出
 # ============================================================
 dry_run_report() {
-  echo
-  echo "  ┌──────────────────────────────────────────────────────────┐"
-  echo "  │  演练模式（--dry-run）：只打印将要做什么，不实际执行       │"
-  echo "  └──────────────────────────────────────────────────────────┘"
+  ui_banner "演练模式（--dry-run）" "只打印将要做什么，不实际执行"
   wizard_summary
   echo
-  echo "  将要执行的步骤："
-  echo "    1) 检查并准备系统环境（curl / git / Docker）"
-  echo "    2) 获取代码：${REPO}@${REF}"
-  echo "    3) 生成 ${INSTALL_DIR}/.env（含随机密钥）"
-  echo "    4) 起飞前检查（资源 / 端口 / 域名 / 防火墙）"
-  echo "    5) 构建镜像并启动容器"
-  [ "$WIZ_BACKUP" = "1" ] && echo "    6) 安装定时备份（每天 ${AT_TIME}，保留 ${KEEP_N} 份）"
+  ui_section "将要执行的步骤"
+  ui_opt 1 "检查并准备系统环境" "curl / git / Docker"
+  ui_opt 2 "获取代码" "${REPO}@${REF}"
+  ui_opt 3 "生成配置文件" "${INSTALL_DIR}/.env（含随机密钥）"
+  ui_opt 4 "起飞前检查" "资源 / 端口 / 域名 / 防火墙"
+  ui_opt 5 "构建镜像并启动容器" ""
+  [ "$WIZ_BACKUP" = "1" ] && ui_opt 6 "安装定时备份" "每天 ${AT_TIME}，保留 ${KEEP_N} 份"
   echo
-  echo "  现在不会做：不装 Docker、不下载代码、不写 .env、不启动容器。"
-  echo "  确认无误后去掉 --dry-run 再跑一次即可。"
+  ui_rule
+  ui_hint "现在不会做：不装 Docker、不下载代码、不写 .env、不启动容器。"
+  ui_kv "下一步" "去掉 --dry-run 再跑一次即可"
   return 0
 }
 
@@ -1685,6 +1878,17 @@ apply_env_extras() {
   [ -n "$SMTP_PASS_OPT" ] && { env_set SMTP_PASS "$SMTP_PASS_OPT"; n=$((n + 1)); }
   [ -n "$SMTP_FROM_OPT" ] && { env_set BLOG_MAIL_FROM "$SMTP_FROM_OPT"; n=$((n + 1)); }
   [ -n "$TIMEZONE" ]      && { env_set TZ "$TIMEZONE"; n=$((n + 1)); }
+  [ -n "$ADMIN_EMAIL_OPT" ] && { env_set BLOG_ADMIN_EMAIL "$ADMIN_EMAIL_OPT"; n=$((n + 1)); }
+  [ -n "$LOG_LEVEL_OPT" ] && { env_set LOG_LEVEL "$LOG_LEVEL_OPT"; n=$((n + 1)); }
+  [ -n "$REDIS_OPT" ]     && { env_set REDIS_URL "$REDIS_OPT"; n=$((n + 1)); }
+  [ -n "$AI_BASE_OPT" ]   && { env_set AI_BASE_URL "$AI_BASE_OPT"; n=$((n + 1)); }
+  [ -n "$AI_KEY_OPT" ]    && { env_set AI_API_KEY "$AI_KEY_OPT"; n=$((n + 1)); }
+  [ -n "$AI_MODEL_OPT" ]  && { env_set AI_MODEL "$AI_MODEL_OPT"; n=$((n + 1)); }
+  [ -n "$S3_ENDPOINT_OPT" ] && { env_set S3_ENDPOINT "$S3_ENDPOINT_OPT"; n=$((n + 1)); }
+  [ -n "$S3_KEY_ID_OPT" ]   && { env_set S3_ACCESS_KEY_ID "$S3_KEY_ID_OPT"; n=$((n + 1)); }
+  [ -n "$S3_SECRET_OPT" ]   && { env_set S3_SECRET_ACCESS_KEY "$S3_SECRET_OPT"; n=$((n + 1)); }
+  [ -n "$S3_BUCKET_OPT" ]   && { env_set S3_MEDIA_BUCKET "$S3_BUCKET_OPT"; n=$((n + 1)); }
+  [ -n "$S3_PUBLIC_BASE_OPT" ] && { env_set S3_MEDIA_PUBLIC_BASE "$S3_PUBLIC_BASE_OPT"; n=$((n + 1)); }
   [ "$n" -gt 0 ] && log "已把邮件 / 时区配置写入 .env（${n} 项；改完执行 $0 restart 生效）"
   return 0
 }
@@ -1714,6 +1918,19 @@ MIRROR=${MIRROR:-0}
 KEEP=$KEEP_N
 AT=$AT_TIME
 AUTOBACKUP=$WIZ_BACKUP
+ADMIN_EMAIL=$ADMIN_EMAIL_OPT
+DATA_DIR=$DATA_DIR_OPT
+LOG_LEVEL=$LOG_LEVEL_OPT
+REDIS=$REDIS_OPT
+AI_BASE_URL=$AI_BASE_OPT
+AI_API_KEY=$AI_KEY_OPT
+AI_MODEL=$AI_MODEL_OPT
+S3_ENDPOINT=$S3_ENDPOINT_OPT
+S3_REGION=$S3_REGION_OPT
+S3_KEY_ID=$S3_KEY_ID_OPT
+S3_SECRET=$S3_SECRET_OPT
+S3_BUCKET=$S3_BUCKET_OPT
+S3_PUBLIC_BASE=$S3_PUBLIC_BASE_OPT
 EOF
   chmod 600 "$f" 2>/dev/null || true
   log "配置档已保存到 ${f}（含 SMTP 密码，权限已设为 600）"
@@ -1728,27 +1945,23 @@ post_install_guide() {
   site_url="$(env_value SITE_URL)"
   [ -n "$site_url" ] || site_url="http://localhost:$(local_health_port)"
   key="$(env_value BLOG_ADMIN_SETUP_KEY)"
+  ui_banner "接下来三件事" "部署已经跑起来了，剩下的就是登录看看"
+  ui_kv "1) 打开站点" "${site_url}"
+  ui_hint   "首次打开可能要等十几秒（容器正在初始化数据库）"
   echo
-  echo "  ┌──────────────────────────────────────────────────────────┐"
-  echo "  │  接下来三件事                                            │"
-  echo "  └──────────────────────────────────────────────────────────┘"
-  echo
-  echo "    1) 打开 ${site_url}"
-  echo "       首次打开可能要等十几秒（容器正在初始化数据库）"
-  echo
-  echo "    2) 打开 ${site_url}/admin 设置管理员密码"
+  ui_kv "2) 设置密码" "${site_url}/admin"
   if [ -n "$key" ]; then
-    echo "       安装密钥：${key}"
-    echo "       （已存在 .env 里，忘了随时跑 $0 info 查看）"
+    ui_hint "安装密钥：${C_B}${key}${C_RESET}（已存进 .env，忘了随时跑 $0 info 查看）"
   fi
-  echo "       设完密码后，到「设置 → 站点」把站名、简介改成你自己的"
+  ui_hint "设完密码后，到「设置 → 站点」把站名、简介改成你自己的"
   echo
-  echo "    3) 确认 SITE_URL 是真实域名"
-  echo "       现在是 ${site_url}"
-  echo "       如果是 localhost / 内网 IP，改 ${INSTALL_DIR}/.env 里的 SITE_URL 后执行 $0 restart"
+  ui_kv "3) 核对地址" "${site_url}"
+  ui_hint "如果是 localhost / 内网 IP，改 ${INSTALL_DIR}/.env 里的 SITE_URL 后执行 $0 restart"
   echo
-  echo "  出问题先跑： $0 doctor        （Docker / 容器 / 端口 / 证书 / 磁盘逐项检查）"
-  echo "  看实时日志： $0 logs"
+  ui_rule
+  ui_kv "出问题先跑" "$0 doctor"
+  ui_hint "Docker / 容器 / 端口 / 证书 / 磁盘 逐项检查"
+  ui_kv "看实时日志" "$0 logs"
   echo
   if [ "$SKIP_DOCTOR" = "1" ]; then
     log "已跳过自动体检（--no-doctor）"
@@ -2084,36 +2297,32 @@ summary() {
   # 以 .env 的 SITE_URL 为准：两种模式（域名 / IP+端口）共用同一段输出
   local site_url; site_url="$(env_value SITE_URL)"
   [ -n "$site_url" ] || site_url="http://localhost:8787"
-  echo
-  echo "  ┌──────────────────────────────────────────────────────────┐"
-  echo "  │  轻语博客 · 自托管通用版 部署完成                          │"
-  echo "  └──────────────────────────────────────────────────────────┘"
-  echo
-  echo "    访问地址    ${site_url}"
-  echo "    管理后台    ${site_url}/admin"
-  echo "    安装目录    ${INSTALL_DIR}"
+  ui_banner "部署完成" "轻语博客 · 自托管通用版"
+  ui_kv "访问地址"  "${C_B}${site_url}${C_RESET}"
+  ui_kv "管理后台"  "${site_url}/admin"
+  ui_kv "安装目录"  "${INSTALL_DIR}"
   local db_url; db_url="$(env_value DATABASE_URL)"
   if [ -n "$db_url" ]; then
     local db_host; db_host="$(printf '%s' "$db_url" | sed -E 's#^[^:]+://[^@]*@([^/:]+).*#\1#')"
     if [ -n "$DATABASE_URL_OPT" ] || [ "$DB_KIND" = "external" ]; then
-      echo "    数据库      PostgreSQL（外部）${db_host}"
+      ui_kv "数据库" "PostgreSQL（外部）${db_host}"
     else
-      echo "    数据库      PostgreSQL（内置容器）${db_host}"
+      ui_kv "数据库" "PostgreSQL（内置容器）${db_host}"
     fi
-    echo "    数据目录    ${INSTALL_DIR}/data（上传 + 备份；数据库在 PostgreSQL 卷里）"
+    ui_kv "数据目录" "${INSTALL_DIR}/data（上传 + 备份；数据库在 PostgreSQL 卷里）"
   else
-    echo "    数据库      SQLite（${INSTALL_DIR}/data/qingyu.db）"
-    echo "    数据目录    ${INSTALL_DIR}/data（SQLite + 上传 + 备份）"
+    ui_kv "数据库" "SQLite（${INSTALL_DIR}/data/qingyu.db）"
+    ui_kv "数据目录" "${INSTALL_DIR}/data（SQLite + 上传 + 备份）"
   fi
   echo
   if [ -n "${SETUP_KEY_SHOWN:-}" ]; then
-    echo "    初始化密钥  ${SETUP_KEY_SHOWN}"
-    echo "                （首次打开 /admin 时填写，已保存在 .env 的 BLOG_ADMIN_SETUP_KEY）"
+    ui_kv "初始化密钥" "${C_B}${SETUP_KEY_SHOWN}${C_RESET}"
+    ui_hint "首次打开 /admin 时填写，已保存在 .env 的 BLOG_ADMIN_SETUP_KEY"
   else
-    echo "    初始化密钥  见 ${INSTALL_DIR}/.env 中的 BLOG_ADMIN_SETUP_KEY"
+    ui_kv "初始化密钥" "见 ${INSTALL_DIR}/.env 中的 BLOG_ADMIN_SETUP_KEY"
   fi
   echo
-  echo "    常用操作："
+  ui_section "常用操作"
   echo "      docker compose -f ${INSTALL_DIR}/compose.yaml logs -f app"
   echo "      ${INSTALL_DIR}/deploy/install.sh upgrade"
   echo "      ${INSTALL_DIR}/deploy/install.sh backup"
@@ -2184,12 +2393,14 @@ cmd_install() {
   [ "$DRY_RUN" = "1" ] || ensure_curl
 
   # 第 1 步：把选项一次性问清楚（向导）或沿用默认值
-  step_begin "确认安装选项"
+  # 默认零配置：不提问，脚本自己决定域名 / 端口 / 数据库；加--wizard 才逐项确认
+  step_begin "确定访问方式"
   if [ "$DRY_RUN" = "1" ] && [ "$WIZARD_FORCE" != "1" ] && ! can_ask; then
     log "演练模式：不提问，使用默认值"
   else
     wizard_maybe
   fi
+  [ "$WIZARD_FORCE" != "1" ] && ui_hint "零配置模式：其余选项（站名 / 密码 / AI / 邮件 / 图床）装完在后台「设置」里填"
   interact_mode
   interact_database
   resolve_mode
@@ -2908,34 +3119,28 @@ cmd_info() {
   deploy_time="$(sed -n '1s/^# 由 deploy\/install.sh 于 \(.*\) 生成$/\1/p' "$env_file" | head -n1)"
   local port="${app_bind##*:}"
 
-  echo
-  echo "  轻语博客 · 部署信息"
-  echo "  ────────────────────────────────────────────────────"
-  echo "    访问地址      ${site_url:-（未设置）}"
-  echo "    管理后台      ${site_url:-}/admin"
+  ui_banner "部署信息" "轻语博客 · 自托管通用版"
+  ui_kv "访问地址" "${C_B}${site_url:-（未设置）}${C_RESET}"
+  ui_kv "管理后台" "${site_url:-}/admin"
   if [ -n "$setup_key" ]; then
-    echo "    初始化密钥    ${setup_key}"
-    echo "                  （首次打开后台设置管理员密码时需要；重置密码也需要）"
+    ui_kv "初始化密钥" "${C_B}${setup_key}${C_RESET}"
+    ui_hint "首次打开后台设置管理员密码时需要；重置密码也需要"
   else
-    echo "    初始化密钥    （未设置——首次初始化无保护，建议补上）"
+    ui_kv "初始化密钥" "（未设置——首次初始化无保护，建议补上）"
   fi
   if [ -n "$write_token" ]; then
-    echo "    写入令牌      ${write_token:0:8}…（脚本/CI 调用写接口用，完整值见 .env）"
+    ui_kv "写入令牌" "${write_token:0:8}…（脚本/CI 调用写接口用，完整值见 .env）"
   fi
 
-  echo
-  echo "  部署方式"
-  echo "  ────────────────────────────────────────────────────"
+  ui_section "部署方式"
   if has_profile domain "$profiles"; then
-    echo "    模式          域名 + 自动 HTTPS"
-    echo "    域名          ${domain:-（未设置）}"
-    echo "    对外端口      80 / 443（由 Caddy 占用）"
+    ui_kv "模式"     "域名 + 自动 HTTPS"
+    ui_kv "域名"     "${domain:-（未设置）}"
+    ui_kv "对外端口" "80 / 443（由 Caddy 占用）"
   else
-    echo "    模式          纯 HTTP（未启用 Caddy / 无证书）"
-    echo "    端口          ${port:-（未知）}"
-    if [ -n "$domain" ]; then
-      echo "    域名          ${domain}"
-    fi
+    ui_kv "模式" "纯 HTTP（未启用 Caddy / 无证书）"
+    ui_kv "端口" "${port:-（未知）}"
+    [ -n "$domain" ] && ui_kv "域名" "$domain"
   fi
   # 数据库：以 .env 的 DATABASE_URL 为准（有值 = PostgreSQL，空 = SQLite）
   local db_url db_kind_label db_host
@@ -2947,13 +3152,13 @@ cmd_info() {
     else
       db_kind_label="PostgreSQL（外部）"
     fi
-    echo "    数据库        ${db_kind_label} ${db_host}"
-    echo "    数据目录      ${INSTALL_DIR}/data（上传 + 备份；数据存 PostgreSQL 卷）"
+    ui_kv "数据库" "${db_kind_label} ${db_host}"
+    ui_kv "数据目录" "${INSTALL_DIR}/data（上传 + 备份；数据存 PostgreSQL 卷）"
   else
-    echo "    数据库        SQLite"
-    echo "    数据目录      ${INSTALL_DIR}/data（SQLite + 上传 + 备份；容器内 /data 卷）"
+    ui_kv "数据库" "SQLite"
+    ui_kv "数据目录" "${INSTALL_DIR}/data（SQLite + 上传 + 备份；容器内 /data 卷）"
   fi
-  [ -n "$deploy_time" ] && echo "    部署时间      ${deploy_time}"
+  [ -n "$deploy_time" ] && ui_kv "部署时间" "${deploy_time}"
 
   # 运行状态：容器在跑就问 /healthz，否则跳过
   local hp health
@@ -2961,12 +3166,10 @@ cmd_info() {
   health="$(curl -fsS --max-time 3 "http://127.0.0.1:${hp}/healthz" 2>/dev/null)" || health=""
   echo
   if [ -z "$health" ]; then
-    echo "  运行状态"
-    echo "  ────────────────────────────────────────────────────"
-    echo "    ⚠ 服务未响应（容器可能没在运行）——执行 ./deploy/install.sh status 查看"
+    ui_section "运行状态"
+    doc_warn "服务未响应（容器可能没在运行）" "执行 $0 status 查看"
   else
-    echo "  运行状态"
-    echo "  ────────────────────────────────────────────────────"
+    ui_section "运行状态"
     local version revision storage database_status posts applied skipped uptime
     version="$(health_string_field version)"
     revision="$(health_string_field revision)"
@@ -2977,33 +3180,32 @@ cmd_info() {
     skipped="$(health_number_field skipped)"
     uptime="$(health_number_field uptime)"
 
-    [ -n "$version" ] && echo "    版本          ${version}"
-    [ -n "$revision" ] && [ "$revision" != "null" ] && echo "    构建版本      ${revision}"
-    [ -n "$posts" ] && echo "    文章数        ${posts}"
+    [ -n "$version" ] && ui_kv "版本" "${version}"
+    [ -n "$revision" ] && [ "$revision" != "null" ] && ui_kv "构建版本" "${revision}"
+    [ -n "$posts" ] && ui_kv "文章数" "${posts}"
     if [ -n "$storage" ]; then
       [ "$storage" = "local" ] && storage="本地磁盘" || storage="S3 兼容对象存储"
-      echo "    存储方式      ${storage}"
+      ui_kv "存储方式" "${storage}"
     fi
     if [ -n "$applied" ] || [ -n "$skipped" ]; then
-      echo "    数据库迁移    已应用 ${applied:-0} / 已跳过 ${skipped:-0}"
+      ui_kv "数据库迁移" "已应用 ${applied:-0} / 已跳过 ${skipped:-0}"
     fi
-    [ -n "$uptime" ] && echo "    运行时长      $(human_uptime "$uptime")"
+    [ -n "$uptime" ] && ui_kv "运行时长" "$(human_uptime "$uptime")"
     if [ "$database_status" = "error" ]; then
-      echo "    数据库        SQLite（异常）"
+      ui_kv "数据库" "SQLite（异常）"
     else
-      echo "    数据库        SQLite（${INSTALL_DIR}/data/qingyu.db）"
+      ui_kv "数据库" "SQLite（${INSTALL_DIR}/data/qingyu.db）"
     fi
   fi
 
   # 安全提示
   if [ "$profiles" != "domain" ]; then
-    echo
-    echo "  安全提示"
-    echo "  ────────────────────────────────────────────────────"
-    echo "    ⚠ 当前为纯 HTTP，管理后台的登录密码是明文传输的。"
-    echo "      让出 80/443 后执行 ./deploy/install.sh upgrade --domain 你的域名 可启用 HTTPS"
+    ui_section "安全提示"
+    doc_warn "当前为纯 HTTP，管理后台的登录密码是明文传输的。" \
+      "让出 80/443 后执行 $0 upgrade --domain 你的域名 可启用 HTTPS"
   fi
   echo
+  return 0
 }
 # ---------- 一键体检 ----------
 # 用法：./deploy/install.sh doctor
@@ -3014,33 +3216,32 @@ DOCTOR_WARN=0
 DOCTOR_FAIL=0
 
 doc_head() {
-  printf '\n  \033[1m%s\033[0m\n' "$1"
-  printf '  %s\n' "────────────────────────────────────────"
+  ui_section "$1"
 }
 
 doc_ok() {
-  printf '    \033[1;32m✅\033[0m %s\n' "$1"
+  printf '    %s%s%s %s\n' "$C_GREEN" "$G_OK" "$C_RESET" "$1"
   DOCTOR_OK=$((DOCTOR_OK + 1))
 }
 
 doc_warn() {
-  printf '    \033[1;33m⚠️ \033[0m %s\n' "$1"
+  printf '    %s%s%s %s\n' "$C_YELLOW" "$G_WARN" "$C_RESET" "$1"
   DOCTOR_WARN=$((DOCTOR_WARN + 1))
   if [ -n "${2:-}" ]; then
-    printf '        \033[2m→ %s\033[0m\n' "$2"
+    printf '        %s→ %s%s\n' "$C_GREY" "$2" "$C_RESET"
   fi
 }
 
 doc_fail() {
-  printf '    \033[1;31m❌\033[0m %s\n' "$1"
+  printf '    %s%s%s %s\n' "$C_RED" "$G_FAIL" "$C_RESET" "$1"
   DOCTOR_FAIL=$((DOCTOR_FAIL + 1))
   if [ -n "${2:-}" ]; then
-    printf '        \033[2m→ %s\033[0m\n' "$2"
+    printf '        %s→ %s%s\n' "$C_GREY" "$2" "$C_RESET"
   fi
 }
 
 doc_info() {
-  printf '      \033[2m%s\033[0m\n' "$1"
+  printf '      %s%s%s\n' "$C_GREY" "$1" "$C_RESET"
 }
 
 cmd_doctor() {
@@ -3368,27 +3569,30 @@ maybe_show_menu() {
   local site
   site="$(env_value SITE_URL 2>/dev/null || true)"
   {
+    ui_banner "运维菜单" "检测到 ${INSTALL_DIR} 已经部署过了"
+    [ -n "$site" ] && ui_kv "当前站点" "${C_B}${site}${C_RESET}"
     echo
-    printf '\033[1;36m==> \033[0m%s\n' "检测到 ${INSTALL_DIR} 已经部署过，你想做什么？"
-    [ -n "$site" ] && printf '    当前站点：\033[1m%s\033[0m\n' "$site"
+    ui_section "常用"
+    ui_opt  1 "更新到最新版" "先查有没有新代码，有才备份 + 重建，数据保留"
+    ui_opt  2 "只检查更新"   "看远端有没有新代码，不改动任何东西"
+    ui_opt  3 "一键体检"     "Docker / 容器 / 端口 / 防火墙 / 公网逐项检查"
+    ui_opt  4 "部署信息"     "访问地址、初始化密钥、版本、文章数"
+    ui_opt  5 "运行状态"     "容器与健康检查"
+    ui_opt  6 "备份数据"     "数据库快照到 data/backups"
+    ui_opt  7 "查看日志"     "实时输出应用日志（Ctrl+C 退出）"
     echo
-    echo "  1) 更新到最新版    先查有没有新代码，有才备份+重建，数据保留"
-    echo "  2) 只检查更新      看远端有没有新代码，不改动任何东西"
-    echo "  3) 一键体检        Docker / 容器 / 端口 / 防火墙 / 公网逐项检查"
-    echo "  4) 查看部署信息    访问地址、初始化密钥、版本、文章数"
-    echo "  5) 查看运行状态    容器与健康检查"
-    echo "  6) 备份数据        数据库快照到 data/backups"
-    echo "  7) 查看日志        实时输出应用日志（Ctrl+C 退出）"
-    echo "  8) 重启服务        改完 .env 之后用它生效"
-    echo "  9) 停止服务        配置和数据都保留"
-    echo " 10) 启动服务        把停过的服务再拉起来"
-    echo " 11) 回滚到上一版    更新出问题时退回"
-    echo " 12) 卸载            删除容器（数据卷保留）"
-    echo " 13) 定时备份        每天自动快照，只保留最近 7 份"
-    echo " 14) 打包迁移        打成 tar.gz，方便搬到新服务器"
-    echo "  0) 退出"
+    ui_section "服务与回退"
+    ui_opt  8 "重启服务"     "改完 .env 之后用它生效"
+    ui_opt  9 "停止服务"     "配置和数据都保留"
+    ui_opt 10 "启动服务"     "把停过的服务再拉起来"
+    ui_opt 11 "回滚到上一版" "更新出问题时退回"
+    ui_opt 12 "定时备份"     "每天自动快照，只保留最近 ${KEEP_N} 份"
+    ui_opt 13 "打包迁移"     "打成 tar.gz，方便搬到新服务器"
+    ui_opt 14 "卸载"         "删除容器（数据卷保留）"
     echo
-    echo "  提示：改端口 / 站点地址 → 编辑 ${INSTALL_DIR}/.env 后选 8 生效"
+    ui_opt  0 "退出" ""
+    ui_rule
+    ui_hint "改端口 / 站点地址 → 编辑 ${INSTALL_DIR}/.env 后选 8 生效"
   } > /dev/tty 2>/dev/null || return 0
   ask "请输入数字" "0"
   case "$REPLY" in
@@ -3403,9 +3607,9 @@ maybe_show_menu() {
     9)  COMMAND="stop" ;;
     10) COMMAND="start" ;;
     11) COMMAND="rollback" ;;
-    12) COMMAND="uninstall" ;;
-    13) COMMAND="autobackup" ;;
-    14) COMMAND="migrate" ;;
+    12) COMMAND="autobackup" ;;
+    13) COMMAND="migrate" ;;
+    14) COMMAND="uninstall" ;;
     0)  log "已退出（再次运行本脚本可重新打开菜单）"; exit 0 ;;
     *)  warn "没看懂这个选择（请输入 0-14），先退出"; exit 1 ;;
   esac

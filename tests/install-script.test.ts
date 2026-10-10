@@ -170,6 +170,59 @@ describe('deploy/install.sh', () => {
     expect(body).toContain('UPDATE_STATE="unknown"');
   });
 
+  // ---------- 终端 UI ----------
+  it('有一套统一的排版原语（不再各处手工拼盒子）', () => {
+    const s = src();
+    for (const fn of ['ui_banner', 'ui_section', 'ui_kv', 'ui_hint', 'ui_opt', 'ui_rule', 'ui_bar']) {
+      expect(s, `缺少 UI 原语 ${fn}()`).toMatch(new RegExp(`^${fn}\\(\\)\\s*\\{`, 'm'));
+    }
+    // 非 UTF-8 终端要能降级成 ASCII，否则进度条 / 对勾全是乱码
+    expect(s).toContain('G_FULL');
+    expect(s).toMatch(/G_FULL="#"/);
+    // 尊重 NO_COLOR
+    expect(s).toContain('NO_COLOR');
+  });
+
+  it('自定义配置项：解析、用法、配置档、.env 四处都齐', () => {
+    const s = src();
+    for (const f of [
+      '--admin-email',
+      '--data-dir',
+      '--log-level',
+      '--redis',
+      '--ai-base-url',
+      '--ai-key',
+      '--ai-model',
+      '--s3-endpoint',
+      '--s3-region',
+      '--s3-key-id',
+      '--s3-secret',
+      '--s3-bucket',
+      '--s3-public-base',
+    ]) {
+      expect(s, `${f} 没有写进 .env 模板`).toContain(f);
+      expect(s, `${f} 没有写进配置档导出`).toContain(f);
+    }
+    // 这些值必须真的落到 env（否则「填了没生效」）
+    for (const k of ['BLOG_ADMIN_EMAIL', 'LOG_LEVEL', 'REDIS_URL', 'AI_BASE_URL', 'AI_API_KEY', 'AI_MODEL', 'S3_ENDPOINT']) {
+      expect(s, `${k} 没有写进 .env`).toContain(`${k}=`);
+    }
+  });
+
+  it('默认零配置：不加任何参数也不会提问', () => {
+    const s = src();
+    // NO_WIZARD 默认 1 —— 只有显式 --wizard 才走问答向导
+    expect(s).toMatch(/^NO_WIZARD=1/m);
+    // interact_mode / interact_database 都要在「没要求向导」时直接返回
+    for (const fn of ['interact_mode', 'interact_database']) {
+      const body = s.slice(s.indexOf(`${fn}() {`));
+      expect(body.slice(0, 600), `${fn} 没有「非向导直接返回」的短路`).toContain('[ "$WIZARD_FORCE" != "1" ] && return 0');
+    }
+    // 帮助第一屏必须告诉用户「什么都不用填」
+    const help = usageText();
+    expect(help).toContain('默认行为：不提问、不需要任何配置');
+  });
+
   it('只检查的命令不装 git（纯只读，不该动系统包管理器）', () => {
     const s = src();
     const fn = s.slice(s.indexOf('cmd_check_update() {'));
