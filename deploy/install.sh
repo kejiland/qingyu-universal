@@ -580,7 +580,7 @@ usage() {
   check-update         只看有没有新代码，不改动任何东西
   upgrade              强制拉最新代码并重建（保留数据）
   rollback             回滚到上一版（回滚前自动备份）
-  domain               域名与 HTTPS：status / set <域名> / port [端口] / off
+  domain               域名与 HTTPS：status / set [域名] / port [端口] / off
   restart              重启（改完 .env 后用它生效）
   start / stop         启动 / 停止（配置和数据都保留）
   logs                 查看应用日志
@@ -617,6 +617,7 @@ usage() {
   换域名（已部署之后）：
     ./deploy/install.sh domain              查看当前域名、DNS 与证书状态
     ./deploy/install.sh domain set blog.example.com   切到新域名（自动 HTTPS）
+    ./deploy/install.sh domain set                 不带域名则交互提问，走同一套流程
     ./deploy/install.sh domain port [8080]  退回 IP + 端口模式
 
   配置档示例（KEY=VALUE，# 开头是注释；命令行参数优先级更高）：
@@ -2902,7 +2903,7 @@ domain_status() {
 
   if [ -z "$domain" ]; then
     echo
-    ui_hint "换成域名 + 自动 HTTPS：./deploy/install.sh domain set blog.example.com"
+    ui_hint "换成域名 + 自动 HTTPS：./deploy/install.sh domain set  （不带域名会交互提问）"
     return 0
   fi
 
@@ -2960,56 +2961,200 @@ domain_apply() {
   fi
 }
 
+# 输入域名（或把用户贴的整段网址压成域名本身）
+domain_normalize() {
+  local d="$1"
+  d="${d#https://}"; d="${d#http://}"
+  d="${d%%/*}"; d="${d%%:*}"
+  d="${d,,}"
+  printf '%s' "$d"
+}
+
+# 没有参数时交互式问一个合法的域名，最多三次；非交互直接报错退出
+domain_ask() {
+  local d
+  [ -n "$ASSUME_YES" ] && return 1
+  can_ask || return 1
+  local i=0
+  while [ "$i" -lt 3 ]; do
+    i=$((i + 1))
+    # UI 输出必须直接写到 tty：本函数的返回值要用 $(...) 捕获，混进提示文字会污染域名
+    ui_section "第 1 问 · 域名是什么？" > /dev/tty
+    ui_hint "只写域名本身，不要带 https:// 和路径，例如 blog.example.com" > /dev/tty
+    ask "域名" ""
+    d="$(domain_normalize "$REPLY")"
+    if [ -z "$d" ]; then
+      ui_warn "没填域名，已放弃" > /dev/tty
+      return 1
+    fi
+    if is_valid_domain "$d"; then
+      printf '%s' "$d"
+      return 0
+    fi
+    ui_warn "「${d}」不像一个合法域名（示例：blog.example.com）" > /dev/tty
+  done
+  return 1
+}
+
+# 证书是否已经签好：直接打一次 HTTPS 健康检查，比翻 Caddy 的数据目录可靠
+domain_https_ok() {
+  local d="$1"
+  have curl || return 1
+  curl -fsS --max-time 8 -o /dev/null "https://${d}/healthz" 2>/dev/null
+}
+
 cmd_domain() {
-  need_root
-  resolve_docker
   [ -d "$INSTALL_DIR" ] || die "未找到安装目录：$INSTALL_DIR —— 先 install，或用 --dir 指定"
   [ -f "$INSTALL_DIR/.env" ] || die "未找到 $INSTALL_DIR/.env —— 这个目录还没有部署过？"
 
   set -- $SUBCMD_ARGS
   local action="${1:-status}" target="${2:-}"
 
+  # status 只是读 .env + 查 DNS，完全不碰 Docker
+  [ "$action" = status ] || [ -z "$action" ] || { need_root; resolve_docker; }
+
   case "$action" in
     status|"") domain_status ;;
 
-    set)
-      [ -n "$target" ] || die "请给出域名，例如：domain set blog.example.com"
-      target="${target#https://}"; target="${target#http://}"; target="${target%%/*}"
-      is_valid_domain "$target" || die "「$target」不像一个合法域名（示例：blog.example.com）"
-      if [ "$(env_value SITE_DOMAIN)" = "$target" ]; then
-        log "域名已经是 ${target}"; domain_status; return 0
-      fi
-      echo
-      log "切换到 ${target}"
-      warn "DNS 需要先把 ${target} 解析到本机公网 IP，否则证书签不出来"
-      domain_apply "$target"
-      # 证书与代理由 compose 重建时拉起；防火墙只新增 80/443 规则，不动其它设置
-      ensure_firewall_open
-      compose up -d --force-recreate caddy app 2>/dev/null || compose up -d
-      wait_healthy
-      domain_status
-      log "域名已切换为 https://${target}"
-      ;;
-
-    port|off)
-      local p="${target:-}"
-      if [ -z "$p" ] && [ "$action" = port ]; then
-        local bind; bind="$(env_value APP_BIND)"; p="${bind##*:}"
-        [ "$p" = "8787" ] && p=8080
-      fi
-      [ -n "$p" ] || p=8080
-      case "$p" in ''|*[!0-9]*) die "端口只能是数字，收到的是「$p」" ;; esac
-      log "切换到 IP + 端口模式（:${p}）"
-      domain_apply "" "$p"
-      APP_PORT="$p"
-      ensure_firewall_open
-      compose up -d --force-recreate app 2>/dev/null || compose up -d
-      wait_healthy
-      log "已改为 $(env_value SITE_URL)（纯 HTTP，无证书）"
-      ;;
-
+    set) domain_set "$target" ;;
+    port|off) domain_port "$target" "$action" ;;
     *) usage; die "未知用法：domain ${action}（可用：status / set <域名> / port [端口] / off）" ;;
   esac
+}
+
+# ---------------- 切到域名 + 自动 HTTPS ----------------
+domain_set() {
+  local d="$1"
+
+  STEP_TOTAL=5
+
+  step_begin "确认要用的域名"
+  if [ -z "$d" ]; then
+    d="$(domain_ask)" || { STEP_TOTAL=0; die "没拿到域名，已取消（可以改用 ./deploy/install.sh domain set 你的域名）"; }
+  else
+    d="$(domain_normalize "$d")"
+    is_valid_domain "$d" || die "「$d」不像一个合法域名（示例：blog.example.com）"
+  fi
+  local old_domain; old_domain="$(env_value SITE_DOMAIN)"
+  if [ "$old_domain" = "$d" ]; then
+    STEP_TOTAL=0
+    log "域名已经是 ${d}，无需切换"; domain_status; return 0
+  fi
+  ui_kv "原站点地址" "$(env_value SITE_URL)"
+  ui_kv "新站点地址" "${C_B}https://${d}${C_RESET}"
+  ui_kv "当前模式" "$([ -n "$old_domain" ] && echo "域名模式（${old_domain}）" || echo 'IP + 端口')"
+  step_end
+
+  step_begin "检查前提条件（DNS 与 80/443）"
+  local ip resolved ok=1
+  ip="$(detect_ip)"
+  resolved="$(getent hosts "$d" 2>/dev/null | awk '{print $1}' | head -n1)"
+  ui_kv "本机公网 IP" "${ip:-（探测失败）}"
+  if [ -z "$resolved" ]; then
+    ui_warn "${d} 还解析不出 IP"
+    ui_hint "到 DNS 控制台加一条 A 记录指向 ${ip:-本机公网 IP}"
+    ok=0
+  elif domain_points_here "$d"; then
+    ui_ok "${d} → ${resolved}，已指向本机"
+  else
+    ui_warn "${d} → ${resolved}，与本机公网 IP（${ip:-未知}）不一致，证书会签发失败"
+    ok=0
+  fi
+  if port_in_use_pair; then
+    ui_ok "80 / 443 空闲，可以签发证书"
+  else
+    ui_warn "80 或 443 已被占用，Caddy 拿不到端口"
+    ui_hint "排查：./deploy/install.sh doctor"
+    ok=0
+  fi
+  if [ "$ok" -eq 0 ]; then
+    ui_hint "以上问题不影响配置写入；补好之后重跑本命令即可签发证书"
+    if ! can_ask || [ "$ASSUME_YES" != "1" ]; then
+      step_end
+      warn "前提条件未满足，仍会继续写入配置（可加 -y 跳过此提示）"
+    else
+      ask "仍然继续写入配置？" "y"
+      case "$REPLY" in
+        y|Y|yes|YES) step_end ;;
+        *) STEP_TOTAL=0; die "已取消，原配置保持不变" ;;
+      esac
+    fi
+  else
+    step_end
+  fi
+
+  step_begin "写入配置"
+  domain_apply "$d"
+  ui_kv "SITE_URL" "$(env_value SITE_URL)"
+  ui_kv "SITE_DOMAIN" "$(env_value SITE_DOMAIN)"
+  ui_kv "APP_BIND" "$(env_value APP_BIND)"
+  ui_kv "TRUST_PROXY" "$(env_value TRUST_PROXY)"
+  ui_kv "COMPOSE_PROFILES" "$(env_value COMPOSE_PROFILES)"
+  step_end
+
+  step_begin "放行端口并重启服务（不重新构建镜像）"
+  ensure_firewall_open
+  # 只重建容器让新配置生效；这里刻意不做 compose build / pull —— 换域名是配置变更，
+  # 应用镜像与域名无关，重新构建在 1 GB 内存的小机器上纯属浪费时间和内存。
+  compose up -d --force-recreate --no-build app 2>/dev/null || compose up -d --force-recreate app
+  step_end
+
+  step_begin "等待服务就绪并确认 HTTPS"
+  wait_healthy
+  local tries=0
+  while [ "$tries" -lt 6 ]; do
+    domain_https_ok "$d" && break
+    tries=$((tries + 1))
+    [ "$tries" -ge 6 ] && break
+    printf '  等待证书签发…（第 %d/6 次）\n' "$tries"
+    sleep 5
+  done
+  if domain_https_ok "$d"; then
+    ui_ok "https://${d} 已可访问（HTTPS 证书已签发）"
+  elif [ -z "$resolved" ]; then
+    ui_warn "域名还没解析到本机，证书暂时签不了 —— 解析生效后重跑：./deploy/install.sh domain set ${d}"
+  else
+    ui_warn "HTTPS 还没通，常见原因：80/443 被占或 DNS 尚未生效"
+    ui_hint "查看详情：./deploy/install.sh doctor"
+  fi
+  step_end
+
+  STEP_TOTAL=0
+  echo
+  log "域名已切换为 https://${d}"
+  domain_status
+}
+
+# ---------------- 退回 IP + 端口 ----------------
+domain_port() {
+  local p="$1" action="$2"
+  STEP_TOTAL=3
+
+  step_begin "确认要用的端口"
+  if [ -z "$p" ]; then
+    local bind; bind="$(env_value APP_BIND)"; p="${bind##*:}"
+    [ "$p" = "8787" ] && p=8080
+  fi
+  [ -n "$p" ] || p=8080
+  case "$p" in ''|*[!0-9]*) die "端口只能是数字，收到的是「$p」" ;; esac
+  ui_kv "原站点地址" "$(env_value SITE_URL)"
+  ui_kv "新站点地址" "${C_B}http://$(detect_ip):${p}${C_RESET}"
+  ui_hint "该模式没有 HTTPS，登录密码以明文传输；随时可用 domain set 切回来"
+  step_end
+
+  step_begin "写入配置并重启服务（不重新构建镜像）"
+  domain_apply "" "$p"
+  APP_PORT="$p"
+  ensure_firewall_open
+  compose up -d --force-recreate --no-build app 2>/dev/null || compose up -d --force-recreate app
+  step_end
+
+  step_begin "等待服务就绪"
+  wait_healthy
+  step_end
+
+  STEP_TOTAL=0
+  log "已改为 $(env_value SITE_URL)（纯 HTTP，无证书）"
 }
 # ---------- 日常运维：启动 / 停止 / 重启 / 回滚 ----------
 cmd_start() {
