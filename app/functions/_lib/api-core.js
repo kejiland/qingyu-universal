@@ -15,6 +15,8 @@ const DB_ERR = '数据库未配置：请创建并绑定名为 DB 的 D1 数据�
 const READ_CACHE = 'public, s-maxage=60, stale-while-revalidate=300';
 const FEED_CACHE = 'public, s-maxage=300, stale-while-revalidate=600';
 const NO_CACHE = 'no-store';
+// 带计数（stats=1）的列表：计数随阅读/点赞变化，窗口压到 30s
+const STATS_CACHE = 'public, s-maxage=30, stale-while-revalidate=60';
 
 /* 点赞频控：每 IP 每分钟上限（防接口被刷量） */
 const LIKE_CAP = 10;
@@ -405,6 +407,33 @@ async function commentGuardEnabled(env) {
 const COMMENT_MIN_FILL_MS = 2000;   // 表单渲染到提交的最短间隔（低于此值视为机器人）
 
 /** GET /api/posts（列表） · POST /api/posts（新建） */
+/** 批量读取阅读/点赞/评论计数，一次查询填满列表里所有文章的 stats 字段。
+ *
+ * 背景：前端「精选文章」原来要给每篇文章各发一次 /stats 和 /comments，
+ * 文章一多就是 N+1 请求——手机上打开一篇文章要等十几秒，还容易被误认为「又刷了一次」。
+ * 改成列表接口 stats=1 一次带上，前端只发一个请求。
+ * 评论数与 handleComments 一致：只算已通过（含历史 NULL）的评论。 */
+async function attachStatsBatch(env, list) {
+  if (!Array.isArray(list) || !list.length) return list;
+  const views = {}, likes = {}, comments = {};
+  try {
+    const rows = await dbAll(env.DB, 'SELECT post_id, views, likes FROM stats');
+    for (const r of rows || []) {
+      views[r.post_id] = Number(r.views) || 0;
+      likes[r.post_id] = Number(r.likes) || 0;
+    }
+  } catch (e) {}
+  try {
+    const rows = await dbAll(env.DB, "SELECT post_id, COUNT(*) AS c FROM comments WHERE (status = 'approved' OR status IS NULL) GROUP BY post_id");
+    for (const r of rows || []) comments[r.post_id] = Number(r.c) || 0;
+  } catch (e) {}
+  for (const p of list) {
+    if (!p || !p.id) continue;
+    p.stats = { views: views[p.id] || 0, likes: likes[p.id] || 0, comments: comments[p.id] || 0 };
+  }
+  return list;
+}
+
 export async function handlePosts(request, env) {
   if (!env || !env.DB) return json({ error: DB_ERR }, 500, request, env);
   if (request.method === 'OPTIONS') return corsPreflight(request, env);
@@ -413,6 +442,8 @@ export async function handlePosts(request, env) {
     const url = new URL(request.url);
     const full = url.searchParams.get('full') === '1';
     const includeDrafts = full || url.searchParams.get('all') === '1';
+    // stats=1：随列表一次性下发阅读/点赞/评论计数（前端精选文章用，避免 N+1 请求）
+    const withStats = url.searchParams.get('stats') === '1';
 
     const q = String(url.searchParams.get('q') || '').trim().toLowerCase();
     const stFilter = String(url.searchParams.get('status') || '');
@@ -450,8 +481,12 @@ export async function handlePosts(request, env) {
       delete p.enc;
       return p;
     });
+    if (withStats) await attachStatsBatch(env, summary);
+    // 带计数的内容会随阅读/点赞变化，缓存窗口比纯列表更短
     return json({ ok: true, posts: summary }, 200, request, env,
-      includeDrafts ? { 'Cache-Control': NO_CACHE } : { 'Cache-Control': READ_CACHE, 'Cache-Tag': TAG_POSTS });
+      includeDrafts ? { 'Cache-Control': NO_CACHE }
+        : withStats ? { 'Cache-Control': STATS_CACHE, 'Cache-Tag': TAG_POSTS }
+          : { 'Cache-Control': READ_CACHE, 'Cache-Tag': TAG_POSTS });
   }
 
   if (request.method === 'POST') {

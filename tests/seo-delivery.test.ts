@@ -9,7 +9,9 @@
  * 现在：Node 层直接压缩（直连部署也生效），已发布文章允许短期复用，
  * 并用 ETag 保证文章一旦更新就立刻回源。
  * ============================================================ */
+import fs from 'node:fs';
 import http from 'node:http';
+import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startTestServer, type TestServer } from './helpers/server.js';
 
@@ -92,8 +94,10 @@ describe('文章页传输：压缩与缓存', () => {
 
   it('文章页允许短期复用，并带 ETag', async () => {
     const res = await fetch(`${server.baseUrl}/posts/${postId}/`);
-    expect(res.headers.get('cache-control')).toContain('max-age=60');
-    expect(res.headers.get('cache-control')).toContain('stale-while-revalidate');
+    // 更新后手机端刷新一两次就要能看到最新：不再用 stale-while-revalidate
+    // （它会先把旧页面顶上去），改为每次回源校验、靠 ETag 命中 304。
+    expect(res.headers.get('cache-control')).toContain('must-revalidate');
+    expect(res.headers.get('cache-control')).toContain('max-age=0');
     expect(res.headers.get('etag')).toBeTruthy();
   });
 
@@ -133,8 +137,8 @@ describe('首页与列表页：同样的压缩与缓存策略', () => {
 
   it.each(pages)('%s 允许短期复用并带 ETag', async (path) => {
     const res = await fetch(server.baseUrl + path);
-    expect(res.headers.get('cache-control')).toContain('max-age=60');
-    expect(res.headers.get('cache-control')).toContain('stale-while-revalidate');
+    expect(res.headers.get('cache-control')).toContain('must-revalidate');
+    expect(res.headers.get('cache-control')).toContain('max-age=0');
     expect(res.headers.get('etag')).toBeTruthy();
   });
 
@@ -187,5 +191,24 @@ describe('首页与列表页：同样的压缩与缓存策略', () => {
     });
     const after = await fetch(server.baseUrl + '/');
     expect(after.headers.get('etag')).not.toBe(etag);
+  });
+});
+
+describe('ETag 必须由最终 HTML 决定', () => {
+  const src = fs.readFileSync(path.resolve('src/routes/seo.ts'), 'utf8');
+
+  it('home 的 ETag 用渲染后的 html，而不是数据库字段', () => {
+    expect(src).toMatch(/weakEtag\('home',[^)]*html\)/);
+  });
+
+  it('文章页的 ETag 在生成 html 之后才计算', () => {
+    const line = src.match(/weakEtag\('post',[^)]*html\)/);
+    expect(line).not.toBeNull();
+    // 不能出现只按 id 猜的旧写法
+    expect(src).not.toMatch(/weakEtag\('post',[^)]*\)\s*;\s*\n\s*if[^\n]*etag\b[^\n]*\n[\s\S]{0,400}?html\s*=/);
+  });
+
+  it('列表页 ETag 同样绑定最终 html', () => {
+    expect(src).toMatch(/weakEtag\(pagePath, config\.siteUrl, pageHtml\)/);
   });
 });

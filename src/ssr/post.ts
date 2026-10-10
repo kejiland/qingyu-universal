@@ -16,7 +16,7 @@
  * 公开访客生成的内容（评论）不走这条路径，仍由前端渲染。
  * ============================================================ */
 import { marked } from 'marked';
-import { escapeHtml, escapeJsonForScript, type PostRow, type SiteIdentity } from '../seo/meta.js';
+import { escapeHtml, escapeJsonForScript, stripMarkdown, type PostRow, type SiteIdentity } from '../seo/meta.js';
 import { proxyHtmlImgSources } from '../lib/image-url.js';
 import { formatDate } from './format.js';
 
@@ -131,7 +131,11 @@ export function toClientPost(post: PostRow, options: { withContent?: boolean } =
     id: post.id,
     title: post.title ?? '',
     date: post.date ?? '',
-    excerpt: post.excerpt ?? '',
+    // 摘要：与列表页（ssr/list.ts renderCard）保持同一口径 ——
+    // 优先手填 excerpt，没有就从正文生成纯文本。
+    // 首页/列表内联时不再带正文（withContent:false），若不在这里补摘要，
+    // 未写摘要的文章卡片摘要位会变空。
+    excerpt: String(post.excerpt ?? '').trim() || stripMarkdown(String(post.content ?? '')).slice(0, 100),
     cover: post.cover ?? '',
     ogImage: post.og_image ?? '',
     content: withContent ? (post.content ?? '') : '',
@@ -167,6 +171,41 @@ function parseJsonObject(raw: unknown): Record<string, unknown> {
  * 用同步内联脚本：它在解析阶段就执行，早于 defer 的 boot.js / app.min.js，
  * 所以 app.js 启动时 window.BLOG_POSTS 已就绪。
  */
+/**
+ * site_settings 行转成 /api/settings 的同形对象（{k:v}）。
+ * 值保持字符串（与数据库、与 /api/settings 一致，前端自己会 parseJsonSafe）。
+ */
+export function settingsToClient(rows: Array<{ k: string; v: string }>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const row of rows) {
+    if (row && typeof row.k === 'string' && row.k) out[row.k] = String(row.v ?? '');
+  }
+  return out;
+}
+
+/**
+ * 首屏数据内联：把列表与站点设置一起塞进 HTML，让前端启动时直接复用，
+ * 不必再等一次 /api/posts + /api/settings 才画第二遍（否则手机端看到「闪一下 / 又拉一次」）。
+ * window.__SSR_LIST__=1 告诉 app.js：列表已是最新，直接置位云端就绪，跳过首屏探测请求。
+ * window.__SSR_SETTINGS__ 与 /api/settings 的响应同形（{settings:{k:v}}）。
+ */
+export function injectListBootstrapData(
+  html: string,
+  posts: Array<Record<string, unknown>>,
+  settings: Record<string, unknown> | null,
+  listInlined: boolean = true,
+  dataInlined: boolean = false
+): string {
+  let out = '<script>';
+  if (listInlined) out += 'window.__SSR_LIST__=1;';
+  if (dataInlined) out += 'window.__SSR_DATA__=1;';
+  if (posts.length) out += 'window.BLOG_POSTS=' + escapeJsonForScript(posts) + ';';
+  if (settings) out += 'window.__SSR_SETTINGS__=' + escapeJsonForScript({ settings }) + ';';
+  out += '</script>';
+  if (html.indexOf('</head>') >= 0) return html.replace('</head>', out + '</head>');
+  return out + html;
+}
+
 export function injectBootstrapData(html: string, posts: Array<Record<string, unknown>>): string {
   if (!posts.length) return html;
   const script = '<script>window.BLOG_POSTS=' + escapeJsonForScript(posts) + ';window.__SSR_DATA__=1;</script>';

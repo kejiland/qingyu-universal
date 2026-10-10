@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 const pub = path.resolve('app/public');
 const read = (name: string) => fs.readFileSync(path.join(pub, name), 'utf8');
 const size = (name: string) => fs.statSync(path.join(pub, name)).size;
+const readSrc = (name: string) => fs.readFileSync(path.resolve(name), 'utf8');
 
 describe('公开站前端拆分（v0.7-b）', () => {
   it('index.html 通过轻量启动器加载，不再首屏直连整包 app.min.js', () => {
@@ -13,13 +14,35 @@ describe('公开站前端拆分（v0.7-b）', () => {
     expect(html).not.toContain('<script defer src="app.min.js');
   });
 
-  it('启动器对 SSR 页面空闲加载，对无内容/后台路由立即加载', () => {
+  it('启动器立即接管，不再等空闲期（否则用户看到页面二次重渲染）', () => {
     const boot = read('boot.js');
-    expect(boot).toContain('requestIdleCallback');
-    expect(boot).toContain('.boot-load');
-    expect(boot).toContain("'/write'");
-    expect(boot).toContain("'/preview/'");
-    expect(boot).toContain('/edit');
+    // SSR 已经画出内容，把 app.min.js 拖到 requestIdleCallback（1~2.5s）才接管，
+    // 手机端会看到「先看到内容 → 页面又整体刷一遍」。启动器是 defer，立即加载不阻塞首屏。
+    expect(boot).not.toContain('requestIdleCallback');
+    expect(boot).toContain('DOMContentLoaded');
+  });
+
+  it('posts.js 不会清空服务端内联的文章列表', () => {
+    // posts.min.js 是 defer 脚本，一定在 SSR 内联脚本之后执行；
+    // 若无条件赋值，会把刚下发的 BLOG_POSTS 覆盖成[]，
+    // 首页/文章页就退化成「本地无数据」→ 文章页卡在「加载中…」。
+    const posts = read('posts.js');
+    expect(posts).toContain('__SSR_LIST__');
+    expect(posts).toContain('__SSR_DATA__');
+    expect(posts).toContain('Array.isArray(window.BLOG_POSTS) ? window.BLOG_POSTS : []');
+  });
+
+  it('云端就绪标记在首屏渲染前置位（否则首帧评论走本地分支）', () => {
+    // _cloudOn() 依赖 _cloudDetected：若首次 route() 之后才置位，
+    // 文章页首帧的评论/统计会读 localStorage，评论永远显示「暂无评论」。
+    const app = read('app.js');
+    const flagAt = app.indexOf('if (window.__SSR_LIST__ || window.__SSR_DATA__)');
+    const firstRoute = app.indexOf('window.__bootPromise');
+    expect(flagAt).toBeGreaterThan(-1);
+    expect(firstRoute).toBeGreaterThan(-1);
+    expect(flagAt).toBeGreaterThan(firstRoute);
+    const probeGate = app.indexOf(' && !window.__SSR_LIST__)');
+    expect(probeGate).toBeGreaterThan(flagAt);
   });
 
   it('字号按钮在 app.js 接管前已有首屏点击兜底', () => {
@@ -226,7 +249,9 @@ describe('后台侧边栏切页保留滚动位置', () => {
     expect(swVer).toBe(appVer);
     // admin.min.js 由 app.js 以 admin.min.js?v=BLOG_VERSION 注入（app.js:1930），
     // 所以只要 BLOG_VERSION 提了，后台产物也会跟着换 URL；这里顺带确认 index.html 同步。
-    const vs = new Set([...read('index.html').matchAll(/\?v=([0-9]+\.[0-9]+\.[0-9]+)/g)].map((m) => m[1]));
+    // 版本号现在由 scripts/build-frontend.mjs 按内容哈希自动算出（b + 8 位十六进制），
+    // 不再是手动填的三段式版本号，正则模式放宽一点以免遗漏。
+    const vs = new Set([...read('index.html').matchAll(/\?v=([0-9a-z.]+)/g)].map((m) => m[1]));
     expect([...vs]).toEqual([appVer]);
   });
 });
@@ -359,5 +384,47 @@ describe('后台存储配置页', () => {
     expect(contract).toContain('secretAccessKeyMasked');
     // /api/settings 的响应 schema 里绝不能出现 secret
     expect(settings).not.toMatch(/secretAccessKey/i);
+  });
+
+  /* ------------------------------------------------------------
+   * 手机端打开文章要快：不能再出现「等 4 秒」和「每篇文章各拉一遍」
+   * ------------------------------------------------------------ */
+  it('全局样式就绪判断不能写死 media === "all"', () => {
+    const app = read('app.js');
+    // link.media 只有显式写media="all" 时才是 'all'，没写时是空串。
+    // 写死 === 'all' 会让首屏永远判不出样式就绪 → 干等兜底 4 秒。
+    expect(app).not.toMatch(/link\.media === 'all'/);
+    expect(app).toMatch(/var mediaAll = function \(\) \{ var m = link\.media; return !m \|\| m === 'all'; \};/);
+    // 兜底也要收短，别让样式失败时整页干等 4 秒
+    expect(app).toMatch(/setTimeout\(finish, 1200\)/);
+    expect(app).not.toMatch(/setTimeout\(finish, 4000\)/);
+  });
+
+  it('精选文章必须批量取计数，不能逐篇拉 /stats 与 /comments', () => {
+    const app = read('app.js');
+    // 列表接口一次带上阅读/点赞/评论
+    expect(app).toContain("apiFetch('api/posts?stats=1')");
+    const start = app.indexOf('async function getFeaturedPosts');
+    const block = app.slice(start, app.indexOf('function renderFeaturedHtml', start));
+    // 逐篇回落的分支只允许出现在「接口没给 stats」时（pending 集合）
+    expect(block).toContain('pending');
+    expect(block).not.toMatch(/posts\.map\(async function/);
+  });
+
+  it('文章页统计不重复请求：云端下由 incView 的响应直接回填', () => {
+    const app = read('app.js');
+    expect(app).toMatch(/if \(!_cloudOn\(\)\) \{\s*\n\s*loadStats\(post\.id\)/);
+    // 网络失败时不要再伪造0，否则会把已显示的计数抹掉
+    expect(app).toContain('return _statsCache[postId] || null;');
+  });
+
+  it('列表接口 stats=1 一次性下发阅读/点赞/评论计数', () => {
+    const core = readSrc('app/functions/_lib/api-core.js');
+    expect(core).toContain("const withStats = url.searchParams.get('stats') === '1';");
+    expect(core).toContain('async function attachStatsBatch(env, list)');
+    // 计数随阅读/点赞变化，缓存窗口要比纯列表短
+    expect(core).toMatch(/const STATS_CACHE = 'public, s-maxage=30/);
+    const contract = readSrc('src/api/contract/posts.ts');
+    expect(contract).toContain('PostStatsBriefSchema');
   });
 });

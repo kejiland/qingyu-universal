@@ -25,6 +25,17 @@ const ROBOTS_NOINDEX = 'noindex, nofollow';
 /** 与前端 stripMd 完全一致的 Markdown 纯文本提取（用于生成描述）。 */
 export function stripMarkdown(markdown: string): string {
   return String(markdown ?? '')
+    // 文章正文在本项目里存的是 HTML（渲染时直接当 HTML 用），
+    // 只去 Markdown 符号会留下 <p> 之类的裸标签，
+    // 摘要卡片与 SEO 描述里就会出现标签文本。
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, String.fromCharCode(34))
+    .replace(/&amp;/gi, '&')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/`([^`]*)`/g, '$1')
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')

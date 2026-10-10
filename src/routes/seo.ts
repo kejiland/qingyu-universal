@@ -33,7 +33,7 @@ import {
   type PostRow,
   type SiteIdentity
 } from '../seo/meta.js';
-import { injectAppContent, injectBootstrapData, renderPostContent, toClientPost } from '../ssr/post.js';
+import { injectAppContent, injectListBootstrapData, renderPostContent, settingsToClient, toClientPost } from '../ssr/post.js';
 import { HOME_POSTS_SQL, renderHomeContent } from '../ssr/list.js';
 import { weakEtag } from '../etag.js';
 import { readChrome, wrapWithChrome, type ActiveState, type ChromeData } from '../ssr/chrome.js';
@@ -52,7 +52,14 @@ export interface SeoDeps {
 }
 
 /** 可短期缓存的 HTML（列表页 / 静态页）缓存策略：1 分钟新鲜 + 10 分钟后台刷新。 */
-const LIST_CACHE_CONTROL = 'public, max-age=60, stale-while-revalidate=600';
+/**
+ * HTML 缓存：每次回源校验，靠 ETag 命中 304（几十字节）。
+ *
+ * 此前是 `max-age=60, stale-while-revalidate=600` —— stale-while-revalidate
+ * 会先把旧页面直接顶上去再后台更新，手机端表现就是「更新后怎么刷新都是旧内容，
+ * 清理缓存才行」。改为 must-revalidate 后，刷新一两次就能看到最新。
+ */
+const LIST_CACHE_CONTROL = 'public, max-age=0, must-revalidate';
 
 /** 把整批 site_settings 折成一个稳定指纹，用于静态页的 ETag。 */
 function fingerprintOfSettings(rows: Array<{ k: string; v: string }>): string {
@@ -149,14 +156,23 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
     // 若只按列表算指纹，两种条件的 ETag 会撞在一起，浏览器拿到 304
     // 却显示的是另一种筛选的页面。
     let filterKey = '';
+    // 渲染到哪些文章（给前端复用）与站点设置（给前端配置用）。
+    let clientPosts: Array<Record<string, unknown>> = [];
+    // 是否为纯首页（无筛选、第 1 页）：只有它的列表是完整的。
+    let plainHome = false;
     try {
       const url = new URL(c.req.url);
       const tag = url.searchParams.get('tag') || '';
       const category = url.searchParams.get('category') || '';
       const page = Math.max(1, Math.floor(Number(url.searchParams.get('page')) || 1));
       filterKey = `${tag}|${category}|${page}`;
+
+      plainHome = !tag && !category && page === 1;
       const posts = await db.all<PostRow>(HOME_POSTS_SQL);
       const chrome = await readChrome(db, site.name, settingsRows);
+      // 首屏已经把列表渲染好了，把同一批数据再内联一次：
+      // 启动时直接复用，不再发一轮 /api/posts（否则手机端会看到页面重画一次）。
+      clientPosts = posts.map((row) => toClientPost(row, { withContent: false }));
       // 分页条数：后台「功能开关」优先，其次 config.js，最后 8（与 app.js 同链）
       const pageSize = chrome.home.pageSize ?? (await loadConfigPageSize()) ?? 8;
       if (posts.length) {
@@ -182,13 +198,17 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
       /* 查询失败时回落到原始外壳，不影响页面可用性 */
     }
 
-    const html = injectHead(withList, meta, renderHeadBlock(meta));
+    // 列表 + 设置内联：前端启动时直接复用，跳过首屏的两个探测请求。
+    let html = injectHead(withList, meta, renderHeadBlock(meta));
+    // 只有纯首页（无标签/分类筛选、第 1 页）才内联 BLOG_POSTS：筛选页与第 2 页只包含列表的一部分，
+    // 若当成完整列表内联进去，SPA 内部切换页码时就会省掉其他文章。这些情况仍走原来的探测路径。
+    html = injectListBootstrapData(html, plainHome ? clientPosts : [], settingsToClient(settingsRows), plainHome);
     /* ETag 必须含内容指纹：此前只按 'home' + siteUrl 计算，是个常量，
      * 于是「文章列表变了但 ETag 不变」 —— 违反 HTTP 语义。眼下首页没有走
      * If-None-Match 协商（所以暂未表现为内容不更新），但一旦前面挂了
      * CDN / 反向代理按 ETag 做缓存，新发布的文章就永远推不到访客和爬虫。
      * 这里把列表里每篇的 id 与更新时间纳入指纹。 */
-    const etag = weakEtag('home', config.siteUrl, filterKey, fingerprint);
+    const etag = weakEtag('home', config.siteUrl, filterKey, html);
     if (c.req.header('if-none-match') === etag) {
       return new Response(null, {
         status: 304,
@@ -244,30 +264,10 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
      * 304 并继续显示旧正文；一旦允许短期缓存，后果从「偶尔看到旧内容」
      * 放大成「60 秒内所有人都看到旧内容」。所以把参与渲染的字段一起纳入指纹。
      * 代价只是对几 KB 文本做一次 sha1，微秒级，换来「改了立刻生效」。 */
-    const etag = weakEtag(
-      'post',
-      row.id,
-      row.updated_at ?? row.date,
-      row.title,
-      row.excerpt,
-      row.content,
-      row.cover,
-      row.og_image,
-      row.tags,
-      row.category,
-      row.series,
-      row.author,
-      row.seo,
-      row.pinned,
-      row.protected
-    );
     const cacheControl = row.protected
       ? 'private, no-cache'
-      : 'public, max-age=60, stale-while-revalidate=600';
+      : 'public, max-age=0, must-revalidate';
 
-    if (c.req.header('if-none-match') === etag) {
-      return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': cacheControl, ...security() } });
-    }
 
     const content = renderPostContent(row, site);
     const chrome = await readChrome(db, site.name, settingsRows);
@@ -277,12 +277,32 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
     // 内联当前文章（含正文）：app.js 接管时直接命中本地数据，
     // 不再出现「加载中 → 拉列表 → 拉正文 → 整页重渲染」的二次闪动。
     let html = injectHead(withBody, meta, renderHeadBlock(meta));
-    html = injectBootstrapData(html, [toClientPost(row)]);
+    // 文章页同样内联完整列表 + 站点设置：与首页一致，启动时不必再发
+    // /api/posts 与 /api/settings 各一次（否则手机端进文章后总会「又拉一轮」）。
+    let listRows: Array<PostRow> = [];
+    try {
+      listRows = await db.all<PostRow>(HOME_POSTS_SQL);
+    } catch {
+      listRows = [];
+    }
+    const clientList = listRows
+      .filter((r) => r.id !== row.id)
+      .map((r) => toClientPost(r, { withContent: false }));
+    clientList.unshift(toClientPost(row));
+    html = injectListBootstrapData(html, clientList, settingsToClient(settingsRows), true, true);
+    /* ETag 必须由**最终 HTML** 决定，而不是由参与渲染的数据库字段推测：
+     * 页面里还内联了模板、静态资源版本号（?v=）与首屏数据，任何一处变化都可能
+     * 改变输出却不动数据库指纹。此前只按文章字段算，于是前端一更新 ETag 不变，
+     * 服务器回 304，手机就一直用旧页面 —— 表现为「必须清缓存才看得到新版」。 */
+    const etag2 = weakEtag('post', config.siteUrl, id, html);
+    if (c.req.header('if-none-match') === etag2) {
+      return new Response(null, { status: 304, headers: { ETag: etag2, 'Cache-Control': cacheControl, ...security() } });
+    }
     // 已发布正文在未更新前是静态的：允许浏览器/前置代理短期复用，
     // ETag 保证文章一改就立刻回源；动态评论和浏览数仍由 API 单独读取。
     return htmlResponse(c, html, {
       'Cache-Control': cacheControl,
-      ETag: etag,
+      ETag: etag2,
       ...security()
     });
   };
@@ -297,12 +317,12 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
         settingsRows = [];
       }
       const site = await readSiteIdentity(db, settingsRows);
-      let withContent = shell;
+      let pageHtml = shell;
       let fingerprint = '';
       try {
         const posts = await db.all<PostRow>(ARCHIVE_POSTS_SQL);
         const chrome = await readChrome(db, site.name, settingsRows);
-        withContent = injectAppContent(
+        pageHtml = injectAppContent(
           shell,
           wrapWithChrome(chrome, render(posts, site), activeOf(c))
         );
@@ -313,14 +333,14 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
         /* 查询失败时回落到原始外壳 */
       }
       // 与文章页同策略：列表页内容在文章改动前是静态的，允许短期复用。
-      const etag = weakEtag(pagePath, config.siteUrl, fingerprint);
+      const etag = weakEtag(pagePath, config.siteUrl, pageHtml);
       if (fingerprint && c.req.header('if-none-match') === etag) {
         return new Response(null, {
           status: 304,
           headers: { ETag: etag, 'Cache-Control': LIST_CACHE_CONTROL, ...security() }
         });
       }
-      return htmlResponse(c, withContent, {
+      return htmlResponse(c, pageHtml, {
         'Cache-Control': fingerprint ? LIST_CACHE_CONTROL : 'no-cache',
         ETag: etag,
         ...security()

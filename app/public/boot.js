@@ -22,26 +22,13 @@
     document.head.appendChild(s);
   }
 
-  function isImmediate() {
-    var p = location.pathname || '/';
-    if (p === '/write' || p.indexOf('/admin') === 0 || p.indexOf('/preview/') === 0) return true;
-    if (/^\/posts\/[^/]+\/edit\/?$/.test(p)) return true;
-    var root = document.getElementById('app');
-    // SSR 页面已经有正文；只有仍是启动动画时才需要立刻接管。
-    return !root || !!root.querySelector('.boot-load');
-  }
-
   function schedule() {
-    if (isImmediate()) { loadApp(); return; }
-    // 用户先交互时立刻增强，空闲时兜底加载；一次性监听避免重复注入。
-    ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function (evt) {
-      window.addEventListener(evt, loadApp, { passive: true, once: true });
-    });
-    if (typeof window.requestIdleCallback === 'function') {
-      window.requestIdleCallback(loadApp, { timeout: 2500 });
-    } else {
-      window.setTimeout(loadApp, 1200);
-    }
+    // 不再等首次交互 / 空闲回调：
+    // SSR 页面已经画出内容，若把 app.min.js 拖到空闲期（实测 1~2.5s）才接管，
+    // 用户会看到「先看到内容 → 页面又整体重渲染 / 重新拉一次数据」，
+    // 手机端尤其明显（此时已经在读第一屏）。
+    // 本脚本是 defer，不阻塞 HTML 解析与首屏绘制，因此立即加载是安全的。
+    loadApp();
   }
 
   if (document.readyState === 'loading') {

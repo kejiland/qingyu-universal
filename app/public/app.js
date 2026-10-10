@@ -6,7 +6,7 @@
  * ============================================================================ */
 'use strict';
 
-var BLOG_VERSION = '2.10.84';
+var BLOG_VERSION = 'b5ff3537c';
 
 /* i18n 兜底：万一 i18n.js 没加载成功（网络抖动 / 缓存缺失 / 被拦截），
  * 也必须保证 t() 可用 —— 否则整页会在第一个 t(...) 处抛 “t is not defined” 而白屏。 */
@@ -394,6 +394,15 @@ function esc(s) {
 
 function stripMd(md) {
   var s = String(md || '');
+  // 正文存的是 HTML：先去标签再去 Markdown 符号，否则摘要里会露出 <p> 之类的裸标签
+  s = s.replace(/<script[\s\S]*?<\/script>/gi, ' ');
+  s = s.replace(/<style[\s\S]*?<\/style>/gi, ' ');
+  s = s.replace(/<[^>]+>/g, ' ');
+  s = s.replace(/&nbsp;/gi, ' ');
+  s = s.replace(/&lt;/gi, '<');
+  s = s.replace(/&gt;/gi, '>');
+  s = s.replace(/&quot;/gi, String.fromCharCode(34));
+  s = s.replace(/&amp;/gi, '&');
   s = s.replace(/```[\s\S]*?```/g, ' ');
   s = s.replace(/`([^`]*)`/g, '$1');
   s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1');
@@ -1094,6 +1103,12 @@ function apiBase() {
   return '';
 }
 
+/* 同时发生的同地址 GET 合并为一次真实请求（不是缓存）：
+ * 文章页首屏会有列表 / 设置 / 正文 / 评论 / 统计 / 关联文章等多个组件各自调用
+ * apiFetch，同一地址被打出两三次，手机端就表现为「进页面后又拉了一轮」。
+ * 响应回来即删除，之后的调用照常重新请求，不会拿到过期数据。 */
+var _apiInflight = Object.create(null);
+
 async function apiFetch(url, opts) {
   var cfg = getConfig();
   var base = apiBase();
@@ -1487,7 +1502,7 @@ async function incView(postId) {
       var s = (data && data.stats) || { views: 0, likes: 0 };
       _statsCache[postId] = s;
       return s;
-    } catch (e) { return _statsCache[postId] || { views: 0, likes: 0 }; }
+    } catch (e) { return _statsCache[postId] || null; }
   }
   var s = await loadStats(postId);
   s.views = Math.min(s.views + 1, 9999999);
@@ -1534,34 +1549,49 @@ async function getFeaturedPosts(excludeId, count) {
   var posts = (typeof getStaticPosts === 'function') ? getStaticPosts() : [];
   if (_cloudOn()) {
     try {
-      var d = await apiFetch('api/posts');
+      // stats=1：一次请求就带回全部文章的阅读/点赞/评论数。
+      // 原来是对每篇文章各发一次 /stats 和 /comments（手机端打开一篇文章要等十几秒）。
+      var d = await apiFetch('api/posts?stats=1');
       if (d && d.posts && d.posts.length) posts = d.posts;
     } catch (e) {}
   }
   // 过滤：排除当前文章
   posts = posts.filter(function (p) { return p.id !== excludeId && (p.status || 'published') !== 'draft'; });
-  // 并行拉取每篇文章的统计和评论数
-  var scored = await Promise.all(posts.map(async function (p) {
-    var views = 0, likes = 0, comments = 0;
-    try {
+  // 逐项打分；接口没带 stats 时（旧服务端 / 静态模式）回落到逐篇拉取
+  var pending = [];
+  var scored = posts.map(function (p) {
+    var st = p.stats;
+    if (st) {
+      var views = Number(st.views) || 0, likes = Number(st.likes) || 0, comments = Number(st.comments) || 0;
+      return { id: p.id, title: p.title || t('post.untitled'), score: likes * 3 + views + comments * 5, views: views, likes: likes, comments: comments };
+    }
+    var item = { id: p.id, title: p.title || t('post.untitled'), score: 0, views: 0, likes: 0, comments: 0 };
+    pending.push(item);
+    return item;
+  });
+  await Promise.all(pending.map(function (item) {
+    return (async function () {
+      var views = 0, likes = 0, comments = 0;
       if (_cloudOn()) {
-        var sd = await apiFetch('api/posts/' + encodeURIComponent(p.id) + '/stats');
-        if (sd && sd.stats) { views = sd.stats.views || 0; likes = sd.stats.likes || 0; }
+        try {
+          var sd = await apiFetch(statApi(item.id));
+          if (sd && sd.stats) { views = sd.stats.views || 0; likes = sd.stats.likes || 0; }
+        } catch (e) {}
+        try {
+          var cd = await apiFetch('api/posts/' + encodeURIComponent(item.id) + '/comments');
+          if (cd && cd.comments) comments = cd.comments.length;
+        } catch (e) {}
       } else {
-        var raw = localStorage.getItem('qingyu.stats.' + p.id);
-        if (raw) { var ps = JSON.parse(raw); views = ps.views || 0; likes = ps.likes || 0; }
+        try {
+          var raw = localStorage.getItem('qingyu.stats.' + item.id);
+          if (raw) { var ps = JSON.parse(raw); views = ps.views || 0; likes = ps.likes || 0; }
+          var cl = localStorage.getItem('qingyu.comments.' + item.id);
+          if (cl) comments = JSON.parse(cl).length;
+        } catch (e) {}
       }
-    } catch (e) {}
-    try {
-      if (_cloudOn()) {
-        var cd = await apiFetch('api/posts/' + encodeURIComponent(p.id) + '/comments');
-        if (cd && cd.comments) comments = cd.comments.length;
-      } else {
-        var cl = localStorage.getItem('qingyu.comments.' + p.id);
-        if (cl) comments = JSON.parse(cl).length;
-      }
-    } catch (e) {}
-    return { id: p.id, title: p.title || t('post.untitled'), score: likes * 3 + views + comments * 5, views: views, likes: likes, comments: comments };
+      item.views = views; item.likes = likes; item.comments = comments;
+      item.score = likes * 3 + views + comments * 5;
+    })();
   }));
   scored.sort(function (a, b) { return b.score - a.score; });
   _featuredCache = scored;
@@ -3085,12 +3115,12 @@ async function renderPost(id) {
     if (cloudPending) {
       html += '<div class="empty"><div class="big">' + svgIcon('spinner', 26) + '</div><p>' + t('site.loading') + '…</p></div></div></main>';
       html += renderFooter();
-      app().innerHTML = html;
+      setAppHtml(html);
       return;
     }
     html += '<div class="empty"><div class="big">' + svgIcon('question', 36) + '</div><p>' + t('post.notFound') + '</p><p><a href="' + esc(href('/')) + '">' + t('post.backHome') + '</a></p></div></div></main>';
     html += renderFooter();
-    app().innerHTML = html;
+    setAppHtml(html);
     return;
   }
 
@@ -3115,7 +3145,7 @@ async function renderPost(id) {
     if (!hasContent && !post.content && !post.enc) {
       html += '<div class="empty"><div class="big">' + svgIcon('spinner', 26) + '</div><p>' + t('site.loading') + '…</p></div>';
       html += '</div></main>' + renderFooter();
-      app().innerHTML = html;
+      setAppHtml(html);
     }
     // 超时保护：10 秒拿不到正文就放弃加载态，避免“一直加载中”
     var settled = false;
@@ -3273,19 +3303,24 @@ async function renderPost(id) {
   if (adCfg.enabled && adCfg.content) html += '<div class="ad-slot"><span class="ad-label">' + t('ad.label') + '</span>' + adCfg.content + '</div>';
 
   html += '</div></main>' + renderFooter();
-  app().innerHTML = html;
+  setAppHtml(html);
   stampHeadingNumbers(tocHeadings);
   enhanceRichContent(document.querySelector('.article'));
 
-  // stats load
-  loadStats(post.id).then(function (s) {
-    var v = document.querySelector('#viewCount'); if (v) v.textContent = String(s.views);
-    var l = document.querySelector('#likeCount'); if (l) l.textContent = String(s.likes);
-  });
+  // stats load：云端模式下 incView 的响应已经带回最新计数，
+  // 再单独 GET 一次 /stats 是重复请求（手机上就是「同一篇被拉了两遍」）。
+  if (!_cloudOn()) {
+    loadStats(post.id).then(function (s) {
+      var v = document.querySelector('#viewCount'); if (v) v.textContent = String(s.views);
+      var l = document.querySelector('#likeCount'); if (l) l.textContent = String(s.likes);
+    });
+  }
   // 精选文章异步加载
   loadFeaturedPosts(post.id);
   incView(post.id).then(function (s) {
-    var v = document.querySelector('#viewCount'); if (v && s) v.textContent = String(s.views);
+    if (!s) return;
+    var v = document.querySelector('#viewCount'); if (v) v.textContent = String(s.views || 0);
+    var l = document.querySelector('#likeCount'); if (l) l.textContent = String(s.likes || 0);
   });
   var printBtnEl = document.querySelector('#btnPrint');
   if (printBtnEl) printBtnEl.addEventListener('click', function () { try { window.print(); } catch (e) {} });
@@ -3559,7 +3594,7 @@ async function renderPost(id) {
 
   // load comments（顶层 + 嵌套回复统一渲染；支持「最热 / 最新」排序与分页）
   var CMT_PAGE = 8;
-  var _cmtState = { sort: 'hot', shown: CMT_PAGE, list: [], serverPaged: false, serverPage: 0, serverPages: 1 };
+  var _cmtState = { sort: 'hot', shown: CMT_PAGE, list: [], serverPaged: false, serverPage: 0, serverPages: 1, loading: false };
   function refreshComments(list) {
     _cmtState.list = Array.isArray(list) ? list : [];
     _cmtState.shown = CMT_PAGE;
@@ -3571,9 +3606,15 @@ async function renderPost(id) {
     var moreWrap = document.querySelector('#commentMore');
     if (!ul) return;
     var list = _cmtState.list;
-    if (cnt) cnt.textContent = String(list.length);
+    if (cnt && !_cmtState.loading) cnt.textContent = String(list.length);
     if (!list.length) {
-      ul.innerHTML = '<li class="comment-empty">' + t('comment.noComments') + '</li>';
+      // 首屏 / 切换排序时先给加载反馈：不要先闪「暂无评论」再突然冒出内容
+      if (_cmtState.loading) {
+        ul.classList.remove('is-loading');
+        ul.innerHTML = '<li class="comment-loading">' + svgIcon('spinner', 16) + '<span>' + esc(t('site.loading')) + '…</span></li>';
+      } else {
+        ul.innerHTML = '<li class="comment-empty">' + t('comment.noComments') + '</li>';
+      }
       if (moreWrap) moreWrap.style.display = 'none';
       return;
     }
@@ -3581,6 +3622,7 @@ async function renderPost(id) {
     var sorter = _cmtState.sort === 'new' ? commentSortNew : commentSort;
     var paged = _cmtState.serverPaged;
     ul.innerHTML = renderCommentTree(list, canDel, { sorter: sorter, limit: paged ? 0 : _cmtState.shown });
+    ul.classList.toggle('is-loading', !!_cmtState.loading);
     var hasMore = paged ? (_cmtState.serverPage < _cmtState.serverPages) : (commentRootCount(list) > _cmtState.shown);
     if (moreWrap) moreWrap.style.display = hasMore ? 'block' : 'none';
     bindCommentActions(ul);
@@ -3589,7 +3631,7 @@ async function renderPost(id) {
     // 删除按钮
     ul.querySelectorAll('.comment-del').forEach(function (b) {
       b.addEventListener('click', function () {
-        deleteComment(post.id, b.getAttribute('data-cid')).then(refreshComments);
+        deleteComment(post.id, b.getAttribute('data-cid')).then(function (list) { _cmtState.loading = false; refreshComments(list); });
       });
     });
     // 评论点赞（每浏览器一次，云端调用点赞接口）
@@ -3641,25 +3683,30 @@ async function renderPost(id) {
     sortWrap.querySelectorAll('[data-sort]').forEach(function (b) {
       b.addEventListener('click', function () {
         var v = b.getAttribute('data-sort');
-        if (v === _cmtState.sort) return;
+        if (v === _cmtState.sort || _cmtState.loading) return;
         _cmtState.sort = v;
         _cmtState.shown = CMT_PAGE;
-        if (_cmtState.serverPaged) {
-          _cmtState.list = [];
-          _cmtState.serverPage = 0;
-          cloudCommentPage(1, v).then(function (res) {
-            _cmtState.serverPage = 1;
-            _cmtState.serverPages = Number(res && res.pages) || 1;
-            refreshComments((res && res.comments) || []);
-          });
-          renderCommentView();
-          return;
-        }
+        // 先切高亮，否则点了像没反应
         sortWrap.querySelectorAll('[data-sort]').forEach(function (x) {
           var on = x === b;
           x.classList.toggle('active', on);
           x.setAttribute('aria-selected', on ? 'true' : 'false');
         });
+        if (_cmtState.serverPaged) {
+          // 保留旧评论并整体变暗作为加载反馈：旧实现先清空成「暂无评论」再冒出内容
+          _cmtState.loading = true;
+          renderCommentView();
+          cloudCommentPage(1, v).then(function (res) {
+            _cmtState.serverPage = 1;
+            _cmtState.serverPages = Number(res && res.pages) || 1;
+            _cmtState.loading = false;
+            refreshComments((res && res.comments) || []);
+          }).catch(function () {
+            _cmtState.loading = false;
+            refreshComments([]);
+          });
+          return;
+        }
         renderCommentView();
       });
     });
@@ -3689,17 +3736,20 @@ async function renderPost(id) {
     return apiFetch('api/posts/' + encodeURIComponent(post.id) + '/comments' + qs);
   }
   (function loadInitialComments() {
+    _cmtState.loading = true;
+    renderCommentView();   // 先显示加载反馈，避免评论区整块空白后才冒出内容
     if (_cloudOn()) {
       cloudCommentPage(1, _cmtState.sort).then(function (res) {
         _cmtState.serverPaged = true;
         _cmtState.serverPage = 1;
         _cmtState.serverPages = Number(res && res.pages) || 1;
+        _cmtState.loading = false;
         refreshComments((res && res.comments) || []);
-      }).catch(function () { _cmtState.serverPaged = false; loadComments(post.id).then(refreshComments); });
+      }).catch(function () { _cmtState.serverPaged = false; _cmtState.loading = false; loadComments(post.id).then(function (l) { refreshComments(l); }); });
       return;
     }
     _cmtState.serverPaged = false;
-    loadComments(post.id).then(refreshComments);
+    loadComments(post.id).then(function (list) { _cmtState.loading = false; refreshComments(list); });
   })();
 
   // 取消回复
@@ -3863,10 +3913,10 @@ function loadWebmentions(post) {
 
 /* 凭签名令牌读取未发布文章，展示「预览模式」提示条；不索引、不统计、不加载评论。 */
 async function renderPreviewPage(token) {
-  app().innerHTML = renderNav('/') + '<main class="container page-fade"><div class="post-body">' +
+  setAppHtml(renderNav('/') + '<main class="container page-fade"><div class="post-body">' +
     '<div class="preview-banner">' + svgIcon('eye', 14) + ' ' + t('preview.banner') + '</div>' +
     '<div class="empty"><div class="big">' + svgIcon('spinner', 26) + '</div><p>' + t('site.loading') + '…</p></div>' +
-    '</div></main>' + renderFooter();
+    '</div></main>' + renderFooter());
   try { _setMeta('robots', 'noindex, nofollow'); } catch (e) {}
   try {
     var d = await apiFetch('api/preview?token=' + encodeURIComponent(token || ''));
@@ -3885,11 +3935,11 @@ async function renderPreviewPage(token) {
       html += '<article class="article">' + bodyHtml + '</article>';
     }
     html += '</div></main>' + renderFooter();
-    app().innerHTML = html;
+    setAppHtml(html);
     try { _setMeta('robots', 'noindex, nofollow'); document.title = '（预览）' + (post.title || '') + ' · ' + getSiteName(); } catch (e) {}
     enhanceRichContent(document.querySelector('.article'));
   } catch (e) {
-    app().innerHTML = renderNav('/') + '<main class="container page-fade"><div class="empty"><div class="big">' + svgIcon('lock', 36) + '</div><p>' + esc((e && e.message) || t('preview.invalid')) + '</p><p><a href="' + esc(href('/')) + '">' + t('post.backHome') + '</a></p></div></main>' + renderFooter();
+    setAppHtml(renderNav('/') + '<main class="container page-fade"><div class="empty"><div class="big">' + svgIcon('lock', 36) + '</div><p>' + esc((e && e.message) || t('preview.invalid')) + '</p><p><a href="' + esc(href('/')) + '">' + t('post.backHome') + '</a></p></div></main>' + renderFooter());
   }
 }
 
@@ -3898,7 +3948,7 @@ function renderPostFail(post) {
   html += '<main class="container page-fade"><div class="post-body"><div class="post-header"><h1>' + esc(post.title || t('post.untitled')) + '</h1><div class="meta"><span class="meta-date">' + esc(fmtDate(post.date) || '') + '</span></div></div>';
   html += '<div class="empty" style="padding:44px 0"><div class="big">' + svgIcon('cloud', 32) + '</div><p>' + t('post.loadFail') + '</p><p style="margin-top:14px"><button class="btn btn-primary" id="retryPostBtn">' + svgIcon('refresh', 14) + ' ' + t('post.retry') + '</button> <a class="btn" href="' + esc(href('/')) + '">' + t('post.backHome') + '</a></p></div>';
   html += '</div></main>' + renderFooter();
-  app().innerHTML = html;
+  setAppHtml(html);
   var retry = document.querySelector('#retryPostBtn');
   if (retry) retry.addEventListener('click', function () { route(); });
 }
@@ -4410,9 +4460,22 @@ function serializeQuery(query) {
 
 var _i18nReady = false;
 function renderLegacyLoadFail(path) {
-  app().innerHTML = renderNav(path) + '<main class="container page-fade"><div class="empty"><div class="big">' +
+  setAppHtml(renderNav(path) + '<main class="container page-fade"><div class="empty"><div class="big">' +
     svgIcon('question', 36) + '</div><p>' + esc(t('post.loadFail')) + '</p><p><a href="' +
-    esc(href('/')) + '">' + esc(t('post.backHome')) + '</a></p></div></main>' + renderFooter();
+    esc(href('/')) + '">' + esc(t('post.backHome')) + '</a></p></div></main>' + renderFooter());
+}
+
+/* 整页写入去重：内容完全相同就不碰 DOM。
+ * 启动流程里 route() 会被调用多次（首屏接管 / 云端列表探测 / 站点设置回填），
+ * 每次重建 DOM 都会让用户看到「页面又刷了一遍」：page-fade 动画重放、
+ * 滚动位置弹回顶部、阅读进度与已输入内容丢失（手机端最明显）。 */
+var _lastRoutePath = (function () { try { return (location.pathname || '/'); } catch (e) { return '/'; } })();
+function setAppHtml(html) {
+  var el = document.querySelector('#app');
+  if (!el) return false;
+  if (typeof html === 'string' && el.innerHTML === html) return false;
+  el.innerHTML = html;
+  return true;
 }
 
 async function route() {
@@ -4427,11 +4490,15 @@ async function route() {
     await window.__i18n.loadLocale(window.__i18n.getLocale());
     _i18nReady = true;
   }
-  var r = currentRoute();
-  var path = r.path;
-  var q = r.query;
+  // 同一个页面里的重复渲染（启动流程会多次调 route()）：保住滚动位置、
+  // 跳过入场动画，避免用户看到「页面又刷了一遍」。
+  var _routePath = currentRoute().path;
+  var path = _routePath;
+  var _samePath = (_lastRoutePath === _routePath);
+  var _keepScroll = _samePath ? (window.pageYOffset || 0) : 0;
+  _lastRoutePath = _routePath;
 
-  if (path === '/') { app().innerHTML = renderHome(); fitCardLineClamps(); }
+  if (path === '/') { setAppHtml(renderHome()); fitCardLineClamps(); }
   else if (path.indexOf('/preview/') === 0) {
     // 草稿预览分享链接：/preview/<签名 token>
     var pvToken = path.slice('/preview/'.length).replace(/\/.*$/, '');
@@ -4478,33 +4545,41 @@ async function route() {
       }
     }
   }
-  else if (path === '/authors') { app().innerHTML = renderAuthors(); }
+  else if (path === '/authors') { setAppHtml(renderAuthors()); }
   else if (path.indexOf('/authors/') === 0) {
     var authorName = '';
     try { authorName = decodeURIComponent(path.slice('/authors/'.length).replace(/\/.*$/, '')); } catch (e) { authorName = path.slice('/authors/'.length); }
-    app().innerHTML = renderAuthorPage(authorName);
+    setAppHtml(renderAuthorPage(authorName));
   }
-  else if (path === '/archive') { app().innerHTML = renderArchive(); }
-  else if (path === '/subscribe') { app().innerHTML = renderSubscribe(); bindSubscribe(); }
-  else if (path === '/about') { app().innerHTML = renderAbout(); }
-  else if (path === '/tags') { app().innerHTML = renderTags(); }
-  else if (path === '/categories') { app().innerHTML = renderCategories(); }
-  else if (path === '/history') { app().innerHTML = renderHistory(); }
-  else if (path === '/links') { app().innerHTML = renderLinks(); }
-  else if (path === '/series') { app().innerHTML = renderSeriesList(); fitCardLineClamps(); }
-  else if (path === '/popular') { app().innerHTML = renderPopular(); bindPopular(); }
-  else if (path.indexOf('/series/') === 0) { var seriesName = ''; try { seriesName = decodeURIComponent(path.slice('/series/'.length)); } catch (e) { seriesName = path.slice('/series/'.length); } app().innerHTML = renderSeriesDetail(seriesName); fitCardLineClamps(); }
-  else if (path === '/guestbook') { app().innerHTML = renderGuestbook(); bindGuestbook(); }
+  else if (path === '/archive') { setAppHtml(renderArchive()); }
+  else if (path === '/subscribe') { setAppHtml(renderSubscribe()); bindSubscribe(); }
+  else if (path === '/about') { setAppHtml(renderAbout()); }
+  else if (path === '/tags') { setAppHtml(renderTags()); }
+  else if (path === '/categories') { setAppHtml(renderCategories()); }
+  else if (path === '/history') { setAppHtml(renderHistory()); }
+  else if (path === '/links') { setAppHtml(renderLinks()); }
+  else if (path === '/series') { setAppHtml(renderSeriesList()); fitCardLineClamps(); }
+  else if (path === '/popular') { setAppHtml(renderPopular()); bindPopular(); }
+  else if (path.indexOf('/series/') === 0) { var seriesName = ''; try { seriesName = decodeURIComponent(path.slice('/series/'.length)); } catch (e) { seriesName = path.slice('/series/'.length); } setAppHtml(renderSeriesDetail(seriesName)); fitCardLineClamps(); }
+  else if (path === '/guestbook') { setAppHtml(renderGuestbook()); bindGuestbook(); }
   else {
-    app().innerHTML = renderNav(path) + '<main class="container page-fade"><div class="empty"><div class="big">' + svgIcon('question', 36) + '</div><p>' + t('post.notFound') + '</p><p><a href="' + esc(href('/')) + '">' + t('post.backHome') + '</a></p></div></main>' + renderFooter();
+    setAppHtml(renderNav(path) + '<main class="container page-fade"><div class="empty"><div class="big">' + svgIcon('question', 36) + '</div><p>' + t('post.notFound') + '</p><p><a href="' + esc(href('/')) + '">' + t('post.backHome') + '</a></p></div></main>' + renderFooter());
   }
   updateSEO(path);
-  // 路由切换后回到页面顶部：否则从「上一篇 / 下一篇」跳转后仍停在新文章的同一滚动位置，
-  // 读者会以为没换页，而是直接落到文章中段 / 底部导航处。
-  if ('scrollRestoration' in history) { try { history.scrollRestoration = 'manual'; } catch (e) {} }
-  try { if (window.scrollX !== 0 || window.scrollY !== 0) window.scrollTo(0, 0); } catch (e) { try { window.scrollTo(0, 0); } catch (e2) {} }
-  // 部分浏览器在同一文档导航后会再恢复一次旧滚动位置，下一帧再归零一次兜底
-  try { requestAnimationFrame(function () { window.scrollTo(0, 0); }); } catch (e) {}
+  // 同一次访问里的重复渲染（启动流程会多次 route()）：内容不变就不该动滚动位置，
+  // 否则读者正看着第一屏就被弹回顶部，看起来就是「页面又刷新了一遍」。
+  if (_samePath) {
+    var _pf = document.querySelector('main.page-fade');
+    if (_pf) _pf.classList.add('no-anim');
+    if (_keepScroll > 0) { try { window.scrollTo(0, _keepScroll); } catch (e) {} }
+  } else {
+    // 路由切换后回到页面顶部：否则从「上一篇 / 下一篇」跳转后仍停在新文章的同一滚动位置，
+    // 读者会以为没换页，而是直接落到文章中段 / 底部导航处。
+    if ('scrollRestoration' in history) { try { history.scrollRestoration = 'manual'; } catch (e) {} }
+    try { if (window.scrollX !== 0 || window.scrollY !== 0) window.scrollTo(0, 0); } catch (e) { try { window.scrollTo(0, 0); } catch (e2) {} }
+    // 部分浏览器在同一文档导航后会再恢复一次旧滚动位置，下一帧再归零一次兜底
+    try { requestAnimationFrame(function () { window.scrollTo(0, 0); }); } catch (e) {}
+  }
   _spaNav = false;
   bindGlobal();
   /* 播放器等全站组件监听路由变化（如后台页隐藏播放器） */
@@ -5426,16 +5501,21 @@ function _waitGlobalStyle() {
   if (!link) return Promise.resolve();
   // 非浏览器环境（测试桩/无 HTMLLinkElement 语义）直接放行，避免无谓等待
   if (typeof link.media === 'undefined' || typeof link.sheet === 'undefined') return Promise.resolve();
-  try {
-    if (link.media === 'all' && link.sheet && link.sheet.cssRules && link.sheet.cssRules.length) return Promise.resolve();
-  } catch (e) {}
+  // link.media 只有在显式写了 media="all" 时才返回 'all'，没写时返回空串。
+  // 之前写死 === 'all'，正常页面永远判不出来 → 每次都要干等 4 秒兜底，
+  // 手机上就是「文章打开后评论区和精选文章迟迟不出现，像是又刷了一次」。
+  var mediaAll = function () { var m = link.media; return !m || m === 'all'; };
+  var ready = function () {
+    try { return mediaAll() && link.sheet && link.sheet.cssRules && link.sheet.cssRules.length > 0; }
+    catch (e) { return false; }
+  };
+  if (ready()) return Promise.resolve();
   return new Promise(function (resolve) {
     var done = false;
     var finish = function () { if (done) return; done = true; if (timer) clearInterval(timer); if (fallback) clearTimeout(fallback); resolve(); };
-    var timer = setInterval(function () {
-      try { if (link.media === 'all' && link.sheet && link.sheet.cssRules && link.sheet.cssRules.length) finish(); } catch (e) {}
-    }, 50);
-    var fallback = setTimeout(finish, 4000);
+    // 兜底从 4000ms 收到 1200ms：样式真的失败时不该让整页干等 4 秒
+    var timer = setInterval(function () { if (ready()) finish(); }, 50);
+    var fallback = setTimeout(finish, 1200);
     link.addEventListener('load', finish);
     link.addEventListener('error', finish);
   });
@@ -5517,6 +5597,19 @@ window.__bootPromise = (async function () {
   }
 
   await _cssReady;
+
+  // 首屏数据已由服务端内联（window.__SSR_LIST__ / window.__SSR_SETTINGS__）：
+  // 那就是刚下发的最新数据，再拉一遍 API 只会让手机端看到「重新拉取 + 重画」。
+  //
+  // 必须在首次 route() 之前置位：_cloudOn() 依赖 _cloudDetected，若首帧还是 false，
+  // 文章页的评论/统计/相关推荐会走本地分支（localStorage），评论永远显示「暂无评论」。
+  if (window.__SSR_LIST__ || window.__SSR_DATA__) {
+    _cloudDetected = true;
+    _cloudReady = true;
+    var _inlSettings = window.__SSR_SETTINGS__;
+    if (_inlSettings && _inlSettings.settings && !_siteSettings) _siteSettings = _inlSettings.settings;
+  }
+
   // 首屏渲染兜底：route() 抛错时也要把页面画出来，避免停在加载动画
   try {
     route();
@@ -5536,7 +5629,8 @@ window.__bootPromise = (async function () {
   window.addEventListener('hashchange', function () { _spaNav = true; withViewTransition(route); });
   window.addEventListener('popstate', function () { _spaNav = true; withViewTransition(route); });
 
-  if (cfg.mode === 'api' || cfg.mode === 'auto') {
+
+  if ((cfg.mode === 'api' || cfg.mode === 'auto') && !window.__SSR_LIST__) {
     // 首次渲染（上方 route()）会显示加载动画；探测完成（成功或失败）后置位并重渲染，
     // 否则首页会一直停在「正在拉取文章…」
     // posts 与 settings 并行拉取：串行叠加等待（各约 0.5~1.5s 冷启动）会拖慢首屏。

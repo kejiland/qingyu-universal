@@ -70,6 +70,14 @@ const COMPRESSIBLE_TYPES = new Set([
   'text/html', 'text/javascript', 'text/css', 'application/json',
   'application/manifest+json', 'application/xml', 'text/plain', 'image/svg+xml'
 ]);
+/* 静态资源缓存头。
+ * 之前这里不负 Cache-Control，浏览器只看得到 Last-Modified，
+ * 就会自行按「部分时间推算的新鲜度」静默复用本地副本，
+ * 于是更新后手机还看到旧的 app.min.js / polish.min.css，
+ * 只能手动清缓存。写明确的失效策略后，
+ * 每次访问都必须回源校验（未变就是 304，变了就拿新文件）。
+ * 文件名不包含内容哈希，不能用 immutable —— 否则更新后始终拿旧副本。 */
+const ASSET_CACHE_CONTROL = 'public, max-age=0, must-revalidate';
 const GZIP_MIN_BYTES = 1024;
 const GZIP_CACHE_MAX = 48;
 const gzipCache = new Map<string, { body: Uint8Array; etag: string }>();
@@ -159,7 +167,8 @@ export class AssetsBinding implements AssetsBindingLike {
         'Content-Length': String(gz.body.length),
         'Last-Modified': stat.mtime.toUTCString(),
         ETag: gz.etag,
-        Vary: 'Accept-Encoding'
+        Vary: 'Accept-Encoding',
+        'Cache-Control': ASSET_CACHE_CONTROL
       });
       if (request.headers.get('If-None-Match') === gz.etag) {
         return new Response(null, { status: 304, headers });
@@ -172,7 +181,8 @@ export class AssetsBinding implements AssetsBindingLike {
       'Content-Type': ctype,
       'Content-Length': String(stat.size),
       'Last-Modified': stat.mtime.toUTCString(),
-      ETag: `W/"${stat.size.toString(16)}-${Math.round(stat.mtimeMs).toString(16)}"`
+      ETag: `W/"${stat.size.toString(16)}-${Math.round(stat.mtimeMs).toString(16)}"`,
+      'Cache-Control': ASSET_CACHE_CONTROL
     });
 
     if (request.headers.get('If-None-Match') === headers.get('ETag')) {

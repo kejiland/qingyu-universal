@@ -46,8 +46,18 @@ const PostBaseSchema = z.object({
 });
 
 /** 列表项：postFromRow 去掉 content/enc，非受保护文章额外带 search 片段。 */
+/** stats=1 时随列表下发的阅读 / 点赞 / 评论计数（见 attachStatsBatch） */
+export const PostStatsBriefSchema = z
+  .object({
+    views: z.number(),
+    likes: z.number(),
+    comments: z.number()
+  })
+  .meta({ id: 'PostStatsBrief' });
+
 export const PostSummarySchema = PostBaseSchema.extend({
-  search: z.string().optional()
+  search: z.string().optional(),
+  stats: PostStatsBriefSchema.optional()
 }).meta({ id: 'PostSummary' });
 
 /** 详情：带正文（受保护文章 content 恒为空）与密文。 */
@@ -143,7 +153,8 @@ export const PostListQuerySchema = z.object({
   q: z.string().optional(),
   status: z.string().optional(),
   page: z.string().optional(),
-  per: z.string().optional()
+  per: z.string().optional(),
+  stats: z.string().optional()
 });
 
 /* ---------- 响应：评论 ---------- */
