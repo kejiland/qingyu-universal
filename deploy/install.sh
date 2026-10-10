@@ -66,6 +66,8 @@ S3_KEY_ID_OPT=""
 S3_SECRET_OPT=""
 S3_BUCKET_OPT=""
 S3_PUBLIC_BASE_OPT=""
+SHORTCUT_KEY="k"    # 快捷键：装完后在终端里敲这个字母就能打开运维菜单（大小写都行）
+SHORTCUT_OFF=0       # --no-shortcut：不要写快捷键
 NO_AUTOBACKUP=0      # --no-autobackup：不安装定时备份
 WIZ_BACKUP=0         # 向导里选了「要自动备份」
 WIZARD_DONE=0        # 本次已经走过向导（用于让 interact_* 不再重复提问）
@@ -122,17 +124,28 @@ warn() { printf '%s[!]%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
 die()  { printf '%s[x]%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
 
 # 细分隔线：用于把长输出切成几段，读起来不累
-ui_rule() { printf '%s%s%s\n' "$C_GREY" "$(printf '%*s' "$UI_W" '' | tr ' ' "$G_RULE")" "$C_RESET"; }
+# 把一个字符重复 n 次。
+#不能用 `printf '%*s' n '' | tr ' ' "$ch"` —— tr 在 C / POSIX 语言环境下按字节处理，
+# 会把 "─"（3 字节）拆成乱码，横线整片糊掉。这里用循环拼接，与语言环境无关。
+ui_repeat() {
+  local ch="$1" n="$2" out="" i
+  for (( i = 0; i < n; i++ )); do out="$out$ch"; done
+  printf '%s' "$out"
+}
+
+ui_rule() { printf '%s%s%s\n' "$C_GREY" "$(ui_repeat "$G_RULE" "$UI_W")" "$C_RESET"; }
 
 # 显示宽度：中文 / 全角字符按 2 列算，否则中英混排的框线会歪。
 # 交给 awk 数（它按字符而非字节遍历），bash 的 ${#s} 在非 UTF-8 locale 下会数错。
 ui_width() {
-  # 三字节 UTF-8（\340-\357）按 2 列算：宽 = 字符数 + 双宽字符数。
-  printf '%s' "$1" | LC_ALL=C awk '
-    {
-      wide = gsub(/[\340-\357]/, "&")
-      print length($0) - 2 * wide + wide
-    }' 2>/dev/null || printf '%s' "${#1}"
+  # 显示列宽 = 字符数 + 双宽字符数。
+  # 字符数用 awk length（UTF-8 locale 下按字符数），字节数用 LC_ALL=C 下数；
+  # ASCII 占 1 字节、CJK / 全角标点占 3 字节，于是 双宽字符数 = (字节数 - 字符数) / 2。
+  local chars bytes
+  chars="$(printf '%s' "$1" | awk 'END { print length($0) }' 2>/dev/null || echo 0)"
+  bytes="$(LC_ALL=C; printf '%s' "$1" | wc -c | tr -d ' ')"
+  case "$chars$bytes" in ''|*[!0-9]*) printf '%s' "${#1}"; return 0 ;; esac
+  printf '%s' "$(( chars + (bytes - chars) / 2 ))"
 }
 
 # 带右边框的一行（按显示宽度自动补齐，中文按 2 列算）
@@ -145,7 +158,7 @@ ui_box_line() {
 
 # 标题横幅：整个脚本只在最开头和关键节点用一次，避免刷屏
 ui_banner() {
-  local bar; bar="$(printf '%*s' "$UI_W" '' | tr ' ' "${G_RULE:-─}")"
+  local bar; bar="$(ui_repeat "${G_RULE:-─}" "$UI_W")"
   echo
   printf '%s+%s+%s\n' "$C_CYAN" "$bar" "$C_RESET"
   ui_box_line "$C_CYAN" "$C_B$1$C_RESET"
@@ -185,8 +198,8 @@ ui_bar() {
   [ "$total" -gt 0 ] || return 0
   filled=$(( cur * w / total ))
   [ "$filled" -gt "$w" ] && filled=$w
-  head="$(printf '%*s' "$filled" '' | tr ' ' "$G_FULL")"
-  tail="$(printf '%*s' "$((w - filled))" '' | tr ' ' "$G_EMPTY")"
+  head="$(ui_repeat "$G_FULL" "$filled")"
+  tail="$(ui_repeat "$G_EMPTY" "$((w - filled))")"
   printf '%s%s%s%s%s %s%d/%d%s\n' \
     "$C_GREEN" "$head" "$C_GREY" "$tail" "$C_RESET" "$C_DIM" "$cur" "$total" "$C_RESET"
   return 0
@@ -213,8 +226,8 @@ on_error() {
   trap - ERR
   echo
   warn "这一步没能完成（退出码 $code）"
-  [ -n "$STEP_NAME" ] && warn "当前步骤：$STEP_NAME"
-  [ -n "$line" ] && warn "出错位置：install.sh 第 $line 行"
+  if [ -n "${STEP_NAME:-}" ]; then warn "当前步骤：$STEP_NAME"; fi
+  if [ -n "$line" ]; then warn "出错位置：install.sh 第 $line 行"; fi
   echo
   echo "  先试这几招（按顺序，成功了就继续）："
   echo
@@ -349,6 +362,8 @@ REF_SET="${REF_SET:-0}"
 DIR_SET=0
 # 数据库选择（脚本开了 set -u，未设置的变量必须先给默认值）
 DB_KIND="${DB_KIND:-}"
+# 子命令后面跟的额外参数（如 shortcut x / shortcut --remove）
+SUBCMD_ARGS=""
 DATABASE_URL_OPT="${DATABASE_URL_OPT:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -356,6 +371,8 @@ while [ $# -gt 0 ]; do
     doctor)                 COMMAND="$1"; COMMAND_SET=1 ;;
     update|check-update)    COMMAND="$1"; COMMAND_SET=1 ;;
     autobackup|migrate)     COMMAND="$1"; COMMAND_SET=1 ;;
+    shortcut)               COMMAND="$1"; COMMAND_SET=1
+                                 shift; SUBCMD_ARGS="$*"; break ;;
     --domain)   DOMAIN="${2:-}"; shift ;;
     --email)    EMAIL="${2:-}"; shift ;;
     --dir)      INSTALL_DIR="${2:-}"; DIR_SET=1; shift ;;
@@ -390,6 +407,8 @@ while [ $# -gt 0 ]; do
     --skip-preflight) SKIP_PREFLIGHT=1 ;;
     --no-doctor)     SKIP_DOCTOR=1 ;;
     --reset|--fresh) RESET_STATE=1 ;;
+    --key)      SHORTCUT_KEY="${2:-k}"; shift ;;
+    --no-shortcut) SHORTCUT_OFF=1 ;;
     --check)          CHECK_ONLY=1 ;;
     --no-autobackup) NO_AUTOBACKUP=1 ;;
     # ---- 站点与运行参数（都能写进配置档，一键复现）----
@@ -550,6 +569,7 @@ usage() {
   restore <快照文件>    从快照恢复（先 stop）
   migrate              打包整站（含数据），用于换服务器
   uninstall            删除容器（数据卷保留）
+  shortcut [字母]      设置/移除终端快捷键（默认敲 k 直接打开运维菜单）
 
 ────────────────────────────────────────────────────────────────────────
 【高级】
@@ -567,6 +587,9 @@ usage() {
   --no-doctor          安装后不做自动体检
   --check              update 时只检查不改动
   --reset, --fresh     清除安装进度记录，从头执行
+  --key <字母>         自定义快捷键（默认 k，大小写都行）
+  --remove            移除已设置的快捷键
+  --no-shortcut        不设置快捷键
   -h, --help           显示本帮助
 
   配置档示例（KEY=VALUE，# 开头是注释；命令行参数优先级更高）：
@@ -881,7 +904,8 @@ install_docker() {
 }
 
 # ---------- 代码获取 ----------
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" >/dev/null 2>&1 && pwd)"
+SCRIPT_PATH="${BASH_SOURCE[0]:-$0}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_PATH")" >/dev/null 2>&1 && pwd)"
 SOURCE_ROOT="$(cd -- "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd || true)"
 
 # 克隆到临时目录再整树覆盖 —— 安装目录里已有的 .env / data 不会被动到。
@@ -2327,6 +2351,7 @@ summary() {
   echo "      ${INSTALL_DIR}/deploy/install.sh upgrade"
   echo "      ${INSTALL_DIR}/deploy/install.sh backup"
   echo "      ${INSTALL_DIR}/deploy/install.sh info      # 随时查看访问地址、初始化密钥和版本"
+  echo "      ${INSTALL_DIR}/deploy/install.sh shortcut  # 设置终端快捷键（默认敲 k 打开运维菜单）"
   echo
   if has_profile domain "$(env_value COMPOSE_PROFILES)"; then
     echo "    已启用自动 HTTPS。证书首次签发通常需要十几秒，可通过 deploy/install.sh logs 查看。"
@@ -2440,6 +2465,7 @@ cmd_install() {
   fi
 
   STEP_TOTAL=0
+  shortcut_maybe
   summary
   post_install_guide
 }
@@ -3529,6 +3555,124 @@ cmd_doctor() {
 }
 
 cmd_status()   { compose ps; echo; curl -fsS "http://127.0.0.1:$(local_health_port)/healthz" || true; echo; }
+# ------------------------------------------------------------
+# 快捷键：在终端里敲一个字母就直接打开运维菜单
+# ------------------------------------------------------------
+# 装完之后不用记脚本路径、不用 cd，敲 k 就能打开菜单。
+# 写入 ~/.bashrc（bash）和 ~/.zshrc（zsh，若存在），并给大小写两个别名。
+# 之所以用 alias 而不是软链接：脚本要能跟着安装目录走，且 alias 更好清理。
+SHORTCUT_MARK_BEGIN="# >>> qingyu 快捷键（deploy/install.sh）>>>"
+SHORTCUT_MARK_END="# <<< qingyu 快捷键 <<<"
+
+shortcut_target() {
+  # 优先用安装目录里的脚本；找不到就退回当前这个脚本自身
+  local c="$INSTALL_DIR/deploy/install.sh"
+  [ -f "$c" ] || c="$SCRIPT_PATH"
+  # 转成绝对路径：alias 只在当前目录下的终端里生效，写全路径才随处可用
+  case "$c" in /*) ;; *) c="$PWD/$c" ;; esac
+  printf '%s' "$c"
+}
+
+shortcut_block() {
+  local key="$1" target; target="$(shortcut_target)"
+  printf '%s\n' "$SHORTCUT_MARK_BEGIN"
+  # 大小写都给，省得用户纠结Shift
+  printf 'alias %s='"'"'bash %s'"'"'\n' "$key" "$target"
+  if [ "$key" != "$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')" ]; then
+    printf 'alias %s='"'"'bash %s'"'"'\n' "$key" "$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')" "$target"
+  else
+    printf 'alias %s='"'"'bash %s'"'"'\n' "$(printf '%s' "$key" | tr '[:lower:]' '[:upper:]')" "$target"
+  fi
+  printf '%s\n' "$SHORTCUT_MARK_END"
+}
+
+# 从 rc 文件里删掉旧的快捷键块（先删后加，改键时不会留下两个）
+shortcut_strip() {
+  local rc="$1"
+  [ -f "$rc" ] || return 0
+  grep -qF "$SHORTCUT_MARK_BEGIN" "$rc" 2>/dev/null || return 0
+  local tmp; tmp="$(mktemp "${TMPDIR:-/tmp}/qy-rc.XXXXXX")"
+  awk -v b="$SHORTCUT_MARK_BEGIN" -v e="$SHORTCUT_MARK_END" '
+    $0 == b { skip = 1 } skip != 1 { print }
+    $0 == e { skip = 0; print "" }
+  ' "$rc" > "$tmp" 2>/dev/null && cat "$tmp" > "$rc"
+  rm -f "$tmp" 2>/dev/null || true
+}
+
+shortcut_rcs() {
+  local home="${HOME:-/root}" rc
+  printf '%s\n' "$home/.bashrc"
+  [ -f "$home/.zshrc" ] && printf '%s\n' "$home/.zshrc"
+  # 精简系统可能没有 .bashrc（alpine），补一个
+  [ -f "$home/.bashrc" ] || printf '%s\n' "$home/.profile"
+  return 0
+}
+
+cmd_shortcut() {
+  # 用法： install.sh shortcut [字母] | shortcut --key 字母 | shortcut --remove
+  local remove=0 key="" a
+  set -- $SUBCMD_ARGS
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --remove|-r|--no-shortcut) remove=1 ;;
+      --key|-k)
+        if [ $# -ge 2 ]; then key="$2"; shift; else die "--key 后面要写一个字母"; fi ;;
+      -*) die "看不懂的参数：$1（用法： $0 shortcut [字母] / shortcut --remove）" ;;
+      *) key="$1" ;;
+    esac
+    shift
+  done
+  if [ "$SHORTCUT_OFF" = "1" ]; then remove=1; fi
+  if [ "$remove" = "0" ] && [ -n "$key" ]; then SHORTCUT_KEY="$key"; fi
+
+  if [ "$remove" = "1" ]; then
+    local rc n=0
+    while IFS= read -r rc; do
+      if [ -f "$rc" ]; then shortcut_strip "$rc"; n=$((n + 1)); fi
+    done <<EOF
+$(shortcut_rcs)
+EOF
+    log "已移除快捷键（清理了 $n 个配置文件）；当前终端里执行 hash -r 即可生效"
+    return 0
+  fi
+
+  # 只允许单个字母 / 数字，避免写出乱七八糟的 alias
+  case "$SHORTCUT_KEY" in
+    [a-zA-Z0-9]) ;;
+    *) die "快捷键只能是单个字母或数字，当前是「${SHORTCUT_KEY}」" ;;
+  esac
+
+  local target rc n=0
+  target="$(shortcut_target)"
+  while IFS= read -r rc; do
+    [ -n "$rc" ] || continue
+    mkdir -p "$(dirname "$rc")" 2>/dev/null || true
+    shortcut_strip "$rc"
+    shortcut_block "$SHORTCUT_KEY" >> "$rc" 2>/dev/null || { warn "写入 ${rc} 失败（跳过）"; continue; }
+    n=$((n + 1))
+  done <<EOF
+$(shortcut_rcs)
+EOF
+
+  if [ "$n" -eq 0 ]; then
+    warn "没能写入任何配置文件，请手动执行这一行："
+    echo "      alias ${SHORTCUT_KEY}='bash ${target}'"
+    return 0
+  fi
+  ok "快捷键已设置：以后在终端里敲 ${SHORTCUT_KEY} 就能打开运维菜单"
+  ui_hint "已写入 $n 个配置文件（当前终端立即可用： source ~/.bashrc）"
+  ui_hint "想换别的键： $target shortcut x    不想用了： $target shortcut --remove"
+}
+
+# 安装成功后顺手把快捷键装上（--no-shortcut 可跳过）
+shortcut_maybe() {
+  if [ "$SHORTCUT_OFF" = "1" ]; then return 0; fi
+  if [ "$COMMAND_SET" = "0" ]; then return 0; fi
+  [ "$(id -u)" = "0" ] || { ui_hint "快捷键需要 root 才能写~/.bashrc，跳过（可稍后手动执行）"; return 0; }
+  cmd_shortcut >/dev/null 2>&1 || true
+  return 0
+}
+
 cmd_uninstall() {
   warn "将停止并删除容器（数据卷 qingyu-data 会保留）"
   if [ "$PURGE" = "1" ]; then
@@ -3630,6 +3774,7 @@ case "$COMMAND" in
   check-update) if [ "$CHECK_ONLY" = "1" ]; then cmd_update; else cmd_check_update; fi ;;
   backup)    cmd_backup; prune_backups "$KEEP_N" ;;
   autobackup) cmd_autobackup ;;
+  shortcut)   cmd_shortcut ;;
   migrate)   cmd_migrate ;;
   restore) cmd_restore ;;
   logs) cmd_logs ;;

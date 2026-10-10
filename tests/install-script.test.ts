@@ -229,4 +229,25 @@ describe('deploy/install.sh', () => {
     const body = fn.slice(0, fn.indexOf('\n}\n'));
     expect(body).not.toContain('ensure_git');
   });
+it('边框不再用 tr 拼重复字符（非 UTF-8 locale 下会变乱码）', () => {
+    const s = src();
+    // tr 在非 UTF-8 locale 下按字节处理，─(3 字节) 会被拆成乱码，必须走纯 bash 拼接
+    expect(s).not.toMatch(/^\s*[^#\n].*\| tr ' '/m);
+    expect(s).toMatch(/^ui_repeat\(\) \{/m);
+  });
+
+  it('快捷键：默认 k、可自定义、可移除，装完自动生效', () => {
+    const s = src();
+    expect(s).toMatch(/^SHORTCUT_KEY="k"/m);
+    expect(s).toMatch(/^SHORTCUT_OFF=0/m);
+    expect(s).toMatch(/^    shortcut\) /m);
+    expect(s).toMatch(/^  shortcut\)   cmd_shortcut ;;$/m);
+    // 大小写两个别名都写，Shift 敲也能用
+    expect(s).toContain('alias %s=');
+    // 改键前先删旧块，避免留下两个快捷键
+    expect(s).toContain('shortcut_strip "$rc"');
+    // 安装成功后自动装上
+    const fn = s.slice(s.indexOf('cmd_install() {'));
+    expect(fn).toContain('shortcut_maybe');
+  });
 });
