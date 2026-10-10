@@ -1279,7 +1279,7 @@ async function safeEqual(a, b) {
   for (let i = 0; i < da.length; i++) diff |= da[i] ^ db[i];
   return diff === 0;
 }
-function clientIp(request) {
+export function clientIp(request) {
   // 仅信任 CDN 注入的 CF-Connecting-IP：不可伪造。
   // 不读 X-Forwarded-For——该头是客户端可控的，直接构造可绕过
   // 点赞去重 / 评论频控 / 登录失败锁定等所有按 IP 的限流。
@@ -2091,6 +2091,77 @@ export async function handlePreviewGet(request, env) {
  * Webmention（W3C）：外站引用本篇文章 → 校验来源页确实链接到本站后收录展示
  * ============================================================ */
 const WEBMENTION_MAX_BYTES = 200000;
+/* ---------------- SSRF 防护：拒绝环回 / 私网 / 链路本地 / CGNAT / 组播 ---------------- */
+/*
+ * Webmention 的 source 由访客提供，服务端会去抓它 —— 没有这层拦截就等于
+ * 开放了一个可以扫内网 / 读云厂商 metadata 的公开代理。
+ * 判定思路与 src/routes/image-proxy.ts 保持一致；Workers 运行时没有 DNS 能力，
+ * 因此这里只拦「字面量 IP + 内网域名后缀」，域名类仍靠下面逐跳重定向复检兜底。
+ */
+function wmIsPrivateIPv4(ip) {
+  const p = String(ip).split('.').map(Number);
+  if (p.length !== 4 || p.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
+  if (p[0] === 0 || p[0] === 10 || p[0] === 127) return true; // 0/8、10/8、环回
+  if (p[0] === 169 && p[1] === 254) return true; // 链路本地（云厂商 metadata）
+  if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return true; // 172.16/12
+  if (p[0] === 192 && p[1] === 168) return true; // 192.168/16
+  if (p[0] === 100 && p[1] >= 64 && p[1] <= 127) return true; // CGNAT 100.64/10
+  if (p[0] >= 224) return true; // 组播 / 保留 / 广播
+  return false;
+}
+function wmIsPrivateIPv6(ip) {
+  const v = String(ip).trim().toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
+  if (v === '::' || v === '::1') return true;
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(v);
+  if (mapped) return wmIsPrivateIPv4(mapped[1]);
+  if (v.indexOf('::ffff:') === 0) return true; // 非标准 IPv4-mapped，一律拒绝
+  const head = v.split(':')[0] || '';
+  if (/^f[cd][0-9a-f]{0,2}$/.test(head)) return true; // fc00::/7 唯一本地
+  if (/^fe[89ab][0-9a-f]?$/.test(head)) return true; // fe80::/10 链路本地
+  if (/^ff[0-9a-f]{0,2}$/.test(head)) return true; // 组播
+  return false;
+}
+function wmIsIpLiteral(host) {
+  return /^[0-9.]+$/.test(host) || host.indexOf(':') >= 0;
+}
+function wmIsPrivateHost(hostname) {
+  const host = String(hostname || '').trim().toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
+  if (!host) return true;
+  if (host === 'localhost' || /\.(localhost|local|internal|home\.arpa)$/.test(host)) return true;
+  if (wmIsIpLiteral(host)) {
+    if (/^[0-9.]+$/.test(host)) return wmIsPrivateIPv4(host);
+    return wmIsPrivateIPv6(host);
+  }
+  return false;
+}
+
+function wmAssertPublicUrl(rawUrl) {
+  let u;
+  try { u = new URL(String(rawUrl)); } catch (e) { throw new Error('bad-url'); }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('bad-url');
+  if (wmIsPrivateHost(u.hostname)) throw new Error('private');
+  return u;
+}
+
+/**
+ * 手动逐跳抓取：每一跳都重新校验目标地址，绝不交给 fetch 自动跟随重定向
+ * （自动跟随会把 302 → 127.0.0.1 直接打通 SSRF）。
+ */
+async function wmFetchPublic(url, maxRedirects, signal) {
+  let current = String(url);
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    wmAssertPublicUrl(current);
+    const res = await fetch(current, { redirect: 'manual', signal: signal, headers: { 'User-Agent': 'QingyuBlog-Webmention/1.0 (+webmention)', 'Accept': 'text/html,application/xhtml+xml' } });
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get('location');
+      if (!loc) throw new Error('fetch-failed');
+      current = new URL(loc, current).href; // 下一跳会在循环开头重新校验
+      continue;
+    }
+    return res;
+  }
+  throw new Error('too-many-redirects');
+}
 function wmStripTags(s) {
   return String(s == null ? '' : s).replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/\s+/g, ' ').trim();
 }
@@ -2163,13 +2234,19 @@ export async function handleWebmention(request, env) {
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 8000);
-    const res = await fetch(source, { redirect: 'follow', signal: ctrl.signal, headers: { 'User-Agent': 'QingyuBlog-Webmention/1.0 (+webmention)', 'Accept': 'text/html,application/xhtml+xml' } });
-    clearTimeout(timer);
-    if (!res.ok) return json({ error: '来源页无法访问 HTTP ' + res.status }, 400, request, env);
-    const ct = String(res.headers.get('content-type') || '');
-    if (ct && ct.indexOf('text/html') < 0 && ct.indexOf('text/plain') < 0) return json({ error: '来源页不是 HTML' }, 400, request, env);
-    html = (await res.text()).slice(0, WEBMENTION_MAX_BYTES);
+    try {
+      const res = await wmFetchPublic(source, 3, ctrl.signal);
+      if (!res.ok) return json({ error: '来源页无法访问 HTTP ' + res.status }, 400, request, env);
+      const ct = String(res.headers.get('content-type') || '');
+      if (ct && ct.indexOf('text/html') < 0 && ct.indexOf('text/plain') < 0) return json({ error: '来源页不是 HTML' }, 400, request, env);
+      html = (await res.text()).slice(0, WEBMENTION_MAX_BYTES);
+    } finally {
+      clearTimeout(timer);
+    }
   } catch (e) {
+    const code = e && e.message;
+    if (code === 'private') return json({ error: '不允许抓取内网地址' }, 400, request, env);
+    if (code === 'bad-url') return json({ error: 'source 不是合法的 http(s) URL' }, 400, request, env);
     return json({ error: '无法抓取来源页' }, 400, request, env);
   }
   let links = false;

@@ -6,7 +6,7 @@
  * 可选：BLOG_MAIL_REPLY_TO
  * 订阅采用双重确认；文章发布后写入 mail_outbox，由 Cron 异步发送。
  * ============================================================ */
-import { json, corsPreflight, isWriteAuthed, unauthorized, dbAll, dbFirst, dbRun, dbBatch } from './api-core.js';
+import { json, corsPreflight, isWriteAuthed, unauthorized, dbAll, dbFirst, dbRun, dbBatch, clientIp } from './api-core.js';
 
 function randomToken() {
   const b = new Uint8Array(24);
@@ -85,12 +85,27 @@ export async function handleSubscribe(request, env) {
   if (request.method === 'GET') return json({ ok: true, enabled: mailConfigured(env) }, 200, request, env, { 'Cache-Control': 'no-store' });
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405, request, env);
   if (!mailConfigured(env)) return json({ error: '邮件订阅尚未配置' }, 503, request, env);
+  // 订阅接口此前完全没有频控：既能被刷爆邮件额度，也能被拿来回溯枚举
+  // 你的订阅者邮箱（已订阅会明说 already:true）。这里与评论 / Webmention 对齐，
+  // 补上每 IP 每分钟 5 次的上限。
+  if (env.BLOG) {
+    const ip = clientIp(request);
+    const win = Math.floor(Date.now() / 60000);
+    const rk = 'rate:sub:' + ip + ':' + win;
+    let cnt = 0;
+    try { cnt = Number(await env.BLOG.get(rk)) || 0; } catch (e) {}
+    if (cnt >= 5) return json({ error: '操作太频繁，请稍后再试' }, 429, request, env);
+    try { await env.BLOG.put(rk, String(cnt + 1), { expirationTtl: 120 }); } catch (e) {}
+  }
   const body = await request.json().catch(() => null);
   const email = normalizeEmail(body && body.email);
   if (!email) return json({ error: '请输入有效邮箱' }, 400, request, env);
   const locale = String((body && body.locale) || 'zh-CN').slice(0, 16);
   const existing = await dbFirst(env.DB, 'SELECT * FROM subscribers WHERE email = ?', email);
-  if (existing && existing.status === 'active') return json({ ok: true, already: true }, 200, request, env);
+  // 已订阅者不再回一个只有「已订阅」才有的响应：订阅与否对访客必须长得一模一样，
+  // 否则这个接口就是个邮箱查询器。统一按「确认邮件已发送」应答，且不动他的记录
+  // （避免重置 token 让历史邮件里的退订链接失效）。
+  if (existing && existing.status === 'active') return json({ ok: true, message: '确认邮件已发送' }, 200, request, env);
   const token = randomToken();
   const id = existing ? existing.id : ('sub-' + randomToken().slice(0, 16));
   const now = Date.now();

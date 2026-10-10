@@ -2992,8 +2992,8 @@ cmd_migrate() {
 
   out="${BUNDLE_OUT:-$HOME/qingyu-migrate-$ts.tar.gz}"
   staging="$(mktemp -d)"
-  # 容器里的 node 用户不是 root，mktemp 默认 700 会写不进去，这里放开目录权限（只是临时目录，收尾会删）
   # 容器里的应用用户不是 root，临时目录得可写（收尾会 rm -rf）
+  # 777 只在打包数据卷那几秒需要；打完立刻收回 700，避免同机其他用户读到 .env 里的密钥
   chmod 777 "$staging"
   if [ -n "$(env_value DATABASE_URL)" ]; then db_label="PostgreSQL（连接串已含在 .env 里，数据卷里是上传文件与快照）"; else db_label="SQLite（数据库文件在数据卷里）"; fi
 
@@ -3003,6 +3003,10 @@ cmd_migrate() {
     -v "$staging":/out \
     --entrypoint sh "$img" -c 'cd /data && tar czf /out/data.tar.gz .' \
     || { rm -rf "$staging"; die "打包数据卷失败（容器里 tar 不可用？）"; }
+
+  # 容器已经把包写完了，接下来这个目录里会出现 .env（管理员密钥 / 数据库密码）。
+  # 趁还没写进去，先把权限收回 700。
+  chmod 700 "$staging"
 
   log "写入站点配置 .env 与恢复脚本…"
   cp "$INSTALL_DIR/.env" "$staging/.env"
