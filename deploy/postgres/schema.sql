@@ -1,6 +1,6 @@
 -- ============================================================
 -- 轻语博客 · PostgreSQL 架构
--- 由 SQLite migrations 0001-0035 等价转换而来。
+-- 由 SQLite migrations 0001-0039 等价转换而来（须保持幂等，每次启动重跑）。
 -- 说明：comments.post_id 不再强绑 posts，以支持 gb-note / gb-idea 留言板；
 -- 删除文章时由 trigger 清理评论。全文检索使用生成列 + GIN，替代 SQLite FTS5。
 -- ============================================================
@@ -33,6 +33,10 @@ CREATE TABLE IF NOT EXISTS posts (
 CREATE INDEX IF NOT EXISTS idx_posts_series ON posts(series, series_order);
 CREATE INDEX IF NOT EXISTS idx_posts_scheduled ON posts(publish_at) WHERE status = 'scheduled';
 CREATE INDEX IF NOT EXISTS idx_posts_search ON posts USING GIN(search_vector);
+-- 0038：列表热路径索引（SSR 首页 / 归档 / 标签 / 分类共用的谓词与排序）
+CREATE INDEX IF NOT EXISTS idx_posts_pub_date
+  ON posts (COALESCE(status, 'published'), date DESC, COALESCE(pinned, 0) DESC);
+CREATE INDEX IF NOT EXISTS idx_posts_date_desc ON posts (date DESC);
 
 CREATE TABLE IF NOT EXISTS comments (
   seq       BIGSERIAL UNIQUE,
@@ -48,6 +52,8 @@ CREATE TABLE IF NOT EXISTS comments (
   pinned    INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id);
+-- 0038：文章页评论按文章 + 状态取
+CREATE INDEX IF NOT EXISTS idx_comments_post_status ON comments (post_id, status, date DESC);
 CREATE INDEX IF NOT EXISTS idx_comments_status ON comments(status);
 CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments(parent_id);
 CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id, id);
@@ -272,3 +278,12 @@ DROP TRIGGER IF EXISTS trg_comments_cleanup_on_post_delete ON posts;
 CREATE TRIGGER trg_comments_cleanup_on_post_delete
 AFTER DELETE ON posts
 FOR EACH ROW EXECUTE FUNCTION qingyu_cleanup_comments_on_post_delete();
+-- ============================================================
+-- 0039：回填 posts.created_at / updated_at
+-- ------------------------------------------------------------
+-- 写路径长期只在 SQLite migrations 里追加，PG 端首装后不再执行，
+-- 这条因此长期缺失；api-core.js 已同步修复写路径，此处负责老数据。
+-- 幂等（WHERE 过滤），每次启动随 schema.sql 重跑也安全。
+-- ============================================================
+UPDATE posts SET created_at = date WHERE created_at IS NULL OR created_at = '';
+UPDATE posts SET updated_at = date WHERE updated_at IS NULL OR updated_at = '';

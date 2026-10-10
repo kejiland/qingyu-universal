@@ -191,7 +191,6 @@ const padTo = (text: string, width: number): string => text + ' '.repeat(Math.ma
 const server = serve(
   {
     // 最靠外的可拦截点：把响应交给 @hono/node-server 写出之前先消毒头值
-    // 最靠外的可拦截点：交给 @hono/node-server 写出之前先消毒头值。
     // 这里断言是必要的：Hono 的 fetch 与 node-server 的 FetchCallback 在
     // 可选参数上类型不兼容，但运行时签名一致。
     fetch: ((request: Request) => withAsciiHeaders(app.fetch(request))) as never,

@@ -52,7 +52,6 @@ export interface SeoDeps {
   securityHeaders?: () => Record<string, string>;
 }
 
-/** 当前请求的导航高亮状态：路径 + 首页 ?category= 选中的分类。 */
 /** 可短期缓存的 HTML（列表页 / 静态页）缓存策略：1 分钟新鲜 + 10 分钟后台刷新。 */
 const LIST_CACHE_CONTROL = 'public, max-age=60, stale-while-revalidate=600';
 
@@ -65,6 +64,8 @@ function activeOf(c: Context): ActiveState {
   const url = new URL(c.req.url);
   return { path: url.pathname.replace(/\/+$/, '') || '/', category: url.searchParams.get('category') || '' };
 }
+
+/** 当前请求的导航高亮状态：路径 + 首页 ?category= 选中的分类。 */
 function htmlResponse(c: Context, html: string, extra: Record<string, string>): Response {
   return new Response(c.req.method === 'HEAD' ? null : html, {
     status: 200,

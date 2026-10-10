@@ -267,8 +267,18 @@ function postToParams(p) {
     p.seriesOrder || 0,
     normalizePostStatus(p.status),
     p.status === 'scheduled' ? normalizePublishAt(p.publishAt) : null,
-    JSON.stringify(normalizeSeo(p.seo))
+    JSON.stringify(normalizeSeo(p.seo)),
+    // created_at / updated_at 此前**从未被写入**，两列恒为空串。后果：sitemap 的
+    // <lastmod>、文章页的 dateModified / article:modified_time 全部退化成「发布日期」
+    // —— 改过的文章在搜索引擎眼里仍是旧内容，各种缓存指纹也失去可靠依据。
+    nowIso(),
+    nowIso()
   ];
+}
+
+/** 统一的 ISO 时间戳（秒精度，与 posts.date 的写法一致）。 */
+function nowIso() {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
 function isPublicPost(p) {
@@ -455,7 +465,7 @@ export async function handlePosts(request, env) {
     const exist = await dbFirst(env.DB, 'SELECT 1 FROM posts WHERE id = ?', p.id);
     if (exist) return json({ error: '已存在相同 id（' + p.id + '），请用 PUT 更新' }, 409, request, env);
     await dbRun(env.DB,
-      'INSERT INTO posts (id,title,date,excerpt,content,cover,og_image,pinned,protected,enc,tags,category,series,author,series_order,status,publish_at,seo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO posts (id,title,date,excerpt,content,cover,og_image,pinned,protected,enc,tags,category,series,author,series_order,status,publish_at,seo,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       ...postToParams(p));
     await recordPostRevision(env, p, 'create').catch(() => {});
     if ((p.status || 'published') === 'published') await queuePostNotifications(env, p).catch(() => {});
@@ -495,8 +505,8 @@ export async function handlePostId(request, env, id) {
     if (!p.title) return json({ error: '缺少 title' }, 400, request, env);
     if (p.status === 'scheduled' && !p.publishAt) return json({ error: '定时发布缺少发布时间' }, 400, request, env);
     await dbRun(env.DB,
-      'INSERT INTO posts (id,title,date,excerpt,content,cover,og_image,pinned,protected,enc,tags,category,series,author,series_order,status,publish_at,seo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ' +
-      'ON CONFLICT(id) DO UPDATE SET title=excluded.title,date=excluded.date,excerpt=excluded.excerpt,content=excluded.content,cover=excluded.cover,og_image=excluded.og_image,pinned=excluded.pinned,protected=excluded.protected,enc=excluded.enc,tags=excluded.tags,category=excluded.category,series=excluded.series,series_order=excluded.series_order,author=excluded.author,status=excluded.status,publish_at=excluded.publish_at,seo=excluded.seo',
+      'INSERT INTO posts (id,title,date,excerpt,content,cover,og_image,pinned,protected,enc,tags,category,series,author,series_order,status,publish_at,seo,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ' +
+      'ON CONFLICT(id) DO UPDATE SET title=excluded.title,date=excluded.date,excerpt=excluded.excerpt,content=excluded.content,cover=excluded.cover,og_image=excluded.og_image,pinned=excluded.pinned,protected=excluded.protected,enc=excluded.enc,tags=excluded.tags,category=excluded.category,series=excluded.series,series_order=excluded.series_order,author=excluded.author,status=excluded.status,publish_at=excluded.publish_at,seo=excluded.seo,updated_at=excluded.updated_at,created_at=COALESCE(NULLIF(posts.created_at, \'\'), excluded.created_at)',
       ...postToParams(p));
     await recordPostRevision(env, p, 'update').catch(() => {});
     const oldStatus = exist ? normalizePostStatus(exist.status) : '';
@@ -884,8 +894,8 @@ export async function handlePostRevisionRestore(request, env, postId, revisionId
     author: (current && current.author) || ''
   };
   await dbRun(env.DB,
-    'INSERT INTO posts (id,title,date,excerpt,content,cover,og_image,pinned,protected,enc,tags,category,series,author,series_order,status,publish_at,seo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ' +
-    'ON CONFLICT(id) DO UPDATE SET title=excluded.title,date=excluded.date,excerpt=excluded.excerpt,content=excluded.content,cover=excluded.cover,og_image=excluded.og_image,pinned=excluded.pinned,protected=excluded.protected,enc=excluded.enc,tags=excluded.tags,category=excluded.category,series=excluded.series,series_order=excluded.series_order,author=excluded.author,status=excluded.status,publish_at=excluded.publish_at,seo=excluded.seo',
+    'INSERT INTO posts (id,title,date,excerpt,content,cover,og_image,pinned,protected,enc,tags,category,series,author,series_order,status,publish_at,seo,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ' +
+    'ON CONFLICT(id) DO UPDATE SET title=excluded.title,date=excluded.date,excerpt=excluded.excerpt,content=excluded.content,cover=excluded.cover,og_image=excluded.og_image,pinned=excluded.pinned,protected=excluded.protected,enc=excluded.enc,tags=excluded.tags,category=excluded.category,series=excluded.series,series_order=excluded.series_order,author=excluded.author,status=excluded.status,publish_at=excluded.publish_at,seo=excluded.seo,updated_at=excluded.updated_at,created_at=COALESCE(NULLIF(posts.created_at, \'\'), excluded.created_at)',
     ...postToParams(post));
   await recordPostRevision(env, post, 'restore');
   await purgeTags(env, [TAG_POSTS, TAG_FEED, TAG_SITEMAP, 'post:' + postId]);
@@ -903,7 +913,9 @@ export async function publishScheduledPosts(env, nowMs) {
     now).catch(() => []);
   if (!due.length) return { published: 0, ids: [] };
   await dbBatch(env.DB, due.map((row) => ({
-    sql: "UPDATE posts SET status = 'published', publish_at = NULL WHERE id = ? AND status = 'scheduled'",
+    // 转正也是一次内容变更：推进 updated_at，sitemap 与 dateModified 才不会停在草稿期。
+    sql: "UPDATE posts SET status = 'published', publish_at = NULL, updated_at = ? WHERE id = ? AND status = 'scheduled'",
+    params: [nowIso(), id],
     params: [row.id]
   })));
   await purgeTags(env, [TAG_POSTS, TAG_FEED, TAG_SITEMAP].concat(due.map((row) => 'post:' + row.id)));
@@ -1912,7 +1924,9 @@ export async function handleTags(request, env) {
       if (x !== from) { if (next.indexOf(x) < 0) next.push(x); return; }
       if (op === 'rename' && to && next.indexOf(to) < 0) next.push(to);
     });
-    stmts.push({ sql: 'UPDATE posts SET tags = ? WHERE id = ?', params: [JSON.stringify(next), r.id] });
+    // 标签变了也是文章变了：不动 updated_at 的话，改完标签的文章对缓存而言「没变」。
+    const tagStamp = nowIso();
+    stmts.push({ sql: 'UPDATE posts SET tags = ?, updated_at = ? WHERE id = ?', params: [JSON.stringify(next), tagStamp, r.id] });
   });
   if (stmts.length) await dbBatch(env.DB, stmts);
   await recordAudit(env, request, op === 'rename' ? 'tag.rename' : 'tag.delete', from, to);

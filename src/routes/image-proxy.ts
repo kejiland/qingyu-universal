@@ -224,7 +224,12 @@ async function pruneCache(cacheDir: string, cacheBytes: number): Promise<void> {
       const file = path.join(dir, name);
       const fileStat = await fsp.stat(file).catch(() => null);
       if (!fileStat?.isFile()) continue;
-      entries.push({ file, mtime: fileStat.mtimeMs, size: fileStat.size });
+      // 用 atime（最后访问）而不是 mtime（最后写入）：
+      // mtime 只记录「什么时候写进来的」，永不再变 —— 一张天天被访问的
+      // 热门老图和一张从没人看的图会被一视同仁地按写入先后淘汰。
+      // atime 才反映「最近还用不用」，这才是真正的 LRU。
+      // NTFS 上 atime 的更新由系统管（默认对频繁访问做延迟合并），够用。
+      entries.push({ file, mtime: Math.max(fileStat.atimeMs, fileStat.mtimeMs), size: fileStat.size });
       total += fileStat.size;
     }
   }

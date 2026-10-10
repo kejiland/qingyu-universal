@@ -141,6 +141,12 @@ on_error() {
     echo "  （最慢的两步：装 Docker、构建镜像，重跑时都不会重复做）"
     echo "  想强制从头执行： $0 install --reset"
   fi
+  if [ "$COMMAND" = "update" ] || [ "$COMMAND" = "upgrade" ]; then
+    echo
+    echo "  这是「更新 / 升级」过程中出的错：代码可能已经换到新版本，服务未必起来了。"
+    echo "    · 先看哪里坏了： $0 doctor"
+    echo "    · 退回上一版：   $0 rollback"
+  fi
   echo
   exit "$code"
 }
@@ -1368,7 +1374,8 @@ wizard_probe() {
   [ -n "$WIZ_IP" ] || WIZ_IP="未探测到（不影响安装）"
   WIZ_DISK="$(df -Pk / 2>/dev/null | awk 'NR==2 {printf "%d", $4/1024}')"
   [ -n "$WIZ_DISK" ] || WIZ_DISK="?"
-  if port_in_use 80 || port_in_use 443; then WIZ_PORTS=0; else WIZ_PORTS=1; fi
+  # 80/443 一起判断（port_in_use_pair 返回 0 = 两个都空闲）
+  if port_in_use_pair; then WIZ_PORTS=1; else WIZ_PORTS=0; fi
 }
 
 is_valid_domain() {
@@ -2068,8 +2075,9 @@ wait_healthy() {
     fi
     i=$((i + 1)); sleep 3
   done
-  warn "等待超时，请查看日志：docker compose logs -f app"
-  return 0
+  warn "应用 3 分钟内没有就绪（可能是数据库迁移失败 / 端口没通 / 镜像构建出错）"
+  warn "查看日志：docker compose -f $INSTALL_DIR/compose.yaml logs -f app"
+  return 1
 }
 
 summary() {
@@ -2289,7 +2297,9 @@ show_pending_commits() {
   echo "    （拿不到提交明细，不影响更新）"
 }
 
-# 只检查：不动任何东西。退出码 0 = 有新版，1 = 已是最新 / 查不到。
+# 只检查：不动任何东西。退出码 0 = 检查成功（有没有新版都算成功，方便定时任务只在
+# 「查不到」时告警）；1 = 拿不到远端版本号。想「有新版就更新」直接跑 update，
+# 它在没有新版时是零操作、零风险的。
 cmd_check_update() {
   [ -d "$INSTALL_DIR" ] || die "未找到安装目录：$INSTALL_DIR
   提示：如果装在别处，用 --dir <目录> 指定。"
@@ -2374,6 +2384,16 @@ cmd_update() {
   step_begin "拉取最新代码"
   UPGRADE_FROM="$UPDATE_CUR"
   update_source
+  # git pull 失败时 update_source 只警告不中断（upgrade 需要「拉不到就用现有代码重建」），
+  # 但 update 没真拿到新代码就该在这儿停下 —— 否则白重启一次服务还谎报「更新完成」。
+  if [ -d "$INSTALL_DIR/.git" ] && have git; then
+    local cur_after
+    cur_after="$(resolve_revision_full)"
+    if [ -n "$cur_after" ] && ! refs_equal "$cur_after" "$UPDATE_REMOTE"; then
+      die "新版本没拉下来（本地仍是 $(printf '%.7s' "$cur_after")，远端已是 $(printf '%.7s' "$UPDATE_REMOTE")）。
+  常见原因：网络不通、本地分支和远端有冲突。可以先跑 $0 doctor，或用 $0 upgrade 强制按现有代码重建。"
+    fi
+  fi
   step_end
 
   step_begin "重建容器并等待服务就绪"
@@ -2657,10 +2677,6 @@ cmd_autobackup() {
     [01][0-9]:[0-5][0-9]|2[0-3]:[0-5][0-9]) ;;
     *) die "时间要写成 00:00-23:59 之间的 HH:MM，例如 03:30（你写的是：$AT_TIME）" ;;
   esac
-    case "$AT_TIME" in
-    [0-9][0-9]:[0-9][0-9]) ;;
-    *) die "时间格式不对：$AT_TIME —— 请写成 HH:MM，例如 03:30" ;;
-  esac
 
   chmod +x "$script_path" 2>/dev/null || true
   log "设置定时备份：每天 ${AT_TIME} 执行，保留最近 ${KEEP_N} 份"
@@ -2725,14 +2741,14 @@ cmd_migrate() {
   resolve_docker
   [ -f "$INSTALL_DIR/.env" ] || die "未找到 $INSTALL_DIR/.env —— 这个目录还没有部署过？"
 
-  local ts vol img out staging size db_label
+  local ts vol vol_rc=0 img out staging size db_label
   ts="$(date +%Y%m%d-%H%M%S)"
-  vol="$(data_volume_name)"
-    if [ -z "$vol" ]; then
-      warn "系统里有多个 qingyu-data 卷，没敢乱删。请确认后手动执行： docker volume ls | grep qingyu-data"
-      return 0
-    fi
-  [ -n "$vol" ] || die "没找到数据卷 qingyu-data（容器没在运行，且系统里有多个同名卷，无法确定）。\n请先 $0 start，或手动执行：docker volume ls | grep qingyu-data"
+  # data_volume_name：0 = 找到唯一一个（可能为空 = 一个都没有）；非 0 = 有多个候选，不能猜
+  vol="$(data_volume_name)" || vol_rc=$?
+  if [ "$vol_rc" -ne 0 ]; then
+    die "系统里有多个 qingyu-data 卷，没敢乱猜该打包哪一个。请确认后手动执行： docker volume ls | grep qingyu-data"
+  fi
+  [ -n "$vol" ] || die "没找到数据卷 qingyu-data（容器没在运行？）。先 $0 start，或手动执行： docker volume ls | grep qingyu-data"
   # 打包要用带 tar 的镜像：优先用站点自己的镜像（本地已有，不用联网拉）
   img="$(env_value QINGYU_IMAGE)"; [ -n "$img" ] || img="qingyu-universal:local"
   $(${DOCKER:-docker} image inspect "$img" >/dev/null 2>&1) || img="node:22-alpine"
@@ -2844,10 +2860,12 @@ cmd_restore() {
   [ -f "$file" ] || die "找不到快照：$file"
   log "停止应用容器…"
   compose stop app
-  local name
-  name="$(basename "$file")"
   ${DOCKER:-docker} cp "$file" qingyu-app:/data/restore-incoming.db
-  compose run --rm --no-deps app node dist/cli/restore.js /data/restore-incoming.db
+  # 恢复失败也要把应用重新拉起来：数据没被动过，总好过把站点一直停着
+  if ! compose run --rm --no-deps app node dist/cli/restore.js /data/restore-incoming.db; then
+    compose up -d app || true
+    die "恢复失败（应用已重新启动，数据仍是恢复前的状态）。请看上面的报错，或换一个快照重试"
+  fi
   compose up -d app
   log "恢复完成"
 }
@@ -3322,10 +3340,14 @@ cmd_uninstall() {
   fi
   compose down
   if [ "$PURGE" = "1" ]; then
-    local vol
-    vol="$(data_volume_name)"
-    if [ -z "$vol" ]; then
+    local vol vol_rc=0
+    vol="$(data_volume_name)" || vol_rc=$?
+    if [ "$vol_rc" -ne 0 ]; then
       warn "系统里有多个 qingyu-data 卷，没敢乱删。请确认后手动执行： docker volume ls | grep qingyu-data"
+      return 0
+    fi
+    if [ -z "$vol" ]; then
+      warn "没找到 qingyu-data 数据卷（可能已经删过了），跳过"
       return 0
     fi
     log "删除数据卷 ${vol}…"

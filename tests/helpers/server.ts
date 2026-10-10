@@ -24,6 +24,8 @@ import type { WorkerModule } from '../../src/types.js';
 export interface TestServer {
   baseUrl: string;
   setupKey: string;
+  /** 直接访问测试库，方便验证写路径/迁移 */
+  db: ReturnType<typeof createD1>;
   /** 开启后，响应不符合契约会直接返回 500，而不是只告警 */
   close(): Promise<void>;
 }
@@ -112,6 +114,7 @@ export async function startTestServer(): Promise<TestServer> {
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
     setupKey,
+    db,
     async close() {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       db.close();

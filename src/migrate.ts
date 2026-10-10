@@ -94,14 +94,18 @@ async function runPostgresMigrations(db: AppDatabase, schemaPath: string, log: M
     log
   );
   const existing = await db.first<{ name: string }>('SELECT name FROM _migrations WHERE name = ?', POSTGRES_SCHEMA_MARKER);
-  if (existing) return { applied: [], skipped: [POSTGRES_SCHEMA_MARKER] };
 
   if (!fs.existsSync(schemaPath)) throw new Error(`PostgreSQL schema 不存在：${schemaPath}`);
-  log(`[migrate] 正在应用 ${POSTGRES_SCHEMA_MARKER}`);
+  /* [self-host] schema.sql 必须保持**幂等**（IF NOT EXISTS / CREATE OR REPLACE /
+   * DROP TRIGGER IF EXISTS），每次启动都重跑一遍。
+   * 否则老库永远拿不到首装之后新增的表、索引与数据回填 —— SQLite 端有
+   * migrations 逐个追加，PG 端此前只在首装执行一次，两边会长期不一致。 */
   await db.exec(fs.readFileSync(schemaPath, 'utf8'));
   await db.prepare('INSERT INTO _migrations (name, applied_at) VALUES (?, ?) ON CONFLICT (name) DO NOTHING')
     .bind(POSTGRES_SCHEMA_MARKER, new Date().toISOString())
     .run();
+  if (existing) return { applied: [], skipped: [POSTGRES_SCHEMA_MARKER] };
+  log(`[migrate] 正在应用 ${POSTGRES_SCHEMA_MARKER}`);
   return { applied: [POSTGRES_SCHEMA_MARKER], skipped: [] };
 }
 
