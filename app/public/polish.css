@@ -456,3 +456,84 @@ html[data-theme='light'] .ssr-theme-moon {
 html[data-theme='dark'] .ssr-theme-sun {
   display: block;
 }
+
+/* ============================================================
+ * 手机端排版：把卡片度量交回上游
+ * ------------------------------------------------------------
+ * style.css 在 ≤992px 给卡片**固定高度**（200px / 480px 以下 192px），
+ * 标题 2 行 + 摘要 3 行 + 标签行刚好放满；一旦 polish.css 用更大的
+ * 字号 / 行高 / 内外边距挤进来，放不下又不能长高，于是被 overflow:hidden
+ * 硬裁 —— 手机上表现为「标题下半截被切掉、摘要只剩一行」。
+ * 上游自己的注释也写了这条：line-clamp 元素不能再加显式高度，
+ * 否则 WebKit 按高度硬裁、露出半行文字。
+ *
+ * 所以这里在移动端把 polish 的桌面观感收掉：字号 / 行高 / 间距全部
+ * 用上游值，polish 的圆角、阴影、留白等不影响排版的部分保留。
+ * 桌面端（>992px）维持 polish 的原有观感不变。
+ * ============================================================ */
+@media (max-width: 992px) {
+  /* 标题：上游 ≤992 为 margin 0 0 4px、line-height 1.42（polish 的 12/8 + 1.45 会多占约 22px） */
+  .post-card h2 {
+    margin: 0 0 4px;
+    line-height: 1.42;
+  }
+
+  /* 摘要：上游行高 1.5（polish 的 1.85 让 3 行多占 20px），行数仍由 JS 按标题行数切 3/4 */
+  .post-card .excerpt {
+    line-height: 1.5;
+    -webkit-line-clamp: 3;
+    min-height: 0;
+  }
+
+  /* 标签行上方留白回到上游的 8px（polish 为 14px） */
+  .post-card .mini-tags {
+    padding-top: 8px;
+  }
+
+  /* 日期：上游是纯文字（灰、无底色），polish 的「日期胶囊」是桌面端自托管观感，
+     手机端收掉，避免与上游观感不一致 */
+  .post-card .meta .date,
+  .post-card:hover .meta .date {
+    background: none;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    font-family: inherit;
+    font-size: inherit;
+    letter-spacing: 0.3px;
+    color: var(--muted);
+  }
+  .post-card:hover .meta .date {
+    color: var(--accent);
+  }
+
+  /* 页面大标题下的橙色短线是 polish 额外加的装饰，上游没有 */
+  .page-title {
+    padding-bottom: 0;
+  }
+  .page-title::after {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  /* 内边距 / 间距对齐上游窄屏档位（polish 原本 18px / 14px） */
+  .post-card {
+    padding: 14px;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .post-card {
+    padding: 12px;
+    gap: 12px;
+    min-height: 140px;
+  }
+  .post-card h2 {
+    font-size: 17px;
+  }
+  .post-card .excerpt {
+    font-size: 13.5px;
+  }
+}
