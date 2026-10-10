@@ -39,7 +39,6 @@ import { weakEtag } from '../etag.js';
 import { readChrome, wrapWithChrome, type ActiveState, type ChromeData } from '../ssr/chrome.js';
 import {
   ARCHIVE_POSTS_SQL,
-  filterPosts,
   renderArchiveContent,
   renderCategoriesContent,
   renderTagsContent
@@ -77,6 +76,28 @@ function htmlResponse(c: Context, html: string, extra: Record<string, string>): 
   });
 }
 
+/** 静态 config.js 的 pageSize（后台未配置 features.pageSize 时的回落值）。
+ *  不读它就会与 app.js 的 getConfig() 分页结果不一致：SSR 渲染 N 篇、
+ *  前端接管后变成 M 篇，用户看到列表凭空增减。 */
+function createConfigPageSizeLoader(publicDir: string) {
+  let cache: { value: number | null; mtimeMs: number } | null = null;
+  return async (): Promise<number | null> => {
+    try {
+      const file = path.join(publicDir, 'config.js');
+      const stat = await fsp.stat(file);
+      if (!cache || cache.mtimeMs !== stat.mtimeMs) {
+        const text = await fsp.readFile(file, 'utf8');
+        const m = /pageSize\s*:\s*(\d+)/.exec(text);
+        const n = m ? Number(m[1]) : NaN;
+        cache = { value: Number.isFinite(n) && n >= 0 ? Math.floor(n) : null, mtimeMs: stat.mtimeMs };
+      }
+      return cache.value;
+    } catch {
+      return null;
+    }
+  };
+}
+
 /** index.html 外壳缓存：按 mtime 失效，改文件无需重启进程。 */
 function createShellLoader(publicDir: string) {
   let cache: { html: string; mtimeMs: number } | null = null;
@@ -106,6 +127,7 @@ export interface SeoHandlers {
 export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
   const { config, db } = deps;
   const loadShell = createShellLoader(config.publicDir);
+  const loadConfigPageSize = createConfigPageSizeLoader(config.publicDir);
   const security = (): Record<string, string> => deps.securityHeaders?.() ?? {};
 
   const home = async (c: Context): Promise<Response> => {
@@ -129,23 +151,33 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
     let filterKey = '';
     try {
       const url = new URL(c.req.url);
-      const tag = url.searchParams.get('tag');
-      const category = url.searchParams.get('category');
-      filterKey = `${tag ?? ''}|${category ?? ''}`;
-      let posts = await db.all<PostRow>(HOME_POSTS_SQL);
-      if (tag || category) {
-        const all = await db.all<PostRow>(ARCHIVE_POSTS_SQL);
-        posts = filterPosts(all, { tag, category }).slice(0, 10);
+      const tag = url.searchParams.get('tag') || '';
+      const category = url.searchParams.get('category') || '';
+      const page = Math.max(1, Math.floor(Number(url.searchParams.get('page')) || 1));
+      filterKey = `${tag}|${category}|${page}`;
+      const posts = await db.all<PostRow>(HOME_POSTS_SQL);
+      const chrome = await readChrome(db, site.name, settingsRows);
+      // 分页条数：后台「功能开关」优先，其次 config.js，最后 8（与 app.js 同链）
+      const pageSize = chrome.home.pageSize ?? (await loadConfigPageSize()) ?? 8;
+      if (posts.length) {
+        withList = injectAppContent(
+          shell,
+          wrapWithChrome(chrome, renderHomeContent(posts, site, {
+            tag,
+            category,
+            page,
+            pageSize,
+            homeTags: chrome.home.homeTags,
+            adsHtml: chrome.home.adsBelowSearch
+          }), { path: '/', category })
+        );
       }
       // 同 article 页：updated_at 从不被写入，光看它无法反映正文变化，
       // 这里把参与渲染的字段一起纳入，避免允许缓存后出现「改了还是旧内容」。
+      // 另需纳入首页配置（分页 / 标签白名单 / 广告位）：它们同样改变渲染结果。
       fingerprint = posts
         .map((p) => `${p.id}:${p.title ?? ''}:${p.excerpt ?? ''}:${(p.content ?? '').length}:${p.tags ?? ''}:${p.category ?? ''}:${p.pinned ?? ''}:${p.protected ?? ''}`)
-        .join('|');
-      if (posts.length) {
-        const chrome = await readChrome(db, site.name, settingsRows);
-        withList = injectAppContent(shell, wrapWithChrome(chrome, renderHomeContent(posts, site), { path: '/', category: category || '' }));
-      }
+        .join('|') + '#' + JSON.stringify([pageSize, chrome.home.homeTags, chrome.home.adsBelowSearch]);
     } catch {
       /* 查询失败时回落到原始外壳，不影响页面可用性 */
     }

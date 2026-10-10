@@ -3,10 +3,15 @@
 本项目**不重写** upstream 的业务逻辑，而是复用 [qingyu-blog](https://github.com/kejiland/qingyu-blog)
 的代码，并用一层同形绑定把它运行在原生 Node 上。本文档说明边界、改动清单与同步流程。
 
-- 上游基线：`kejiland/qingyu-blog` @ `ad3bfb95bdb5bf5783c66db67bbd108c6f33d71c`
-- 同步日期：2026-10-04
-- 增量同步：2026-10-06 已把基线之后的 3 个提交（`c10eb07` / `daf85a8` / `c9559ef`）人工合入，
-  对应原版 2.10.60 → 2.10.63 的「导航默认项自动补齐」「新增导航项显示开关」「AI 结果不按代码块显示」
+- 上游基线：`kejiland/qingyu-blog` @ `cc0c3d10a1a13bdb7f391bee2e99310829118132`（v2.10.93）
+- 同步日期：2026-10-10
+- 历史：2026-10-04 同步至 `ad3bfb95`；2026-10-06 增量合入 3 个提交（2.10.63）；
+  **2026-10-10 全量同步到 v2.10.93**（原版 2.10.63 → 2.10.93，约 26 个提交），
+  前台 UI（首页标签行 / 翻页器 / 空态 / 置顶徽章 / 缩略图占位 / 顶栏发现菜单等）随之对齐，
+  并重写 SSR 首页（`src/ssr/list.ts`）与之同构，避免 app.js 接管后二次重绘。
+- 本次同步**故意保留旧版**的文件（保住通用版增量功能，见 COMPARE.md）：
+  `app/public/admin.js`、`admin.css`、`i18n.js`、`locales/*.json`。
+  代价是后台暂时落后上游 26 个提交，需后续人工合并。
 - 差异清单：见 [docs/COMPARE.md](COMPARE.md)
 - 复用目录：`app/worker.js`、`app/functions/**`、`app/public/**`、`app/migrations/**`
 

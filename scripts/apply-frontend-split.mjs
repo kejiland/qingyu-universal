@@ -263,7 +263,24 @@ function patchShellReferences() {
   }
 }
 
-function ensurePolishShell() {
+/* 版本号统一：上游 index.html 的 ?v= 与 app.js 的 BLOG_VERSION 本身就不一致
+ * （上游发布 tag 与资源版本号分开维护），而后台产物由 app.js 以
+ * admin.min.js?v=BLOG_VERSION 注入，版本号必须全局唯一，否则浏览器会混用
+ * 两套缓存。这里以 app.js 的 BLOG_VERSION 为准，把 index.html 里所有
+ * ?v=x.y.z 统一改写（幂等）。 */
+function normalizeIndexVersions() {
+  const version = (read('app.js').match(/BLOG_VERSION\s*=\s*'([^']+)'/) || [])[1];
+  if (!version) throw new Error('app.js 未找到 BLOG_VERSION');
+  let html = read('index.html');
+  const before = html;
+  html = html.replace(/\?v=\d+\.\d+\.\d+/g, '?v=' + version);
+  if (html !== before) {
+    write('index.html', html);
+    report.push('index.html -> 资源版本号统一为 ' + version);
+  } else {
+    report.push('[skip] index.html 版本号已统一');
+  }
+}function ensurePolishShell() {
   const version = (read('app.js').match(/BLOG_VERSION\s*=\s*'([^']+)'/) || [])[1];
   if (!version) throw new Error('app.js 未找到 BLOG_VERSION');
 
@@ -563,6 +580,7 @@ if (!fs.existsSync(path.join(PUB, 'boot.js'))) write('boot.js', BOOT_SOURCE);
 app = patchDisplayPolish(app);
 app = patchImageProxy(app);
 write('app.js', app);
+normalizeIndexVersions();
 ensurePolishShell();
 patchCriticalCss();
 patchReadingScalePreset();

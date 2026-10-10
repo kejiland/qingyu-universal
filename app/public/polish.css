@@ -440,3 +440,19 @@ footer {
   .home-stats { padding: 12px; margin-bottom: 14px; }
   .home-stats-grid { grid-template-columns: repeat(2, 1fr); }
 }
+/* ---------- SSR 主题切换图标 ----------
+ * src/ssr/chrome.ts 直接把日/月两个图标都渲染进 HTML，避免主题按钮在
+ * app.js 接管前是空壳。隐藏/显示规则原先写在 style.css 里，
+ * style.css 换成上游版本后丢了 —— 表现为两个图标同时可见。
+ * polish.css 是本项目自有、不被上游覆盖的样式落点，放这里。 */
+html[data-theme] .ssr-theme-icon {
+  display: none;
+}
+
+html[data-theme='light'] .ssr-theme-moon {
+  display: block;
+}
+
+html[data-theme='dark'] .ssr-theme-sun {
+  display: block;
+}

@@ -73,7 +73,6 @@ async function signS3(env, method, path, canonicalQuery, canonicalHeaders, signe
  *  contentType 可选：把 Content-Type 纳入签名，防止上传后被改写为其他 MIME 类型。
  *  Content-Length 由浏览器自动生成，不能纳入签名；规范化差异会导致 R2 返回无 CORS 头的 403。 */
 export async function presignPut(env, key, expiresSec, bucket, contentType, relative) {
-  // [self-host] 未配置 S3 时，改由本地磁盘签名上传端点承接
   // [self-host] 本地模式返回相对上传地址，避免 SITE_URL 与浏览器来源不一致
   if (env && env.LOCAL_STORAGE) return env.LOCAL_STORAGE.presignPut(env, key, expiresSec, bucket, contentType, relative);
   expiresSec = expiresSec || 3600;

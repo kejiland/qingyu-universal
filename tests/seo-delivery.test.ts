@@ -153,6 +153,19 @@ describe('首页与列表页：同样的压缩与缓存策略', () => {
     expect(second.status).toBe(304);
   });
 
+  it('首页 SSR 直接给出上游的列表结构（不必等 app.js 二次重绘）', async () => {
+    const html = await (await fetch(server.baseUrl + '/')).text();
+    for (const token of [
+      'id="listContainer"',
+      'class="post-card"',
+      'class="post-thumb',
+      'class="mini-tags"',
+      '最新发布'
+    ]) {
+      expect(html, `首页 SSR 缺少 ${token}`).toContain(token);
+    }
+  });
+
   it('不同筛选条件的首页不会共用同一个 ETag（否则 304 会返回错误的列表）', async () => {
     const all = await fetch(server.baseUrl + '/');
     const byTag = await fetch(server.baseUrl + '/?tag=%E4%BC%A0%E8%BE%93');

@@ -12,8 +12,6 @@ const SEARCH_CACHE = 'public, s-maxage=30, stale-while-revalidate=120';
 const MAX_QUERY = 80;
 const DEFAULT_PAGE_SIZE = 10;
 const MAX_PAGE_SIZE = 20;
-/** 搜索分页上限：防止 ?page=99999 拼出超大 OFFSET 拖垮数据库（见 handleSearch）。 */
-const SEARCH_MAX_PAGE = 2000;
 
 function clampInt(value, min, max, fallback) {
   const n = Math.floor(Number(value));
@@ -106,27 +104,6 @@ async function searchWithFts(db, query, page, pageSize) {
   return { total, rows };
 }
 
-async function searchWithPostgres(db, query, page, pageSize) {
-  const totalRows = await dbAll(
-    db,
-    'SELECT COUNT(*) AS total FROM posts p ' +
-      "WHERE p.search_vector @@ plainto_tsquery('simple', ?) AND " + PUBLIC_FILTER,
-    query
-  );
-  const total = Number(totalRows[0] && totalRows[0].total) || 0;
-  if (!total) return { total: 0, rows: [] };
-  const rows = await dbAll(
-    db,
-    'SELECT ' + SEARCH_COLUMNS + ', ' +
-      "ts_rank(p.search_vector, plainto_tsquery('simple', ?)) AS rank, " +
-      "ts_headline('simple', COALESCE(NULLIF(p.content, ''), NULLIF(p.excerpt, ''), p.title), plainto_tsquery('simple', ?), 'MaxWords=24, MinWords=8') AS snippet " +
-      'FROM posts p ' +
-      "WHERE p.search_vector @@ plainto_tsquery('simple', ?) AND " + PUBLIC_FILTER + ' ' +
-      'ORDER BY rank DESC, p.date DESC LIMIT ? OFFSET ?',
-    query, query, query, pageSize, (page - 1) * pageSize
-  );
-  return { total, rows };
-}
 async function searchWithLike(db, query, page, pageSize) {
   const rawLike = '%' + escapeLike(query) + '%';
   const where =
@@ -170,22 +147,12 @@ export async function handleSearch(request, env) {
   const url = new URL(request.url);
   const query = normalizeSearchQuery(url.searchParams.get('q'));
   if (!query) return json({ error: '缺少搜索关键词' }, 400, request, env, { 'Cache-Control': 'no-store' });
-  // 深分页上限：page 此前可到 100000，配合 pageSize 上限能拼出 OFFSET 数百万的
-  // 查询 —— 一次请求就能让数据库做全表扫描 + 丢弃。真实博客文章量级下
-  // 2000 页（约十万条）远远够用，超出按最后一页处理。
-  const page = clampInt(url.searchParams.get('page'), 1, SEARCH_MAX_PAGE, 1);
+  const page = clampInt(url.searchParams.get('page'), 1, 100000, 1);
   const pageSize = clampInt(url.searchParams.get('pageSize'), 1, MAX_PAGE_SIZE, DEFAULT_PAGE_SIZE);
 
   let engine = 'like';
   let result = null;
-  if (env.DB_DIALECT === 'postgres') {
-    try {
-      result = await searchWithPostgres(env.DB, query, page, pageSize);
-      engine = 'postgres';
-    } catch (e) {
-      result = null;
-    }
-  } else if (canUseFts(query)) {
+  if (canUseFts(query)) {
     try {
       result = await searchWithFts(env.DB, query, page, pageSize);
       engine = 'fts5';

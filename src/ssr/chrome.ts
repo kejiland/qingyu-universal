@@ -48,6 +48,19 @@ export interface ChromeData {
     contactEmail: string;
     links: NavChild[];
   };
+  /**
+   * 首页展示配置（来自 site_settings.features / home_tags）。
+   * 与 app.js 的 getConfig().{pageSize,homeTags,ads} 同源 ——
+   * SSR 若用另一套默认值，app.js 接管后会整块重绘，首屏等于白做。
+   */
+  home: {
+    /** 每页条数；null = 后台未配置，由调用方回落到 config.js / 默认值 */
+    pageSize: number | null;
+    /** 首页标签白名单（空 = 全显示） */
+    homeTags: string[];
+    /** 首页广告位 HTML（后台富文本，原样插入，与上游一致） */
+    adsBelowSearch: string;
+  };
 }
 
 /**
@@ -218,6 +231,11 @@ export async function readChrome(
   const site = safeJson<Record<string, unknown>>(map.get('site_info') ?? map.get('site'), {});
   const profile = safeJson<Record<string, unknown>>(map.get('profile'), {});
   const features = safeJson<Record<string, unknown>>(map.get('features'), {});
+  const homeTagsRaw = safeJson<unknown>(map.get('home_tags'), []);
+  const homeTags = (Array.isArray(homeTagsRaw) ? homeTagsRaw : []).map((x) => String(x).trim()).filter(Boolean);
+  const featurePageSize = Number(features.pageSize);
+  const featureAds =
+    features.ads && typeof features.ads === 'object' ? (features.ads as Record<string, unknown>) : {};
 
   // 后台保存的键是 nav_menu；早期数据里可能残留 nav，两个都读。
   let nav = normalizeNav(safeJson<unknown>(map.get('nav_menu') ?? map.get('nav'), null));
@@ -264,6 +282,11 @@ export async function readChrome(
       decl: str(site.footerText) || str(footer.decl),
       contactEmail: str(profile.email) || str(footer.email),
       links: listOf(footer.links)
+    },
+    home: {
+      pageSize: Number.isFinite(featurePageSize) && featurePageSize >= 0 ? Math.floor(featurePageSize) : null,
+      homeTags,
+      adsBelowSearch: String(featureAds.belowSearch ?? '')
     }
   };
 }
@@ -318,6 +341,14 @@ export function hydrateChrome(input: ChromeInput): ChromeData {
       decl: footer.decl || '',
       contactEmail: footer.contactEmail || '',
       links: Array.isArray(footer.links) ? footer.links : []
+    },
+    home: {
+      pageSize:
+        typeof input.home?.pageSize === 'number' && input.home.pageSize >= 0
+          ? Math.floor(input.home.pageSize)
+          : null,
+      homeTags: Array.isArray(input.home?.homeTags) ? input.home.homeTags.map(String).filter(Boolean) : [],
+      adsBelowSearch: String(input.home?.adsBelowSearch ?? '')
     }
   };
 }

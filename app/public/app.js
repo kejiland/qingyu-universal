@@ -6,7 +6,7 @@
  * ============================================================================ */
 'use strict';
 
-var BLOG_VERSION = '2.10.106';
+var BLOG_VERSION = '2.10.84';
 
 /* i18n 兜底：万一 i18n.js 没加载成功（网络抖动 / 缓存缺失 / 被拦截），
  * 也必须保证 t() 可用 —— 否则整页会在第一个 t(...) 处抛 “t is not defined” 而白屏。 */
@@ -145,44 +145,9 @@ function getTheme() {
   try { if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark'; } catch (e) {}
   return 'light';
 }
-/* 切换明暗 / 主题色时短暂开启换肤过渡，让整页变色是「化开」的而不是「跳变」的 */
-var _themeSwitchTimer = null;
-function withThemeTransition(fn) {
-  try {
-    var root = document.documentElement;
-    root.classList.add('theme-switching');
-    if (_themeSwitchTimer) clearTimeout(_themeSwitchTimer);
-    _themeSwitchTimer = setTimeout(function () { root.classList.remove('theme-switching'); }, 320);
-  } catch (e) {}
-  fn();
-}
-
-/* 顶栏滚动态：滚过之后才加分隔线与浮起阴影 */
-function bindTopbarScroll() {
-  // app.js 的 renderNav() 会整体替换 .topbar 节点，因此这里不能在绑定时把元素
-  // 存进闭包，否则首次重渲染后监听就作用在一个已被移除的旧节点上（滚动永远不生效）。
-  // 正确做法：每次都重新查询当前文档里的 .topbar。
-  if (window.__qyTopbarScrollBound) { syncTopbarScroll(); return; }
-  window.__qyTopbarScrollBound = true;
-  var ticking = false;
-  window.addEventListener('scroll', function () {
-    if (ticking) return;
-    ticking = true;
-    requestAnimationFrame(function () { syncTopbarScroll(); ticking = false; });
-  }, { passive: true });
-  syncTopbarScroll();
-}
-
-function syncTopbarScroll() {
-  var bar = document.querySelector('.topbar');
-  if (bar) bar.classList.toggle('is-scrolled', window.scrollY > 4);
-}
-
 function applyTheme(t) {
-  withThemeTransition(function () {
   if (t !== 'dark') t = 'light';
   try { document.documentElement.setAttribute('data-theme', t); } catch (e) {}
-  });
 }
 function setTheme(t) { applyTheme(t); try { localStorage.setItem(themeKey(), t); } catch (e) {} }
 function toggleTheme() { var n = getTheme() === 'dark' ? 'light' : 'dark'; setTheme(n); refreshThemeIcon(); renderAccentSwatches(); renderAccentNativeSelect(); return n; }
@@ -301,9 +266,7 @@ function getAccent() {
   return 'terra';
 }
 function applyAccent(a) {
-  withThemeTransition(function () {
-    try { document.documentElement.setAttribute('data-accent', a); } catch (e) {}
-  });
+  try { document.documentElement.setAttribute('data-accent', a); } catch (e) {}
 }
 function setAccent(a) {
   applyAccent(a);
@@ -311,18 +274,6 @@ function setAccent(a) {
   renderAccentSwatches();
   renderAccentNativeSelect();
 }
-/* 后台与管理端共用同一个键：在后台换主题色时，已打开的前台标签页也要立刻跟上。
-   storage 事件只在「另一个标签页 / 另一个文档」写入时触发，因此这里天然不会自触发。 */
-if (typeof window !== 'undefined' && window.addEventListener) {
-  window.addEventListener('storage', function (e) {
-    if (e.key !== null && e.key !== accentKey()) return;
-    applyAccent(getAccent());
-    renderAccentSwatches();
-    renderAccentNativeSelect();
-    refreshThemeIcon();
-  });
-}
-
 function accentSwatchColor(id) {
   for (var i = 0; i < ACCENT_PALETTES.length; i++) {
     if (ACCENT_PALETTES[i].id === id) return getTheme() === 'dark' ? ACCENT_PALETTES[i].dark : ACCENT_PALETTES[i].light;
@@ -1447,17 +1398,14 @@ async function saveComment(postId, author, content, parentId, guard) {
   if (_cloudOn()) {
     // 失败不再静默吞掉：抛出后端透传的具体原因（重复内容 409 / 频率限制 429 / 来源校验 403 等），
     // 由调用方（文章评论 / 留言板）在状态行展示，用户能明确知道为何未发表成功。
-    var payload = {
-      author: author, content: content,
-      // 反机器人：蜜罐字段（正常用户不会填）+ 表单渲染时间戳
-      hp: (guard && guard.hp) || '',
-      ts: (guard && guard.ts) || 0
-    };
-    // 顶层评论省略 parent_id：显式 null 会在契约层被拒（历史上导致整站评论发不出去）
-    if (parentId) payload.parent_id = String(parentId);
     var data = await apiFetch(commentApi(id), {
       method: 'POST',
-      body: JSON.stringify(payload)
+      // 反机器人：蜜罐字段（正常用户不会填）+ 表单渲染时间戳
+      body: JSON.stringify({
+        author: author, content: content, parent_id: parentId,
+        hp: (guard && guard.hp) || '',
+        ts: (guard && guard.ts) || 0
+      })
     });
     var c = (data && data.comment) || null;
     if (c) { try { delete _commentsCache[id]; } catch (e) {} }
@@ -2813,18 +2761,6 @@ function countRenderedLines(el) {
     }
     return Math.max(1, lines);
   } catch (e) { return 1; }
-}
-/* 列表错峰入场：重放 CSS 动画（列表重渲染后需要重新触发一次） */
-function applyStagger(scope) {
-  var root = scope || document;
-  // 卡片实际挂在 #listContainer 内；SSR 首屏可能只有 #homeBody 外壳
-  var q = root.querySelector && root.querySelector.bind(root);
-  var box = q && (q('#listContainer') || q('#homeBody'));
-  if (!box || !box.classList) return;
-  box.classList.remove('stagger');
-  // 强制回流，让同一批 DOM 重新播放 animation
-  void box.offsetWidth;
-  box.classList.add('stagger');
 }
 function fitCardLineClamps() {
   // 仅手机尺寸（≤768px）执行
@@ -4482,7 +4418,7 @@ async function route() {
   var path = r.path;
   var q = r.query;
 
-  if (path === '/') { app().innerHTML = renderHome(); fitCardLineClamps(); applyStagger(); }
+  if (path === '/') { app().innerHTML = renderHome(); fitCardLineClamps(); }
   else if (path.indexOf('/preview/') === 0) {
     // 草稿预览分享链接：/preview/<签名 token>
     var pvToken = path.slice('/preview/'.length).replace(/\/.*$/, '');
@@ -4542,7 +4478,7 @@ async function route() {
   else if (path === '/categories') { app().innerHTML = renderCategories(); }
   else if (path === '/history') { app().innerHTML = renderHistory(); }
   else if (path === '/links') { app().innerHTML = renderLinks(); }
-  else if (path === '/series') { app().innerHTML = renderSeriesList(); fitCardLineClamps(); applyStagger(); }
+  else if (path === '/series') { app().innerHTML = renderSeriesList(); fitCardLineClamps(); }
   else if (path === '/popular') { app().innerHTML = renderPopular(); bindPopular(); }
   else if (path.indexOf('/series/') === 0) { var seriesName = ''; try { seriesName = decodeURIComponent(path.slice('/series/'.length)); } catch (e) { seriesName = path.slice('/series/'.length); } app().innerHTML = renderSeriesDetail(seriesName); fitCardLineClamps(); }
   else if (path === '/guestbook') { app().innerHTML = renderGuestbook(); bindGuestbook(); }
@@ -4761,19 +4697,6 @@ function aiCommentsSlotHTML() {
   return '<div class="ai-comments-slot" id="aiCommentsSlot"></div>';
 }
 /* —— 探测完成后填充 slot —— */
-/* AI 摘要 GET 的进程内去重：首页 5 张卡片 + 文章页 slot 可能对同一 slug 并发
- * 发起相同请求（曾实测首页重复发了 10 个请求）。以 slug+lang 为键共享同一个
- * Promise：先到先得、后来复用。失败不缓存，下次进入页面仍可重试。 */
-var _aiSummaryGets = {};
-function aiGetSummary(slug) {
-  var key = encodeURIComponent(slug) + '|' + aiLang();
-  if (!_aiSummaryGets[key]) {
-    _aiSummaryGets[key] = apiFetch('api/ai/summary?slug=' + encodeURIComponent(slug) + '&lang=' + encodeURIComponent(aiLang()), { method: 'GET' })
-      .then(function (d) { return d && d.summary ? d : null; })
-      .catch(function () { return null; });
-  }
-  return _aiSummaryGets[key];
-}
 function aiFillSlots() {
   aiProbe().then(function (ok) {
     var s = document.getElementById('aiSummarySlot');
@@ -4781,11 +4704,20 @@ function aiFillSlots() {
       var slug = s.getAttribute('data-slug') || '';
       if (ok && slug) {
         // 优先拉取已有缓存摘要：命中直接展示（刷新不丢），未命中显示生成按钮
-        aiGetSummary(slug).then(function (d) {
-          var el = document.getElementById('aiSummarySlot');
-          if (!el) return;
-          el.innerHTML = d ? aiSummaryCardHTML(d.summary, slug, !!d.cached || adminOk(), !!d.cached) : aiSummaryBtnHTML(slug);
-        });
+        apiFetch('api/ai/summary?slug=' + encodeURIComponent(slug) + '&lang=' + encodeURIComponent(aiLang()), { method: 'GET' })
+          .then(function (d) {
+            var el = document.getElementById('aiSummarySlot');
+            if (!el) return;
+            if (d && d.summary) {
+              el.innerHTML = aiSummaryCardHTML(d.summary, slug, !!d.cached || adminOk(), !!d.cached);
+            } else {
+              el.innerHTML = aiSummaryBtnHTML(slug);
+            }
+          })
+          .catch(function () {
+            var el = document.getElementById('aiSummarySlot');
+            if (el) el.innerHTML = aiSummaryBtnHTML(slug);
+          });
       } else {
         s.innerHTML = '';
       }
@@ -4806,9 +4738,11 @@ function aiFillCardExcerpts() {
   Array.prototype.forEach.call(els, function (el) {
     var slug = el.getAttribute('data-ai-excerpt');
     if (!slug) return;
-    aiGetSummary(slug).then(function (d) {
-      if (d && el.isConnected) el.textContent = d.summary;
-    });
+    apiFetch('api/ai/summary?slug=' + encodeURIComponent(slug) + '&lang=' + encodeURIComponent(aiLang()), { method: 'GET' })
+      .then(function (d) {
+        if (d && d.summary && el.isConnected) el.textContent = d.summary;
+      })
+      .catch(function () { /* 拉取失败：保留默认摘要 */ });
   });
 }
 function aiSummaryBtnHTML(slug) {
@@ -5017,7 +4951,6 @@ function bindGlobal() {
   bindMobileSidebar();
   aiInit();
   bindFitCardLineClamps();   // 手机卡片摘要行数自适应：旋转/字体加载后重测
-  applyStagger();         // 首屏卡片错峰入场
   // 广告占位符：有广告（静态内容或 AdSense 已填充）才显示，无广告保持隐藏
   initAdSlots(app());
 }
@@ -5585,6 +5518,8 @@ window.__bootPromise = (async function () {
         + '<p><a href="' + esc(href('/')) + '">' + t('post.backHome') + '</a></p></div></main>';
     }
   }
+  // 首屏已渲染（成功或走了兜底）：关闭 index.html 里的「网络较慢」提示计时器
+  try { window.__qingyuBooted = true; } catch (e) {}
   window.addEventListener('hashchange', function () { _spaNav = true; withViewTransition(route); });
   window.addEventListener('popstate', function () { _spaNav = true; withViewTransition(route); });
 
@@ -5647,6 +5582,3 @@ window.__bootPromise = (async function () {
     } catch (e) { /* 设置获取失败 → 使用静态配置 */ }
   }
 })();
-
-// 顶栏滚动态：与上方初始化 IIFE 相互独立，挂在全局以便后续路由重渲染后复用
-bindTopbarScroll();

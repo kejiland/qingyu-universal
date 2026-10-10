@@ -18,7 +18,7 @@
   --fg: #23201b;
   --muted: #6b655c;
   --border: #e6e2da;
-  --accent: #a65132;
+  --accent: #c25e3a;
   --accent-soft: #f6e6df;
   --accent-2: #e28a56;
   --accent-fg: #fff;
@@ -75,7 +75,7 @@ html[data-theme="dark"] {
   --accent: #e08a63;
   --accent-soft: #3a2c22;
   --accent-2: #d97d4a;
-  --accent-fg: #1c1917;
+  --accent-fg: #fff;
   --code-bg: #2a2621;
   /* 深色模式下的语义别名（与浅色同源，仅跟随主题变量） */
   --text: var(--fg);
@@ -102,27 +102,27 @@ html[data-theme="dark"] {
  *   · 浅色模式主色在浅底 ≥4.7:1，适合链接/正文
  *   · 深色模式主色在深底 ≥5.9:1；文字对比不足时用 --accent-fg 深色文字兜底 */
 :root[data-theme="light"][data-accent="terra"] {
-  --accent: #a65132; --accent-soft: #f6e6df; --accent-2: #e28a56; --accent-fg: #fff;
+  --accent: #c25e3a; --accent-soft: #f6e6df; --accent-2: #e28a56; --accent-fg: #fff;
 }
 html[data-theme="dark"][data-accent="terra"] {
-  --accent: #e08a63; --accent-soft: #3a2c22; --accent-2: #d97d4a; --accent-fg: #1c1917;
+  --accent: #e08a63; --accent-soft: #3a2c22; --accent-2: #d97d4a; --accent-fg: #fff;
 }
 
 :root[data-theme="light"][data-accent="indigo"] {
-  --accent: #266694; --accent-soft: #d9e7f5; --accent-2: #1661ab; --accent-fg: #fff;
+  --accent: #2b73af; --accent-soft: #d9e7f5; --accent-2: #1661ab; --accent-fg: #fff;
   --bg: #f6f8fb; --bg-soft: #eef2f7; --card: #ffffff; --border: #dde6ef;
 }
 html[data-theme="dark"][data-accent="indigo"] {
-  --accent: #659dc5; --accent-soft: #223144; --accent-2: #8fb2c9; --accent-fg: #101c2b;
+  --accent: #619ac3; --accent-soft: #223144; --accent-2: #8fb2c9; --accent-fg: #101c2b;
   --bg: #141a21; --bg-soft: #1b222b; --card: #1d242e; --border: #2f3945;
 }
 
 :root[data-theme="light"][data-accent="bamboo"] {
-  --accent: #477165; --accent-soft: #e2ece6; --accent-2: #6e8b74; --accent-fg: #fff;
+  --accent: #497568; --accent-soft: #e2ece6; --accent-2: #6e8b74; --accent-fg: #fff;
   --bg: #f6f8f5; --bg-soft: #eef2ee; --card: #ffffff; --border: #dfe6dd;
 }
 html[data-theme="dark"][data-accent="bamboo"] {
-  --accent: #1fa986; --accent-soft: #1c3429; --accent-2: #40a070; --accent-fg: #0c241b;
+  --accent: #1ba784; --accent-soft: #1c3429; --accent-2: #40a070; --accent-fg: #0c241b;
   --bg: #141b16; --bg-soft: #1a231d; --card: #1d2620; --border: #2d3a32;
 }
 
@@ -131,7 +131,7 @@ html[data-theme="dark"][data-accent="bamboo"] {
   --bg: #faf7fa; --bg-soft: #f2ecf1; --card: #ffffff; --border: #e8dde6;
 }
 html[data-theme="dark"][data-accent="dusk"] {
-  --accent: #bc80aa; --accent-soft: #362640; --accent-2: #c98ab9; --accent-fg: #1c1917;
+  --accent: #ad6598; --accent-soft: #362640; --accent-2: #c98ab9; --accent-fg: #fff;
   --bg: #19141a; --bg-soft: #201a22; --card: #221c24; --border: #382b3a;
 }
 
@@ -227,50 +227,15 @@ a:hover { text-decoration: underline; }
   padding: 0 20px;
 }
 
-/* ---------- 主题切换过渡 ----------
- * 明暗 / 主题色是「整页换肤」，直接换会显得生硬。
-  * 切换的那一瞬间给根节点挂一个 .theme-switching，只在这段时间内
- * 让颜色类属性参与过渡，结束后立刻摘掉，免得常态下所有 hover 都变慢。
- * 用 :root.has() 限定在确实挂了该class 的文档上，避免影响其他页面。 */
-:root.theme-switching,
-:root.theme-switching body,
-:root.theme-switching .card,
-:root.theme-switching .topbar,
-:root.theme-switching .post-card,
-:root.theme-switching .btn {
-  transition: background-color .28s cubic-bezier(.4, 0, .2, 1),
-              border-color .28s cubic-bezier(.4, 0, .2, 1),
-              color .28s cubic-bezier(.4, 0, .2, 1),
-              box-shadow .28s cubic-bezier(.4, 0, .2, 1) !important;
-}
-/* 无障碍：用户要求减少动效时，切换应当是瞬时的 */
-@media (prefers-reduced-motion: reduce) {
-  :root.theme-switching,
-  :root.theme-switching body,
-  :root.theme-switching .card,
-  :root.theme-switching .topbar,
-  :root.theme-switching .post-card,
-  :root.theme-switching .btn {
-    transition: none !important;
-  }
-}
-
 /* ---------- 顶栏 ---------- */
 .topbar {
   position: sticky;
   top: 0;
   z-index: 10;
   background: color-mix(in srgb, var(--bg) 86%, transparent);
-  backdrop-filter: blur(10px) saturate(140%);
-  -webkit-backdrop-filter: blur(10px) saturate(140%);
-  border-bottom: 1px solid transparent;
-  transition: border-color .22s ease, box-shadow .22s ease, background .22s ease;
-}
-/* 滚动后顶栏才显出分隔线与浮起感：页面在最顶端时保持通透，不多余压一道线 */
-.topbar.is-scrolled {
-  border-bottom-color: var(--border);
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--fg) 4%, transparent),
-              0 8px 24px -12px color-mix(in srgb, var(--fg) 22%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
 }
 
 .topbar-inner {
@@ -643,12 +608,6 @@ a:hover { text-decoration: underline; }
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 .icon-btn:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
-
-/* SSR 主题按钮：日 / 月双图标只显示与当前主题匹配的一枚。
-   app.js 接管后会替换为单枚 SVG，本规则不会命中它。 */
-html[data-theme] .ssr-theme-icon { display: none; }
-html[data-theme="light"] .ssr-theme-moon { display: block; }
-html[data-theme="dark"] .ssr-theme-sun { display: block; }
 
 /* ---------- 桌面：主题色 & 语言 图标按钮 + 弹出面板（同风格） ---------- */
 .accent-wrap { position: relative; }
@@ -3589,36 +3548,3 @@ html[data-theme="dark"] body.scrolled .topbar {
   to { opacity: 1; transform: translateY(0); }
 }
 @media (prefers-reduced-motion: reduce) { .toast-item { animation: none; } }
-
-/* ============================================================
- * 8. 列表错峰入场（stagger reveal）
- *    纯 CSS 实现，不改动渲染逻辑：同一容器下的卡片依次淡入上浮，
- *    只在前 12 项生效，避免长列表末尾等待过久。
- * ============================================================ */
-@keyframes qyStaggerIn {
-  from { opacity: 0; transform: translateY(10px) scale(0.995); }
-  to   { opacity: 1; transform: none; }
-}
-
-.stagger > * {
-  animation: qyStaggerIn 0.42s cubic-bezier(0.22, 0.61, 0.36, 1) both;
-}
-.stagger > *:nth-child(1)  { animation-delay: 0.02s; }
-.stagger > *:nth-child(2)  { animation-delay: 0.06s; }
-.stagger > *:nth-child(3)  { animation-delay: 0.10s; }
-.stagger > *:nth-child(4)  { animation-delay: 0.14s; }
-.stagger > *:nth-child(5)  { animation-delay: 0.18s; }
-.stagger > *:nth-child(6)  { animation-delay: 0.21s; }
-.stagger > *:nth-child(7)  { animation-delay: 0.24s; }
-.stagger > *:nth-child(8)  { animation-delay: 0.26s; }
-.stagger > *:nth-child(9)  { animation-delay: 0.28s; }
-.stagger > *:nth-child(10) { animation-delay: 0.30s; }
-.stagger > *:nth-child(11) { animation-delay: 0.31s; }
-.stagger > *:nth-child(n + 12) { animation-delay: 0.32s; }
-
-/* 入场动画与 hover 抬升共存时，动画结束后交还给 hover 的 transform */
-.stagger > * { will-change: auto; }
-
-@media (prefers-reduced-motion: reduce) {
-  .stagger > * { animation: none !important; }
-}

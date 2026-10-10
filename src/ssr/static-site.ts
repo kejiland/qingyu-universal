@@ -339,7 +339,11 @@ export async function buildStaticSite(deps: StaticSiteDeps): Promise<StaticSiteR
     name: 'index.html',
     text: finalize(
       injectHead(
-        injectAppContent(shell, wrapWithChrome(chrome, renderHomeContent(posts.slice(0, 10), site), { path: '/', category: '' })),
+        injectAppContent(shell, wrapWithChrome(chrome, renderHomeContent(posts, site, {
+          pageSize: 0,
+          homeTags: chrome.home.homeTags,
+          adsHtml: chrome.home.adsBelowSearch
+        }), { path: '/', category: '' })),
         buildHomeMeta(site, siteUrl),
         renderHeadBlock(buildHomeMeta(site, siteUrl))
       ),
