@@ -51,6 +51,10 @@ window.BLOG_CONFIG = {
    * 例：pageSize: 8 → 首页每页 8 篇，底部出现「上一页 / 下一页」。
    * 云端模式：后台「设置 → 功能开关 → 首页分页」可覆盖此值（存 D1 site_settings.features，无需改代码重部署）。 */
   pageSize: 5,
+  /* 文章页工具栏（阅读字号 A−/A/A+ 、高亮汇总、清除高亮、收藏、导出/导入高亮）。
+   * 设为 false 即整排隐藏。
+   * 云端模式：后台「设置 → 功能开关 → 文章页工具栏」可覆盖此值（存 D1 site_settings.features，无需改代码重部署）。 */
+  readingFontSize: true,
   /* 管理员门禁（静态模式本地密码；云端模式请留空）。
    * 云端部署（推荐）：密码只存 Cloudflare D1，见文件头说明——
    *   首次 /api/admin/setup 设置（配置安装密钥时需 X-Setup-Key），

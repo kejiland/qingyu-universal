@@ -269,7 +269,8 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
       : 'public, max-age=0, must-revalidate';
 
 
-    const content = renderPostContent(row, site);
+    // 后台「功能开关 → 文章页工具栏」关闭时，首屏就别输出工具栏，避免出现后又被前端移除
+    const content = renderPostContent(row, site, { readingTools: readingToolsEnabled(settingsRows) });
     const chrome = await readChrome(db, site.name, settingsRows);
     const withBody = content
       ? injectAppContent(shell, wrapWithChrome(chrome, content, activeOf(c)))
@@ -423,3 +424,16 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
   return { home, article, archive, tags, categories, about, links, popular, series, guestbook };
 }
 
+
+/** 后台「功能开关」里的文章页工具栏开关（features.fontSize === false 即关闭）。
+ *  未配置 / 解析失败一律按开启处理，保证老站升级后行为不变。 */
+function readingToolsEnabled(rows: Array<{ k: string; v: string }>): boolean {
+  const raw = rows.find((r) => r.k === 'features')?.v;
+  if (!raw) return true;
+  try {
+    const feat = JSON.parse(raw) as { fontSize?: unknown };
+    return feat.fontSize !== false;
+  } catch {
+    return true;
+  }
+}

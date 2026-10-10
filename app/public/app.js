@@ -6,7 +6,7 @@
  * ============================================================================ */
 'use strict';
 
-var BLOG_VERSION = 'be3e41f96';
+var BLOG_VERSION = 'ba3c474bb';
 
 /* i18n 兜底：万一 i18n.js 没加载成功（网络抖动 / 缓存缺失 / 被拦截），
  * 也必须保证 t() 可用 —— 否则整页会在第一个 t(...) 处抛 “t is not defined” 而白屏。 */
@@ -1065,6 +1065,8 @@ function getConfig() {
     site: siteInfo,        // 站点信息（头像/名称/简介）供关于页等使用
     profile: prof,         // 个人信息（头像/昵称/简介/邮箱）供关于页等使用
     features: features,    // 后台「功能开关」的原始配置（供错误上报等读取）
+    // 阅读字号按钮：后台关闭优先，其次 config.js 的 readingFontSize（静态部署用）
+    readingFont: (features && features.fontSize === false) ? false : (cfg.readingFontSize !== false),
     ads: ads
   };
 }
@@ -3204,11 +3206,14 @@ async function renderPost(id) {
   var minutes = Math.max(1, Math.ceil((stripMd(content || '').length / 400)));
   var seriesMeta = post.series ? '<a class="pin" href="' + esc(href(seriesUrl(post.series))) + '">' + svgIcon('list', 13) + ' ' + esc(post.series) + '</a>' : '';
   html += '<div class="post-header"><h1>' + esc(post.title || '') + '</h1><div class="meta"><span class="meta-date">' + esc(fmtDate(post.date) || '') + '</span>' + (post.author ? '<span class="meta-author">' + esc(post.author) + '</span>' : '') + '<span>' + minutes + ' ' + t('post.minRead') + '</span><span class="meta-views">' + svgIcon('eye', 14) + ' <span id="viewCount">0</span> ' + t('post.views') + '</span>' + seriesMeta + (post.pinned ? '<span class="pin">' + svgIcon('pin', 13) + ' ' + t('post.pin') + '</span>' : '') + '</div></div>';
+  // 阅读字号工具栏：后台「功能开关」关闭后整排不输出
+  if (getConfig().readingFont !== false) {
   html += '<div class="reading-tools"><span class="rt-label">' + t('post.fontSize') + '</span>' +
     '<button type="button" class="rt-btn" data-rs="-1" aria-label="' + t('post.fontSmaller') + '" title="' + t('post.fontSmaller') + '">A−</button>' +
     '<button type="button" class="rt-btn" data-rs="0" aria-label="' + t('post.fontReset') + '" title="' + t('post.fontReset') + '">A</button>' +
     '<button type="button" class="rt-btn" data-rs="1" aria-label="' + t('post.fontLarger') + '" title="' + t('post.fontLarger') + '">A+</button>' +
     '</div>';
+  }
   html += aiPostSlot(post);
   html += toc;
   if (locked) {
@@ -3389,6 +3394,13 @@ async function renderPost(id) {
   // 避免同一次点击被处理两遍导致字号连跳两格。
   try { window.__readingScaleBound = true; } catch (e) {}
   var rsWrap = document.querySelector('#readingToolsHost') || document.querySelector('.reading-tools');
+  // 后台关闭工具栏时：SSR 首屏可能已渲染，这里连容器一起移除，
+  // 字号 / 高亮汇总 / 清除高亮 / 收藏 / 导入导出 全部按钮都不会出现
+  if (getConfig().readingFont === false) {
+    var _rsOld = document.querySelector('.reading-tools');
+    if (_rsOld && _rsOld.parentNode) _rsOld.parentNode.removeChild(_rsOld);
+    rsWrap = null;
+  }
   if (rsWrap) {
     rsWrap.querySelectorAll('[data-rs]').forEach(function (b) {
       b.addEventListener('click', function () {

@@ -4921,7 +4921,8 @@
       errorReport: !(feat && feat.errorReport === false),
       commentGuard: !(feat && feat.commentGuard === false),
       richContent: !(feat && feat.richContent === false),
-      navExtras: !(feat && feat.navExtras === false)
+      navExtras: !(feat && feat.navExtras === false),
+      fontSize: !(feat && feat.fontSize === false)
     };
   }
   function saveTabToDraft(content) {
@@ -4963,7 +4964,8 @@
         errorReport: content.querySelector('#abFeatErrReport') ? content.querySelector('#abFeatErrReport').checked : true,
         commentGuard: content.querySelector('#abFeatCommentGuard') ? content.querySelector('#abFeatCommentGuard').checked : true,
         richContent: content.querySelector('#abFeatRichContent') ? content.querySelector('#abFeatRichContent').checked : true,
-        navExtras: content.querySelector('#abFeatNavExtras') ? content.querySelector('#abFeatNavExtras').checked : true
+        navExtras: content.querySelector('#abFeatNavExtras') ? content.querySelector('#abFeatNavExtras').checked : true,
+        fontSize: content.querySelector('#abFeatFontSize') ? content.querySelector('#abFeatFontSize').checked : true
       };
     }
     if (content.querySelector('#abHomeTags')) collectHomeTagsFromDom(content);
@@ -5054,6 +5056,7 @@
     if (content.querySelector('#abFeatCommentGuard')) content.querySelector('#abFeatCommentGuard').checked = (feat.commentGuard !== false);
     if (content.querySelector('#abFeatRichContent')) content.querySelector('#abFeatRichContent').checked = (feat.richContent !== false);
     if (content.querySelector('#abFeatNavExtras')) content.querySelector('#abFeatNavExtras').checked = (feat.navExtras !== false);
+    if (content.querySelector('#abFeatFontSize')) content.querySelector('#abFeatFontSize').checked = (feat.fontSize !== false);
     if (content.querySelector('#abProfileName')) content.querySelector('#abProfileName').value = prof.name || '';
     if (content.querySelector('#abProfileBio')) content.querySelector('#abProfileBio').value = prof.bio || '';
     if (content.querySelector('#abProfileAvatar')) content.querySelector('#abProfileAvatar').value = prof.avatar || '';
@@ -5264,6 +5267,8 @@
       body.innerHTML = '<div class="ab-card" style="max-width:700px">' +
         '<div class="ab-section-title">' + icon('doc', 15) + ' ' + t('admin.settings.featPaging') + '</div>' +
         '<div class="ab-field"><label class="ab-label">' + t('admin.settings.featPageSize') + '</label><input class="ab-input" id="abFeatPageSize" type="number" min="0" step="1" style="max-width:180px"><label class="ab-hint">' + t('admin.settings.featPageSizeHint') + '</label></div>' +
+        '<div class="ab-section-title" style="margin-top:16px">' + icon('sliders', 15) + ' ' + t('admin.settings.featReading') + '</div>' +
+        '<div class="ab-field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input type="checkbox" id="abFeatFontSize"> ' + t('admin.settings.featFontSize') + '</label><label class="ab-hint">' + t('admin.settings.featFontSizeHint') + '</label></div>' +
         '<div class="ab-section-title" style="margin-top:16px">' + icon('link', 15) + ' ' + t('admin.settings.featNavigation') + '</div>' +
         '<div class="ab-field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input type="checkbox" id="abFeatNavExtras"> ' + t('admin.settings.featNavExtras') + '</label><label class="ab-hint">' + t('admin.settings.featNavExtrasHint') + '</label></div>' +
         '<div class="ab-section-title" style="margin-top:16px">' + icon('image', 15) + ' ' + t('admin.settings.featRich') + '</div>' +
@@ -5879,7 +5884,8 @@
         errorReport: !(settingsDraft.features && settingsDraft.features.errorReport === false),
         commentGuard: !(settingsDraft.features && settingsDraft.features.commentGuard === false),
         richContent: !(settingsDraft.features && settingsDraft.features.richContent === false),
-        navExtras: !(settingsDraft.features && settingsDraft.features.navExtras === false)
+        navExtras: !(settingsDraft.features && settingsDraft.features.navExtras === false),
+        fontSize: !(settingsDraft.features && settingsDraft.features.fontSize === false)
       })
     };
     try {

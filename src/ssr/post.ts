@@ -99,7 +99,11 @@ const READING_TOOLS =
  * 渲染文章正文。
  * 受保护文章（enc 存在）不注入正文——内容本身是密文，且已标记 noindex。
  */
-export function renderPostContent(post: PostRow, _site: SiteIdentity): string | null {
+export function renderPostContent(
+  post: PostRow,
+  _site: SiteIdentity,
+  options: { readingTools?: boolean } = {}
+): string | null {
   if (post.protected) return null;
 
   const body = renderMarkdown(String(post.content ?? ''));
@@ -107,7 +111,7 @@ export function renderPostContent(post: PostRow, _site: SiteIdentity): string | 
     '<main class="container page-fade"><div class="post-body">' +
     '<div class="reading-progress" id="readingProgress" aria-hidden="true"><span></span></div>' +
     renderHeader(post) +
-    READING_TOOLS +
+    (options.readingTools === false ? '' : READING_TOOLS) +
     `<article class="article">${body}</article>` +
     '</div></main>'
   );

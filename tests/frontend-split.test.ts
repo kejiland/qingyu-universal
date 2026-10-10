@@ -435,6 +435,23 @@ describe('后台存储配置页', () => {
     expect(app).toContain('aiSummaryCardHTML(d.summary, slug, adminOk(), !!d.cached)');
   });
 
+  it('文章页工具栏（字号/高亮/收藏）可由后台开关关闭', () => {
+    const app = read('app.js');
+    // 读取开关：后台 features.fontSize 优先，其次 config.js 的 readingFontSize
+    expect(app).toContain('readingFont: (features && features.fontSize === false) ? false : (cfg.readingFontSize !== false)');
+    // 关闭时整排不渲染，且把 SSR 已渲染的工具栏容器移除（字号 + 高亮汇总/清除/收藏/导入导出一起消失）
+    expect(app).toContain("if (getConfig().readingFont !== false) {");
+    expect(app).toContain("var _rsOld = document.querySelector('.reading-tools');");
+    const admin = read('admin.js');
+    expect(admin).toContain('id="abFeatFontSize"');
+    expect(admin).toContain("t('admin.settings.featFontSize')");
+    expect(admin).toContain('fontSize: !(settingsDraft.features && settingsDraft.features.fontSize === false)');
+    // SSR 首屏同样尊重开关，避免工具栏闪一下再消失
+    const post = readSrc('src/ssr/post.ts');
+    expect(post).toContain("options.readingTools === false ? '' : READING_TOOLS");
+    expect(readSrc('src/routes/seo.ts')).toContain('readingToolsEnabled(settingsRows)');
+  });
+
   it('页脚导航之间不插小圆点', () => {
     expect(read('app.js')).not.toContain('footer-dot');
     const chrome = readSrc('src/ssr/chrome.ts');
