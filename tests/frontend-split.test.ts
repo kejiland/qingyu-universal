@@ -427,4 +427,19 @@ describe('后台存储配置页', () => {
     const contract = readSrc('src/api/contract/posts.ts');
     expect(contract).toContain('PostStatsBriefSchema');
   });
+
+  it('AI 摘要的「重新生成」只对管理员显示', () => {
+    const app = read('app.js');
+    // 原来把 d.cached 也当成管理员，导致任何访客看到已缓存摘要都有「重新生成」
+    expect(app).not.toContain('!!d.cached || adminOk()');
+    expect(app).toContain('aiSummaryCardHTML(d.summary, slug, adminOk(), !!d.cached)');
+  });
+
+  it('页脚导航之间不插小圆点', () => {
+    expect(read('app.js')).not.toContain('footer-dot');
+    const chrome = readSrc('src/ssr/chrome.ts');
+    expect(chrome).not.toContain('footer-dot');
+    // 去掉圆点后靠间距分隔
+    expect(read('polish.css')).toContain('.footer-nav { font-size: 13px; gap: 14px; }');
+  });
 });

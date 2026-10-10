@@ -303,7 +303,7 @@ footer {
     var(--bg-soft);
 }
 .footer-inner { gap: 12px; padding: 28px 20px 30px; }
-.footer-nav { font-size: 13px; gap: 2px; }
+.footer-nav { font-size: 13px; gap: 14px; }
 .footer-nav a { padding: 3px 8px; border-radius: 8px; transition: color 0.16s ease, background 0.16s ease; }
 .footer-nav a:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); text-decoration: none; }
 

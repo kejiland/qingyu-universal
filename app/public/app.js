@@ -6,7 +6,7 @@
  * ============================================================================ */
 'use strict';
 
-var BLOG_VERSION = 'b5ff3537c';
+var BLOG_VERSION = 'b0b3503da';
 
 /* i18n 兜底：万一 i18n.js 没加载成功（网络抖动 / 缓存缺失 / 被拦截），
  * 也必须保证 t() 可用 —— 否则整页会在第一个 t(...) 处抛 “t is not defined” 而白屏。 */
@@ -2510,14 +2510,15 @@ function renderFooter() {
     else if (/^\//.test(u)) u = href(u);
     return '<a href="' + esc(u) + '"' + ext + '>' + esc(x.text || '') + '</a>';
   }
-  var navHtml = nav.map(l).join('<span class="footer-dot">·</span>');
+  // 导航项之间只留间距，不要小圆点（上游观感）
+  var navHtml = nav.map(l).join('');
   // RSS：仅非管理员显示（管理员有写作后台入口）。云端模式指向动态
   // /api/feed.xml（含全部云端文章、自动取站点域名）；file:// 直开时同目录；
   // 其余静态托管用根路径 feed.xml
   if (!adminOk()) {
     var rssHref = _cloudOn() ? '/api/feed.xml' : (useHashMode() ? 'feed.xml' : '/feed.xml');
-    navHtml += '<span class="footer-dot footer-rss">·</span><a class="footer-rss" href="' + esc(rssHref) + '">RSS</a>';
-    navHtml += '<span class="footer-dot">·</span><a href="' + esc(href('/subscribe')) + '">' + esc(t('subscribe.title')) + '</a>';
+    navHtml += '<a class="footer-rss" href="' + esc(rssHref) + '">RSS</a>';
+    navHtml += '<a href="' + esc(href('/subscribe')) + '">' + esc(t('subscribe.title')) + '</a>';
   }
   // 电脑端专属区块：自定义文字 / 站点声明 / 联系方式 / 友情链接
   var extra = '';
@@ -4797,7 +4798,9 @@ function aiFillSlots() {
             var el = document.getElementById('aiSummarySlot');
             if (!el) return;
             if (d && d.summary) {
-              el.innerHTML = aiSummaryCardHTML(d.summary, slug, !!d.cached || adminOk(), !!d.cached);
+              // isAdmin 只认真实登录态：原来把 d.cached 也算进去，
+              // 结果任何访客看到已缓存的摘要都冒出「重新生成」按钮。
+              el.innerHTML = aiSummaryCardHTML(d.summary, slug, adminOk(), !!d.cached);
             } else {
               el.innerHTML = aiSummaryBtnHTML(slug);
             }

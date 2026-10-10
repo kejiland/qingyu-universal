@@ -523,10 +523,11 @@ export function renderFooter(input: ChromeInput): string {
   const list = source.slice();
   if (!list.some((x) => String(x.url) === '/links')) list.push({ text: '友链', url: '/links' });
 
-  let navHtml = list.map(footerLink).join('<span class="footer-dot">·</span>');
+  // 导航项之间只留间距，不插入小圆点（与上游观感一致）
+  let navHtml = list.map(footerLink).join('');
   navHtml +=
-    '<span class="footer-dot footer-rss">·</span><a class="footer-rss" href="/feed.xml">RSS</a>' +
-    `<span class="footer-dot">·</span><a href="/subscribe">邮件订阅</a>`;
+    '<a class="footer-rss" href="/feed.xml">RSS</a>' +
+    `<a href="/subscribe">邮件订阅</a>`;
 
   let extra = '';
   if (chrome.footer.text) extra += `<p class="footer-text">${escapeHtml(chrome.footer.text)}</p>`;
