@@ -18,7 +18,7 @@
   --fg: #23201b;
   --muted: #6b655c;
   --border: #e6e2da;
-  --accent: #c25e3a;
+  --accent: #a55031;
   --accent-soft: #f6e6df;
   --accent-2: #e28a56;
   --accent-fg: #fff;
@@ -72,10 +72,10 @@ html[data-theme="dark"] {
   --fg: #e8e2d8;
   --muted: #9c9484;
   --border: #35302a;
-  --accent: #e08a63;
+  --accent: #e08c65;
   --accent-soft: #3a2c22;
   --accent-2: #d97d4a;
-  --accent-fg: #fff;
+  --accent-fg: #141414;
   --code-bg: #2a2621;
   /* 深色模式下的语义别名（与浅色同源，仅跟随主题变量） */
   --text: var(--fg);
@@ -102,27 +102,27 @@ html[data-theme="dark"] {
  *   · 浅色模式主色在浅底 ≥4.7:1，适合链接/正文
  *   · 深色模式主色在深底 ≥5.9:1；文字对比不足时用 --accent-fg 深色文字兜底 */
 :root[data-theme="light"][data-accent="terra"] {
-  --accent: #c25e3a; --accent-soft: #f6e6df; --accent-2: #e28a56; --accent-fg: #fff;
+  --accent: #a55031; --accent-soft: #f6e6df; --accent-2: #e28a56; --accent-fg: #fff;
 }
 html[data-theme="dark"][data-accent="terra"] {
-  --accent: #e08a63; --accent-soft: #3a2c22; --accent-2: #d97d4a; --accent-fg: #fff;
+  --accent: #e08c65; --accent-soft: #3a2c22; --accent-2: #d97d4a; --accent-fg: #141414;
 }
 
 :root[data-theme="light"][data-accent="indigo"] {
-  --accent: #2b73af; --accent-soft: #d9e7f5; --accent-2: #1661ab; --accent-fg: #fff;
+  --accent: #276aa1; --accent-soft: #d9e7f5; --accent-2: #1661ab; --accent-fg: #fff;
   --bg: #f6f8fb; --bg-soft: #eef2f7; --card: #ffffff; --border: #dde6ef;
 }
 html[data-theme="dark"][data-accent="indigo"] {
-  --accent: #619ac3; --accent-soft: #223144; --accent-2: #8fb2c9; --accent-fg: #101c2b;
+  --accent: #679ec5; --accent-soft: #223144; --accent-2: #8fb2c9; --accent-fg: #101c2b;
   --bg: #141a21; --bg-soft: #1b222b; --card: #1d242e; --border: #2f3945;
 }
 
 :root[data-theme="light"][data-accent="bamboo"] {
-  --accent: #497568; --accent-soft: #e2ece6; --accent-2: #6e8b74; --accent-fg: #fff;
+  --accent: #467064; --accent-soft: #e2ece6; --accent-2: #6e8b74; --accent-fg: #fff;
   --bg: #f6f8f5; --bg-soft: #eef2ee; --card: #ffffff; --border: #dfe6dd;
 }
 html[data-theme="dark"][data-accent="bamboo"] {
-  --accent: #1ba784; --accent-soft: #1c3429; --accent-2: #40a070; --accent-fg: #0c241b;
+  --accent: #1cab87; --accent-soft: #1c3429; --accent-2: #40a070; --accent-fg: #0c241b;
   --bg: #141b16; --bg-soft: #1a231d; --card: #1d2620; --border: #2d3a32;
 }
 
@@ -131,7 +131,7 @@ html[data-theme="dark"][data-accent="bamboo"] {
   --bg: #faf7fa; --bg-soft: #f2ecf1; --card: #ffffff; --border: #e8dde6;
 }
 html[data-theme="dark"][data-accent="dusk"] {
-  --accent: #ad6598; --accent-soft: #362640; --accent-2: #c98ab9; --accent-fg: #fff;
+  --accent: #bc81ab; --accent-soft: #362640; --accent-2: #c98ab9; --accent-fg: #141414;
   --bg: #19141a; --bg-soft: #201a22; --card: #221c24; --border: #382b3a;
 }
 
@@ -3059,8 +3059,8 @@ textarea { resize: none; }
   --smoji-hover: var(--bg-soft, #f1efeb) !important;
   --smoji-tab-bg: var(--bg-soft, #f1efeb) !important;
   --smoji-tab-ink: var(--fg, #23201b) !important;
-  --smoji-focus: var(--accent, #c25e3a) !important;
-  --smoji-accent: var(--accent, #c25e3a) !important;
+  --smoji-focus: var(--accent, #a55031) !important;
+  --smoji-accent: var(--accent, #a55031) !important;
 }
 
 html[data-theme="dark"] .smoji {
@@ -3073,8 +3073,8 @@ html[data-theme="dark"] .smoji {
   --smoji-hover: var(--bg-soft, #201d18) !important;
   --smoji-tab-bg: var(--bg-soft, #201d18) !important;
   --smoji-tab-ink: var(--fg, #fff) !important;
-  --smoji-focus: var(--accent, #e08a63) !important;
-  --smoji-accent: var(--accent, #e08a63) !important;
+  --smoji-focus: var(--accent, #e08c65) !important;
+  --smoji-accent: var(--accent, #e08c65) !important;
 }
 
 /* ============================================================

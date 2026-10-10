@@ -240,10 +240,10 @@ function refreshThemeIcon() {
  * 色板定义在 style.css 的 [data-accent=...] 变量块；此处只负责
  * data-accent 属性、持久化、以及取色面板（顶栏弹层 + 移动端侧栏）的渲染与交互。 */
 var ACCENT_PALETTES = [
-  { id: 'terra',  zh: '赭橙',   en: 'Terra',   light: '#c25e3a', dark: '#e08a63' },
-  { id: 'indigo', zh: '黛蓝',   en: 'Indigo',  light: '#2b73af', dark: '#619ac3' },
-  { id: 'bamboo', zh: '竹青',   en: 'Bamboo',  light: '#497568', dark: '#1ba784' },
-  { id: 'dusk',   zh: '凝夜紫', en: 'Dusk',    light: '#8b2671', dark: '#ad6598' }
+  { id: 'terra',  zh: '赭橙',   en: 'Terra',   light: '#a55031', dark: '#e08c65' },
+  { id: 'indigo', zh: '黛蓝',   en: 'Indigo',  light: '#276aa1', dark: '#679ec5' },
+  { id: 'bamboo', zh: '竹青',   en: 'Bamboo',  light: '#467064', dark: '#1cab87' },
+  { id: 'dusk',   zh: '凝夜紫', en: 'Dusk',    light: '#8b2671', dark: '#bc81ab' }
 ];
 function accentKey() { return 'qingyu.accent'; }
 /* 面板标题内置多语言：不依赖 locales JSON（避免旧 JSON 缓存导致显示成 key 原文） */
