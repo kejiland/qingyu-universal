@@ -375,9 +375,11 @@ while [ $# -gt 0 ]; do
   case "$1" in
     install|upgrade|backup|restore|logs|status|info|start|stop|restart|rollback|uninstall|help) COMMAND="$1"; COMMAND_SET=1 ;;
     doctor)                 COMMAND="$1"; COMMAND_SET=1 ;;
+  domain)                 COMMAND="$1"; COMMAND_SET=1
+                                 shift; SUBCMD_ARGS="$*"; break ;;
     update|check-update)    COMMAND="$1"; COMMAND_SET=1 ;;
     autobackup|migrate)     COMMAND="$1"; COMMAND_SET=1 ;;
-    shortcut)               COMMAND="$1"; COMMAND_SET=1
+    shortcut|domain)       COMMAND="$1"; COMMAND_SET=1
                                  shift; SUBCMD_ARGS="$*"; break ;;
     --domain)   DOMAIN="${2:-}"; shift ;;
     --email)    EMAIL="${2:-}"; shift ;;
@@ -578,6 +580,7 @@ usage() {
   check-update         只看有没有新代码，不改动任何东西
   upgrade              强制拉最新代码并重建（保留数据）
   rollback             回滚到上一版（回滚前自动备份）
+  domain               域名与 HTTPS：status / set <域名> / port [端口] / off
   restart              重启（改完 .env 后用它生效）
   start / stop         启动 / 停止（配置和数据都保留）
   logs                 查看应用日志
@@ -611,6 +614,10 @@ usage() {
   --remove            移除已设置的快捷键
   --no-shortcut        不设置快捷键
   -h, --help           显示本帮助
+  换域名（已部署之后）：
+    ./deploy/install.sh domain              查看当前域名、DNS 与证书状态
+    ./deploy/install.sh domain set blog.example.com   切到新域名（自动 HTTPS）
+    ./deploy/install.sh domain port [8080]  退回 IP + 端口模式
 
   配置档示例（KEY=VALUE，# 开头是注释；命令行参数优先级更高）：
       DOMAIN=blog.example.com
@@ -2820,6 +2827,12 @@ cmd_upgrade() {
   show_version_diff
   resolve_mode
   persist_mirror_env
+  # 文档里承诺「upgrade --domain X 可以换域名」，但 resolve_mode 只决定本次进程的模式，
+  # 不会写 .env —— 在这里显式落盘，避免升级完域名还是旧的。
+  if [ -n "$DOMAIN" ] && [ -z "$APP_PORT" ] && [ "$DOMAIN" != "$(env_value SITE_DOMAIN)" ]; then
+    log "把域名切换为 ${DOMAIN}（自动申请 HTTPS 证书）"
+    domain_apply "$DOMAIN"
+  fi
   apply_env_extras
   # 先备份，再升级
   backup_now || warn "升级前备份失败，继续升级"
@@ -2844,6 +2857,160 @@ cmd_upgrade() {
   log "升级完成（版本 $BUILD_REVISION）"
 }
 
+# 状态输出用的两行勾叉（doctor 的 doc_* 会顺带累计体检计数，这里不要那套）
+ui_ok()   { printf '    %s%s%s %s\n' "$C_GREEN" "${G_OK:-+}" "$C_RESET" "$*"; }
+ui_warn() { printf '    %s%s%s %s\n' "$C_YELLOW" "${G_WARN:-!}" "$C_RESET" "$*"; }
+# ---------- 域名：查看 / 切换 / 检查 ----------
+# 装完之后换域名是这个脚本最常被问到的操作，但它牵扯到 .env 四个字段
+# （SITE_URL / SITE_DOMAIN / APP_BIND / COMPOSE_PROFILES）+ TRUST_PROXY、
+# 防火墙 80/443 放行、以及 Caddy 是否启用，漏改任何一项都会得到
+# 「能打开但没有 HTTPS」或「登录后被踢」这类难查的问题，所以单独做成子命令。
+# 用法：
+#   domain              查看当前域名与解析/证书状态
+#   domain set X        切到 X（自动 HTTPS）
+#   domain port [8080]  退回 IP + 端口模式（X 换成 --port）
+#   domain off          同 port，但保留原来的端口号
+
+# 域名当前是否解析到本机（拿本机公网 IP 比对，私有网段 / 未探测到时只报解析结果）
+domain_points_here() {
+  local d="$1" resolved ip
+  resolved="$(getent hosts "$d" 2>/dev/null | awk '{print $1}' | head -n1)"
+  [ -n "$resolved" ] || return 1
+  ip="$(detect_ip 2>/dev/null || true)"
+  case "$ip" in
+    ''|10.*|192.168.*|127.*) return 0 ;;
+  esac
+  [ "$resolved" = "$ip" ]
+}
+
+# 只看不改：当前模式、解析指向、端口占用、证书是否已经签发
+domain_status() {
+  local profiles domain site_url app_bind port caddy=0 resolved cert
+  profiles="$(env_value COMPOSE_PROFILES)"
+  domain="$(env_value SITE_DOMAIN)"
+  site_url="$(env_value SITE_URL)"
+  app_bind="$(env_value APP_BIND)"
+  port="${app_bind##*:}"
+  uses_caddy && caddy=1
+
+  ui_banner "域名状态" "轻语博客 · 域名与 HTTPS"
+  ui_kv "站点地址" "${C_B}${site_url:-（未设置）}${C_RESET}"
+  ui_kv "域名" "${domain:-（无 —— 当前是 IP + 端口模式）}"
+  ui_kv "反向代理" "$([ "$caddy" -eq 1 ] && echo 'Caddy（自动 HTTPS）' || echo '未启用（纯 HTTP）')"
+  ui_kv "应用监听" "${app_bind:-（未设置）}"
+  ui_kv "本机健康检查端口" "$port"
+
+  if [ -z "$domain" ]; then
+    echo
+    ui_hint "换成域名 + 自动 HTTPS：./deploy/install.sh domain set blog.example.com"
+    return 0
+  fi
+
+  echo
+  ui_section "DNS 解析"
+  resolved="$(getent hosts "$domain" 2>/dev/null | awk '{print $1}' | head -n1)"
+  if [ -z "$resolved" ]; then
+    ui_warn "解析不到 ${domain}"
+    ui_hint "到 DNS 控制台加一条 A 记录指向本机公网 IP；解析生效后重跑本命令"
+  elif domain_points_here "$domain"; then
+    ui_ok "${domain} → ${resolved}（指向本机）"
+  else
+    ui_warn "${domain} → ${resolved}（与本机公网 IP 不一致，Let's Encrypt 会签发失败）"
+  fi
+
+  ui_section "端口与证书"
+  if port_in_use_pair; then
+    ui_ok "80 / 443 空闲，可签发证书"
+  else
+    ui_warn "80 或 443 已被占用 —— Caddy / 证书签发会失败"
+    ui_hint "排查：./deploy/install.sh doctor"
+  fi
+  cert="$INSTALL_DIR/data/caddy/certificates/${domain}/${domain}.crt"
+  if [ -f "$cert" ]; then
+    ui_ok "证书已签发"
+  elif [ "$caddy" -eq 1 ]; then
+    ui_hint "证书还没签发（Caddy 首次启动后自动申请，DNS 指过来即可）"
+  fi
+  echo
+  ui_hint "改回 IP + 端口：./deploy/install.sh domain port"
+}
+
+# 把「域名模式」和「端口模式」落到 .env，四个字段必须一起改，否则出现半 HTTPS 半明文的怪状态
+domain_apply() {
+  local d="$1" p="${2:-}" profiles port
+  profiles="$(env_value COMPOSE_PROFILES)"
+  port="${p:-8080}"
+  if [ -n "$d" ]; then
+    env_set SITE_DOMAIN "$d"
+    env_set SITE_URL "https://$d"
+    env_set APP_BIND "127.0.0.1:8787"
+    env_set TRUST_PROXY "1"
+    # 保留 postgres 这类与域名无关的 profile，只把 domain 摘掉或加上
+    profiles="${profiles//,domain/}"; profiles="${profiles//domain,/}"; profiles="${profiles//domain/}"
+    profiles="${profiles:+$profiles,}domain"
+    env_set COMPOSE_PROFILES "$profiles"
+  else
+    env_set SITE_DOMAIN ""
+    env_set SITE_URL "http://$(detect_ip):$port"
+    env_set APP_BIND "0.0.0.0:$port"
+    env_set TRUST_PROXY "0"
+    profiles="${profiles//,domain/}"; profiles="${profiles//domain,/}"; profiles="${profiles//domain/}"
+    profiles="${profiles%,}"; profiles="${profiles# ,}"
+    env_set COMPOSE_PROFILES "$profiles"
+  fi
+}
+
+cmd_domain() {
+  need_root
+  resolve_docker
+  [ -d "$INSTALL_DIR" ] || die "未找到安装目录：$INSTALL_DIR —— 先 install，或用 --dir 指定"
+  [ -f "$INSTALL_DIR/.env" ] || die "未找到 $INSTALL_DIR/.env —— 这个目录还没有部署过？"
+
+  set -- $SUBCMD_ARGS
+  local action="${1:-status}" target="${2:-}"
+
+  case "$action" in
+    status|"") domain_status ;;
+
+    set)
+      [ -n "$target" ] || die "请给出域名，例如：domain set blog.example.com"
+      target="${target#https://}"; target="${target#http://}"; target="${target%%/*}"
+      is_valid_domain "$target" || die "「$target」不像一个合法域名（示例：blog.example.com）"
+      if [ "$(env_value SITE_DOMAIN)" = "$target" ]; then
+        log "域名已经是 ${target}"; domain_status; return 0
+      fi
+      echo
+      log "切换到 ${target}"
+      warn "DNS 需要先把 ${target} 解析到本机公网 IP，否则证书签不出来"
+      domain_apply "$target"
+      # 证书与代理由 compose 重建时拉起；防火墙只新增 80/443 规则，不动其它设置
+      ensure_firewall_open
+      compose up -d --force-recreate caddy app 2>/dev/null || compose up -d
+      wait_healthy
+      domain_status
+      log "域名已切换为 https://${target}"
+      ;;
+
+    port|off)
+      local p="${target:-}"
+      if [ -z "$p" ] && [ "$action" = port ]; then
+        local bind; bind="$(env_value APP_BIND)"; p="${bind##*:}"
+        [ "$p" = "8787" ] && p=8080
+      fi
+      [ -n "$p" ] || p=8080
+      case "$p" in ''|*[!0-9]*) die "端口只能是数字，收到的是「$p」" ;; esac
+      log "切换到 IP + 端口模式（:${p}）"
+      domain_apply "" "$p"
+      APP_PORT="$p"
+      ensure_firewall_open
+      compose up -d --force-recreate app 2>/dev/null || compose up -d
+      wait_healthy
+      log "已改为 $(env_value SITE_URL)（纯 HTTP，无证书）"
+      ;;
+
+    *) usage; die "未知用法：domain ${action}（可用：status / set <域名> / port [端口] / off）" ;;
+  esac
+}
 # ---------- 日常运维：启动 / 停止 / 重启 / 回滚 ----------
 cmd_start() {
   need_root
@@ -3885,13 +4052,14 @@ maybe_show_menu() {
     ui_opt 11 "回滚到上一版" "更新出问题时退回"
     ui_opt 12 "定时备份"     "每天自动快照，只保留最近 ${KEEP_N} 份"
     ui_opt 13 "打包迁移"     "打成 tar.gz，方便搬到新服务器"
-    ui_opt 14 "卸载"         "删除容器（数据卷保留）"
+    ui_opt 14 "改域名"       "查看 / 切换域名，自动申请 HTTPS 证书"
+    ui_opt 15 "卸载"         "删除容器（数据卷保留）"
     echo
     ui_section "终端快捷键"
     if [ -n "$shortcut_key" ]; then
-      ui_opt 15 "自定义快捷键" "当前 ${shortcut_key}；改成字母 / 数字，输入 - 移除"
+      ui_opt 16 "自定义快捷键" "当前 ${shortcut_key}；改成字母 / 数字，输入 - 移除"
     else
-      ui_opt 15 "设置快捷键"   "单个字母 / 数字；输入 - 取消设置"
+      ui_opt 16 "设置快捷键"   "单个字母 / 数字；输入 - 取消设置"
     fi
     echo
     ui_opt  0 "退出" ""
@@ -3913,8 +4081,9 @@ maybe_show_menu() {
     11) COMMAND="rollback" ;;
     12) COMMAND="autobackup" ;;
     13) COMMAND="migrate" ;;
-    14) COMMAND="uninstall" ;;
-    15)
+    14) COMMAND="domain" ;;
+    15) COMMAND="uninstall" ;;
+    16)
       # 交互式改键：用户已在菜单里明确选择，忽略这次启动参数里的 --no-shortcut。
       SHORTCUT_OFF=0
       # 交互式改键：单个字母 / 数字直接覆盖；“-”表示移除。
@@ -3926,7 +4095,7 @@ maybe_show_menu() {
       esac
       ;;
     0)  log "已退出（再次运行本脚本可重新打开菜单）"; exit 0 ;;
-    *)  warn "没看懂这个选择（请输入 0-15），先退出"; exit 1 ;;
+    *)  warn "没看懂这个选择（请输入 0-16），先退出"; exit 1 ;;
   esac
 }
 
@@ -3956,6 +4125,7 @@ case "$COMMAND" in
   stop) cmd_stop ;;
   restart) cmd_restart ;;
   rollback) cmd_rollback ;;
+  domain)   cmd_domain ;;
   uninstall) cmd_uninstall ;;
   *) usage; die "未知命令：$COMMAND" ;;
 esac

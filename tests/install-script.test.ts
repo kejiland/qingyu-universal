@@ -249,7 +249,7 @@ it('边框不再用 tr 拼重复字符（非 UTF-8 locale 下会变乱码）', (
     const s = src();
     expect(s).toMatch(/^SHORTCUT_KEY="k"/m);
     expect(s).toMatch(/^SHORTCUT_OFF=0/m);
-    expect(s).toMatch(/^    shortcut\) /m);
+    expect(s).toMatch(/^    shortcut\|domain\) /m);
     expect(s).toMatch(/^  shortcut\)   cmd_shortcut ;;$/m);
     // 大小写两个别名都写，Shift 敲也能用
     expect(s).toContain('alias %s=');
@@ -268,10 +268,27 @@ it('边框不再用 tr 拼重复字符（非 UTF-8 locale 下会变乱码）', (
     // 当前键必须从 rc 文件实读，不能把默认 k 当成“已安装”
     expect(menu).toContain('shortcut_key="$(shortcut_current_key)"');
     expect(menu).toContain('ui_kv "终端快捷键"');
-    expect(menu).toContain('ui_opt 15 "自定义快捷键"');
-    expect(menu).toContain('请输入 0-15');
+    expect(menu).toContain('ui_opt 16 "自定义快捷键"');
+    expect(menu).toContain('请输入 0-16');
     // 菜单里能改成字母 / 数字，也能用 - 移除
     expect(menu).toContain('SUBCMD_ARGS="$REPLY"');
     expect(menu).toContain('SUBCMD_ARGS="--remove"');
+  });
+  it('domain 子命令能查看 / 切换域名，且四个 .env 字段一起改', () => {
+    const s = src();
+    expect(s).toMatch(/^cmd_domain\(\) \{/m);
+    // 子命令要能在参数解析里接住后面的子参数
+    expect(s).toContain('shortcut|domain)');
+    expect(s).toContain('domain)   cmd_domain ;;');
+    // 换域名必须同时改这四个字段，漏一个就会出现「半 HTTPS」或登录被踢
+    const fn = s.slice(s.indexOf('domain_apply() {'), s.indexOf('cmd_domain() {'));
+    expect(fn).toContain('env_set SITE_DOMAIN');
+    expect(fn).toContain('env_set SITE_URL');
+    expect(fn).toContain('env_set APP_BIND');
+    expect(fn).toContain('env_set TRUST_PROXY');
+    expect(fn).toContain('COMPOSE_PROFILES');
+    // 文档里承诺的 `upgrade --domain X` 必须真的写 .env
+    const up = s.slice(s.indexOf('cmd_upgrade() {'));
+    expect(up.slice(0, 3000)).toContain('domain_apply "$DOMAIN"');
   });
 });
