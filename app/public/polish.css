@@ -327,7 +327,9 @@ footer {
   .post-card { padding: 18px; gap: 14px; min-height: 0; }
   .post-card h2 { font-size: 19px; }
   .post-card .excerpt { font-size: 14px; -webkit-line-clamp: 3; }
-  .article { font-size: 16px; line-height: 1.95; }
+  /* 字号必须跟随 --reading-scale：这里若写死 16px，手机端点 A−/A/A+
+     会只更新 localStorage 并弹提示，正文看起来完全没变（上游无此覆盖）。 */
+  .article { font-size: calc(16px * var(--reading-scale, 1)); line-height: 1.95; }
   #homeBody { gap: 14px; }
 }
 

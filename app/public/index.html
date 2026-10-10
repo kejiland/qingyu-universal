@@ -168,6 +168,69 @@
   </div>
   <script defer src="boot.min.js?v=2.10.84"></script>
   <script>
+  /* 阅读字号（A− / A / A+）提前生效
+   * ------------------------------------------------------------
+   * SSR 文章页已经渲染出「字号」工具条，但绑定事件的 app.min.js 是延迟加载的
+   * （boot.js 等首次交互或空闲）。手机端用户点 A+ 的那一下正好被用来触发
+   * app.min.js 加载 —— 事件处理器此时还不存在，于是「第一次点没反应」，
+   * 看起来就是字号功能失效。
+   *
+   * 这里用一份极小的早期实现接管：事件委托挂在 document 上；app.min.js
+   * 接管后会重绘整个工具条并自行绑定，两者不会双重生效。
+   * 同时首屏立刻应用已保存的字号，避免 SSR 页面先按 100% 渲染再跳一下。
+   */
+  (function () {
+    var KEY = 'qingyu.readingScale';
+    function get() {
+      var v = 1;
+      try { v = Number(localStorage.getItem(KEY)) || 1; } catch (e) {}
+      if (!(v >= 0.85 && v <= 1.5)) v = 1;
+      return Math.round(v * 100) / 100;
+    }
+    function apply(v) {
+      v = Math.max(0.85, Math.min(1.5, Number(v) || 1));
+      v = Math.round(v * 100) / 100;
+      try { document.documentElement.style.setProperty('--reading-scale', String(v)); } catch (e) {}
+      try { localStorage.setItem(KEY, String(v)); } catch (e) {}
+      return v;
+    }
+    // 首屏立即应用，避免正文先以 100% 渲染再突然变大/变小
+    apply(get());
+
+    function toast(text) {
+      var wrap = document.querySelector('.toast-wrap');
+      if (!wrap) {
+        wrap = document.createElement('div');
+        wrap.className = 'toast-wrap';
+        document.body.appendChild(wrap);
+      }
+      var el = document.createElement('div');
+      el.className = 'toast-item toast-ok';
+      el.textContent = text;
+      wrap.appendChild(el);
+      setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 1600);
+    }
+    function label() {
+      var el = document.querySelector('.rt-label');
+      return el ? String(el.textContent || '').trim() : '字号';
+    }
+    document.addEventListener('click', function (e) {
+      var b = e.target && e.target.closest ? e.target.closest('[data-rs]') : null;
+      if (!b) return;
+      var step = Number(b.getAttribute('data-rs'));
+      if (!step && step !== 0) return;
+      // app.min.js 已接管时交给它自己处理，避免双重生效
+      if (window.__readingScaleBound) return;
+      // 在捕获阶段统一处理并阻断后续监听（含 app.js 绑在按钮上的处理器），
+      // 否则同一次点击会被处理两遍，字号一次连跳两格。
+      e.preventDefault();
+      e.stopPropagation();
+      var v = apply(step === 0 ? 1 : (get() + step * 0.1));
+      toast(label() + ' ' + Math.round(v * 100) + '%');
+    }, true);
+  })();
+  </script>
+  <script>
   /* 外链图挂死看门狗：图床 DNS 失败 / 代理挂死时，浏览器可能十几秒都不报
    * error，load 事件被拖住（实测 12.5s）。对 4 秒内仍没加载完的外链 eager 图
    * 直接移除：渐变占位顶上，load 事件尽快触发。同源图与懒加载图不设看门狗。

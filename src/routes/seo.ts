@@ -33,7 +33,7 @@ import {
   type PostRow,
   type SiteIdentity
 } from '../seo/meta.js';
-import { injectAppContent, renderPostContent } from '../ssr/post.js';
+import { injectAppContent, injectBootstrapData, renderPostContent, toClientPost } from '../ssr/post.js';
 import { HOME_POSTS_SQL, renderHomeContent } from '../ssr/list.js';
 import { weakEtag } from '../etag.js';
 import { readChrome, wrapWithChrome, type ActiveState, type ChromeData } from '../ssr/chrome.js';
@@ -274,7 +274,10 @@ export function createSeoHandlers(deps: SeoDeps): SeoHandlers {
     const withBody = content
       ? injectAppContent(shell, wrapWithChrome(chrome, content, activeOf(c)))
       : shell;
-    const html = injectHead(withBody, meta, renderHeadBlock(meta));
+    // 内联当前文章（含正文）：app.js 接管时直接命中本地数据，
+    // 不再出现「加载中 → 拉列表 → 拉正文 → 整页重渲染」的二次闪动。
+    let html = injectHead(withBody, meta, renderHeadBlock(meta));
+    html = injectBootstrapData(html, [toClientPost(row)]);
     // 已发布正文在未更新前是静态的：允许浏览器/前置代理短期复用，
     // ETag 保证文章一改就立刻回源；动态评论和浏览数仍由 API 单独读取。
     return htmlResponse(c, html, {

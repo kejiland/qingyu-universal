@@ -16,7 +16,7 @@
  * 公开访客生成的内容（评论）不走这条路径，仍由前端渲染。
  * ============================================================ */
 import { marked } from 'marked';
-import { escapeHtml, type PostRow, type SiteIdentity } from '../seo/meta.js';
+import { escapeHtml, escapeJsonForScript, type PostRow, type SiteIdentity } from '../seo/meta.js';
 import { proxyHtmlImgSources } from '../lib/image-url.js';
 import { formatDate } from './format.js';
 
@@ -111,4 +111,65 @@ export function renderPostContent(post: PostRow, _site: SiteIdentity): string | 
     `<article class="article">${body}</article>` +
     '</div></main>'
   );
+}
+/* ============================================================
+ * 首屏数据内联
+ * ------------------------------------------------------------
+ * SSR 只把正文渲染成 HTML，没有把数据交给 app.js。于是 app.js 接管时
+ * 在本地列表里找不到这篇文章：先渲染「加载中」→ 拉全量列表 → 拉正文
+ * → route() 整页重渲染。手机端网络慢，这套二次拉取正是用户看到的
+ * 「进文章后又刷一遍」。
+ *
+ * 这里把文章数据内联成 window.BLOG_POSTS（并标记 _fullLoaded），
+ * 让 app.js 首次 route() 就能直接渲染正文，不再重复拉取。
+ * ============================================================ */
+
+/** 数据库行 → app.js 期望的文章形态（字段与 static-site 的 toClientPost 对齐）。 */
+export function toClientPost(post: PostRow, options: { withContent?: boolean } = {}): Record<string, unknown> {
+  const withContent = options.withContent !== false;
+  const out: Record<string, unknown> = {
+    id: post.id,
+    title: post.title ?? '',
+    date: post.date ?? '',
+    excerpt: post.excerpt ?? '',
+    cover: post.cover ?? '',
+    ogImage: post.og_image ?? '',
+    content: withContent ? (post.content ?? '') : '',
+    pinned: Boolean(post.pinned),
+    protected: Boolean(post.protected),
+    enc: null,
+    category: post.category ?? '',
+    series: post.series ?? '',
+    author: post.author ?? '',
+    seriesOrder: Number(post.series_order) || 0,
+    status: 'published',
+    publishAt: null,
+    seo: parseJsonObject(post.seo),
+    tags: parseTags(post.tags)
+  };
+  // 明文已内联 → app.js 不必再拉一次正文，也就不会「再刷一遍」
+  if (withContent && !post.protected) out._fullLoaded = true;
+  return out;
+}
+
+function parseJsonObject(raw: unknown): Record<string, unknown> {
+  if (typeof raw !== 'string' || !raw.trim()) return {};
+  try {
+    const v = JSON.parse(raw);
+    return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 在 </head> 前插入启动数据。
+ * 用同步内联脚本：它在解析阶段就执行，早于 defer 的 boot.js / app.min.js，
+ * 所以 app.js 启动时 window.BLOG_POSTS 已就绪。
+ */
+export function injectBootstrapData(html: string, posts: Array<Record<string, unknown>>): string {
+  if (!posts.length) return html;
+  const script = '<script>window.BLOG_POSTS=' + escapeJsonForScript(posts) + ';window.__SSR_DATA__=1;</script>';
+  if (html.indexOf('</head>') >= 0) return html.replace('</head>', script + '</head>');
+  return script + html;
 }

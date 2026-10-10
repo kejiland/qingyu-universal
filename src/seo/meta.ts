@@ -150,6 +150,8 @@ export interface PostRow {
   protected?: number | null;
   pinned?: number | null;
   updated_at?: string | null;
+  /** 系列内排序（部分后端无此列，缺省按 0 处理）。 */
+  series_order?: number | null;
 }
 
 interface SeoOverride {

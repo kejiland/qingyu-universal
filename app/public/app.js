@@ -3099,6 +3099,10 @@ async function renderPost(id) {
     // 每次进入都后台重新拉取最新正文（SWR），有更新则刷新缓存并重渲染
     var hasContent = !!post.content;
     var fromCache = false;
+    // 首屏由服务端内联了正文（window.BLOG_POSTS 带 _fullLoaded）：
+    // 内容已经是刚下发的最新版本，再拉一次只会让手机端看到「闪一下」。
+    // 因此这里只在「确实是首屏内联」时跳过，其余（SPA 内部跳转）保持 SWR。
+    var ssrInlined = !!(window.__SSR_DATA__ && post._fullLoaded && hasContent && currentRoute().path.indexOf('/posts/') === 0);
     if (!hasContent) {
       var cachedPost = readPostCache(post.id);
       if (cachedPost && (cachedPost.content || cachedPost.enc)) {
@@ -3146,10 +3150,16 @@ async function renderPost(id) {
       if (changed) route();
       else if (!hasContent && !fromCache && !post.enc && !post.content) renderPostFail(post);
     }
-    apiFetch('api/posts/' + encodeURIComponent(post.id))
-      .then(function (data) { finish(data); })
-      .catch(function (err) { finish(null, err); });
-    setTimeout(function () { finish(null); }, 10000);
+    if (ssrInlined) {
+      // 内容已由 SSR 交付：只补一次本地缓存（下次 SPA 跳转可秒开），不再请求接口
+      post._fullLoaded = true;
+      if (post.content) writePostCache(post.id, post);
+    } else {
+      apiFetch('api/posts/' + encodeURIComponent(post.id))
+        .then(function (data) { finish(data); })
+        .catch(function (err) { finish(null, err); });
+      setTimeout(function () { finish(null); }, 10000);
+    }
     if (!post.content && !post.enc) return;   // 无正文且非加密：等待拉取后重渲染或显示失败页（加密文章无明文也要渲染锁屏）
     // 有内容（缓存或已加载）：继续渲染正文，后台拉取完成后若有更新会重渲染
   }
@@ -3339,6 +3349,9 @@ async function renderPost(id) {
   })();
 
   // 正文字号：就地调整并记忆
+  // 标记为已接管：index.html 的早期实现（SSR 阶段先响应点击）见到此标记即让位，
+  // 避免同一次点击被处理两遍导致字号连跳两格。
+  try { window.__readingScaleBound = true; } catch (e) {}
   var rsWrap = document.querySelector('#readingToolsHost') || document.querySelector('.reading-tools');
   if (rsWrap) {
     rsWrap.querySelectorAll('[data-rs]').forEach(function (b) {
