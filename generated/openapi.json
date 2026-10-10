@@ -152,6 +152,9 @@
           },
           "search": {
             "type": "string"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/PostStatsBrief"
           }
         },
         "required": [
@@ -190,6 +193,26 @@
             "type": "boolean"
           }
         },
+        "additionalProperties": false
+      },
+      "PostStatsBrief": {
+        "type": "object",
+        "properties": {
+          "views": {
+            "type": "number"
+          },
+          "likes": {
+            "type": "number"
+          },
+          "comments": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "views",
+          "likes",
+          "comments"
+        ],
         "additionalProperties": false
       },
       "ErrorResponse": {
@@ -2818,6 +2841,14 @@
           },
           {
             "name": "per",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "stats",
             "in": "query",
             "required": false,
             "schema": {

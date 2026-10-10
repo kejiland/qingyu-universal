@@ -1309,12 +1309,18 @@ export interface components {
             seo: components["schemas"]["Seo"];
             tags: string[];
             search?: string;
+            stats?: components["schemas"]["PostStatsBrief"];
         };
         Seo: {
             title?: string;
             desc?: string;
             canonical?: string;
             noindex?: boolean;
+        };
+        PostStatsBrief: {
+            views: number;
+            likes: number;
+            comments: number;
         };
         /** @description 统一错误响应；上游不返回 ok 字段 */
         ErrorResponse: {
@@ -1949,6 +1955,7 @@ export interface operations {
                 status?: string;
                 page?: string;
                 per?: string;
+                stats?: string;
             };
             header?: never;
             path?: never;
