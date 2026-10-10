@@ -516,6 +516,9 @@ usage() {
       curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh | bash
       （或在本仓库里执行： bash deploy/install.sh）
 
+  默认行为：不提问、不需要任何配置。
+  自动完成「装 Docker → 取代码 → 建库 → 启动」，装完直接给你一个能打开的网址，
+  管理员密码、站名、AI 摘要、邮件、图床等全部进后台「设置」里填即可。
 
   想自动 HTTPS（有域名时）：加 --domain 你的域名
   想换端口：              加 --port 8080

@@ -27,6 +27,15 @@ const canRunBash = (() => {
 })();
 const itBash = canRunBash ? it : it.skip;
 
+// Windows 上的 bash 通常是 WSL 的转发器，只认 POSIX 路径：把 E:\a\b 直接丢给它
+// 会被当成一个叫 "E:Qingyu-vpsdeployinstall.sh" 的文件，而 wslpath 在没装 WSL
+// 的机器上也未必存在。这里改成「在仓库根目录里传相对路径」，两种情况都成立。
+const bashPath = () => {
+  if (process.platform !== 'win32') return script;
+  return 'deploy/install.sh';
+};
+const bashCwd = () => (process.platform === 'win32' ? path.resolve('.') : undefined);
+
 const flagsIn = (text: string) => {
   const out = new Set<string>();
   for (const m of text.matchAll(/--([a-z][a-z0-9-]*)/g)) out.add(m[1]);
@@ -57,7 +66,7 @@ const parseRegion = () => {
 
 describe('deploy/install.sh', () => {
   itBash('语法检查通过（bash -n）', () => {
-    expect(() => execFileSync('bash', ['-n', script], { stdio: 'pipe' })).not.toThrow();
+    expect(() => execFileSync('bash', ['-n', bashPath()], { stdio: 'pipe', cwd: bashCwd() })).not.toThrow();
   });
 
   it('用法里列出的每个长选项都真的被解析', () => {
@@ -142,10 +151,10 @@ describe('deploy/install.sh', () => {
     expect(body).toContain('拿不到远端版本号');
     const dieAt = body.indexOf('拿不到远端版本号');
     const backupAt = body.indexOf('backup_now');
-    const buildAt = body.indexOf('compose up -d --build');
+    const buildAt = body.indexOf('compose_build');
     expect(dieAt, 'cmd_update 里找不到 unknown 分支的错误提示').toBeGreaterThan(-1);
     expect(backupAt, 'cmd_update 里找不到 backup_now').toBeGreaterThan(-1);
-    expect(buildAt, 'cmd_update 里找不到 compose up -d --build').toBeGreaterThan(-1);
+    expect(buildAt, 'cmd_update 里找不到 compose_build').toBeGreaterThan(-1);
     expect(dieAt).toBeLessThan(backupAt);
     expect(dieAt).toBeLessThan(buildAt);
   });
@@ -155,7 +164,7 @@ describe('deploy/install.sh', () => {
     const fn = s.slice(s.indexOf('cmd_update() {'));
     const body = fn.slice(0, fn.indexOf('\n}\n'));
     expect(body.indexOf('backup_now')).toBeLessThan(body.indexOf('update_source'));
-    expect(body.indexOf('update_source')).toBeLessThan(body.indexOf('compose up -d --build'));
+    expect(body.indexOf('update_source')).toBeLessThan(body.indexOf('compose_build'));
   });
 
   it('比较版本的两端都拿得到 SHA 才敢判「已是最新」', () => {
