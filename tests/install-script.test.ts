@@ -250,4 +250,19 @@ it('边框不再用 tr 拼重复字符（非 UTF-8 locale 下会变乱码）', (
     const fn = s.slice(s.indexOf('cmd_install() {'));
     expect(fn).toContain('shortcut_maybe');
   });
+
+  it('运维菜单明示当前快捷键并提供交互式自定义入口', () => {
+    const s = src();
+    expect(s).toMatch(/^shortcut_current_key\(\) \{/m);
+    const start = s.indexOf('maybe_show_menu() {');
+    const menu = s.slice(start, s.indexOf('\n}\n', start));
+    // 当前键必须从 rc 文件实读，不能把默认 k 当成“已安装”
+    expect(menu).toContain('shortcut_key="$(shortcut_current_key)"');
+    expect(menu).toContain('ui_kv "终端快捷键"');
+    expect(menu).toContain('ui_opt 15 "自定义快捷键"');
+    expect(menu).toContain('请输入 0-15');
+    // 菜单里能改成字母 / 数字，也能用 - 移除
+    expect(menu).toContain('SUBCMD_ARGS="$REPLY"');
+    expect(menu).toContain('SUBCMD_ARGS="--remove"');
+  });
 });

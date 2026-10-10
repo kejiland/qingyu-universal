@@ -3612,6 +3612,30 @@ shortcut_rcs() {
   return 0
 }
 
+# 读出当前真正写进 rc 文件的快捷键，菜单要如实展示；
+# 没装 / 被移除时返回空，不拿默认值冒充“已生效”。
+shortcut_current_key() {
+  local rc key
+  while IFS= read -r rc; do
+    [ -f "$rc" ] || continue
+    key="$(awk -v b="$SHORTCUT_MARK_BEGIN" -v e="$SHORTCUT_MARK_END" '
+      $0 == b { block = 1; next }
+      $0 == e { block = 0 }
+      block == 1 && /^alias [a-zA-Z0-9]=/ {
+        key = $1
+        sub(/^alias /, "", key)
+        sub(/=.*/, "", key)
+        print key
+        exit
+      }
+    ' "$rc" 2>/dev/null)"
+    [ -n "$key" ] && { printf '%s' "$key"; return 0; }
+  done <<EOF
+$(shortcut_rcs)
+EOF
+  return 0
+}
+
 cmd_shortcut() {
   # 用法： install.sh shortcut [字母] | shortcut --key 字母 | shortcut --remove
   local remove=0 key="" a
@@ -3714,11 +3738,17 @@ maybe_show_menu() {
   [ "${COMMAND_SET:-0}" = "0" ] || return 0
   [ -f "$INSTALL_DIR/.env" ] || return 0
   can_ask || return 0
-  local site
+  local site shortcut_key
   site="$(env_value SITE_URL 2>/dev/null || true)"
+  shortcut_key="$(shortcut_current_key)"
   {
     ui_banner "运维菜单" "检测到 ${INSTALL_DIR} 已经部署过了"
     [ -n "$site" ] && ui_kv "当前站点" "${C_B}${site}${C_RESET}"
+    if [ -n "$shortcut_key" ]; then
+      ui_kv "终端快捷键" "在终端敲 ${C_B}${shortcut_key}${C_RESET} 直接打开本菜单"
+    else
+      ui_kv "终端快捷键" "尚未设置（可选 15 设置）"
+    fi
     echo
     ui_section "常用"
     ui_opt  1 "更新到最新版" "先查有没有新代码，有才备份 + 重建，数据保留"
@@ -3737,6 +3767,13 @@ maybe_show_menu() {
     ui_opt 12 "定时备份"     "每天自动快照，只保留最近 ${KEEP_N} 份"
     ui_opt 13 "打包迁移"     "打成 tar.gz，方便搬到新服务器"
     ui_opt 14 "卸载"         "删除容器（数据卷保留）"
+    echo
+    ui_section "终端快捷键"
+    if [ -n "$shortcut_key" ]; then
+      ui_opt 15 "自定义快捷键" "当前 ${shortcut_key}；改成字母 / 数字，输入 - 移除"
+    else
+      ui_opt 15 "设置快捷键"   "单个字母 / 数字；输入 - 取消设置"
+    fi
     echo
     ui_opt  0 "退出" ""
     ui_rule
@@ -3758,8 +3795,19 @@ maybe_show_menu() {
     12) COMMAND="autobackup" ;;
     13) COMMAND="migrate" ;;
     14) COMMAND="uninstall" ;;
+    15)
+      # 交互式改键：用户已在菜单里明确选择，忽略这次启动参数里的 --no-shortcut。
+      SHORTCUT_OFF=0
+      # 交互式改键：单个字母 / 数字直接覆盖；“-”表示移除。
+      ask "输入新的快捷键（字母 / 数字，输入 - 移除）" "${shortcut_key:-$SHORTCUT_KEY}"
+      case "$REPLY" in
+        -) COMMAND="shortcut"; SUBCMD_ARGS="--remove" ;;
+        [a-zA-Z0-9]) COMMAND="shortcut"; SUBCMD_ARGS="$REPLY" ;;
+        *) warn "快捷键只能是单个字母或数字，当前是「${REPLY}」"; exit 1 ;;
+      esac
+      ;;
     0)  log "已退出（再次运行本脚本可重新打开菜单）"; exit 0 ;;
-    *)  warn "没看懂这个选择（请输入 0-14），先退出"; exit 1 ;;
+    *)  warn "没看懂这个选择（请输入 0-15），先退出"; exit 1 ;;
   esac
 }
 
