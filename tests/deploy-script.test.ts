@@ -202,3 +202,31 @@ describe('deploy/install.sh（curl | bash 引导脚本）', () => {
     expect(out).toMatch(/下载失败/);
   });
 });
+describe('curl | bash 的 stdin 问题（用户在 Linux 上实测踩到）', () => {
+  itBash('stdin 是脚本文本而非终端时，报可读错误而不是静默退出', () => {
+    // 模拟 curl ... | bash：stdin 立刻 EOF
+    const out = runBash(src(), '');
+    expect(out).toContain('读不到终端');
+    expect(out).toContain('install.sh');
+    // 关键：不能再出现「请选择」直接接「按回车继续」那种静默退出
+    expect(out).not.toMatch(/请选择 \[1\]：[\s\S]{0,40}按回车继续/);
+  });
+
+  itBash('不会偷偷 exec </dev/tty 去抢终端（那会挂死喂输入的用法）', () => {
+    const s = src();
+    expect(s).not.toMatch(/exec\s+0<\/dev\/tty/);
+  });
+
+  itBash('喂数字依然能正常走完菜单并退出', () => {
+    const out = runBash(src(), '0\n');
+    expect(out).toContain('轻语博客 · 部署助手');
+    expect(out).not.toContain('读不到终端');
+  });
+
+  it('引导脚本把真实终端显式交给 qy.sh', () => {
+    const s = readLf(path.resolve('deploy/install.sh'));
+    expect(s).toContain('exec bash "$TARGET" "$@" < /dev/tty');
+    // 没有终端时也要说清楚，而不是让 qy.sh 读到 EOF 静默退出
+    expect(s).toMatch(/当前会话没有可交互的终端/);
+  });
+});

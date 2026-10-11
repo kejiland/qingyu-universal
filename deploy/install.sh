@@ -47,4 +47,21 @@ else
 fi
 
 [ -f "$TARGET" ] || die "没找到 qy.sh，请到 $APP_DIR 检查一下"
+
+# 必须把终端显式接给 qy.sh：
+# curl ... | bash 时，脚本的 stdin 是管道里那份脚本文本，不是你的终端，
+# qy.sh 的 read 会立刻读到 EOF，表现为「请选择」刚打印就自动退出（用户实测踩到过）。
+if [ -r /dev/tty ]; then
+  exec bash "$TARGET" "$@" < /dev/tty
+fi
+
+# 接不到终端（比如放进 systemd/cron 跑）：只允许非交互动作，避免又变成静默退出
+case "${1:-}" in
+  ''|menu|install|update|rollback|backup|restore|domain|clean)
+    printf '\n'
+    die "当前会话没有可交互的终端，数字菜单没法用。
+  请在交互式 SSH 终端里重新执行本命令；
+  若只想跑非交互动作，请改用：bash $TARGET doctor / status / logs"
+    ;;
+esac
 exec bash "$TARGET" "$@"

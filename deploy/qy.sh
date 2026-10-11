@@ -26,10 +26,14 @@ else
 fi
 step() { printf '%s==>%s %s\n' "$C_C" "$C_0" "$*"; }
 ok()   { printf '  %s✓%s %s\n' "$C_G" "$C_0" "$*"; }
-warn() { printf '  %s!%s %s\n' "$C_Y" "$C_0" "$*"; }
-err()  { printf '  %s✗%s %s\n' "$C_R" "$C_0" "$*"; }
+# 注意：warn/err 必须写 stderr。
+# 菜单是在 $(menu_read) 里跑的，命令替换会吞掉 stdout ——
+# 之前 err 写 stdout，结果 die 的报错在子 shell 里凭空消失，
+# 用户只看到「请选择」之后直接退出，完全不知道发生了什么（Linux 上实测踩到）。
+warn() { printf '  %s!%s %s\n' "$C_Y" "$C_0" "$*" >&2; }
+err()  { printf '  %s✗%s %s\n' "$C_R" "$C_0" "$*" >&2; }
 die()  { err "$*"; exit 1; }
-pause() { printf '\n按回车继续...'; read -r _ || exit 0; }
+pause() { printf '\n按回车继续...'; read -r _ || { echo >&2; no_tty_die; }; }
 
 # 问一个问题，带默认值：ask 问题 默认值 变量名
 ask() {
@@ -48,7 +52,7 @@ pick() {
   local ans=""
   while :; do
     printf '请选择 [1]：' >&2
-    read -r ans || ans="1"
+    read -r ans || { echo >&2; no_tty_die; }
     case "$ans" in
       "") ans=1 ;;
       *[!0-9]*) err "请输入数字" >&2; continue ;;
@@ -66,7 +70,7 @@ menu_read() {
   local ans=""
   while :; do
     printf '请选择 [1]：' >&2
-    if ! read -r ans; then echo >&2; exit 0; fi
+    if ! read -r ans; then echo >&2; no_tty_die; fi
     ans="${ans:-1}"
     case "$ans" in
       *[!0-9]*) err "请输入数字" >&2; continue ;;
@@ -74,6 +78,22 @@ menu_read() {
     if [ "$ans" -le 9 ]; then printf '%s' "$ans"; return 0; fi
     err "没有 $ans 这个选项" >&2
   done
+}
+
+# 输入流结束（EOF）时给出可读的错误，而不是静默退出。
+#
+# 背景：curl ... | bash 时 stdin 是脚本本身，不是终端，read 立刻拿到 EOF，
+# 表现就是「请选择」刚打印出来就直接跳到「按回车继续」然后退出（用户实测踩到过）。
+# 引导脚本 deploy/install.sh 已经用 `< /dev/tty` 把真终端接过来了，
+# 所以走到这里说明确实没有交互终端 —— 报清楚怎么改，别让人对着屏幕猜。
+#
+# 注意这里绝不能偷偷 exec </dev/tty 去「抢」终端：那会把
+# `echo 1 | bash deploy/qy.sh` 这种喂输入的用法也一起劫持掉，直接挂死。
+no_tty_die() {
+  die "读不到终端，没法做数字选择。
+  两种解决办法：
+    1) 用一键引导脚本（它会自动接管终端）：curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh | bash
+    2) 已经克隆了仓库就直接跑：bash deploy/qy.sh"
 }
 
 rand() { head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
@@ -442,6 +462,7 @@ EOF
       7) do_domain ;;
       8) do_doctor ;;
       9) do_clean ;;
+      0) echo "再见，数据都留在 $INSTALL_DIR"; exit 0 ;;
     esac
     pause
   done
