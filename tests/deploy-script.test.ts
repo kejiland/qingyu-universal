@@ -230,3 +230,58 @@ describe('curl | bash 的 stdin 问题（用户在 Linux 上实测踩到）', ()
     expect(s).toMatch(/当前会话没有可交互的终端/);
   });
 });
+describe('预构建镜像（GHCR）默认路径', () => {
+  const compose = () => readLf(path.resolve('compose.yaml'));
+  const override = () => readLf(path.resolve('compose.build.yaml'));
+
+  it('compose.yaml 默认用 GHCR 镜像，且不再自带 build 段', () => {
+    const c = compose();
+    expect(c).toContain('ghcr.io/kejiland/qingyu-universal:latest');
+    // build 段挪到覆盖文件里，否则 compose 会优先现场编译，又变回慢路径
+    const app = c.slice(c.indexOf('\n  app:'), c.indexOf('\n  postgres:'));
+    expect(app).not.toContain('build:');
+  });
+
+  it('源码构建能力没丢，挪到了 compose.build.yaml', () => {
+    const o = override();
+    expect(o).toContain('dockerfile: deploy/Dockerfile');
+    expect(o).toMatch(/^\s{4}build:/m);
+  });
+
+  it('安装时是数字选择：预构建镜像 or 源码构建', () => {
+    const body = funcBody(src(), 'do_install');
+    expect(body).toContain('pick "镜像从哪来？"');
+    expect(body).toContain('ghcr.io 上的成品');
+  });
+
+  it('默认走 pull，源码模式才 --build', () => {
+    const body = funcBody(src(), 'up');
+    expect(body).toContain('docker compose pull app');
+    expect(body).toContain('compose.build.yaml up -d --build');
+    expect(body).toMatch(/use_source_build/);
+  });
+
+  it('.env 里记录构建方式，默认 0（预构建）', () => {
+    const body = funcBody(src(), 'write_env');
+    expect(body).toContain('QINGYU_SOURCE_BUILD=$srcbuild');
+    expect(body).toContain('QINGYU_IMAGE=ghcr.io/kejiland/qingyu-universal:latest');
+    // 只有显式选 2 才置 1，其余一律 0
+    const install = funcBody(src(), 'do_install');
+    expect(install).toContain('[ "$srcbuild" = "2" ] || srcbuild=0');
+  });
+
+  it('拉不到镜像时明确报错，并给出改用源码构建的办法', () => {
+    const body = funcBody(src(), 'up');
+    expect(body).toContain('拉取预构建镜像失败');
+    expect(body).toContain('QINGYU_SOURCE_BUILD');
+  });
+
+  it('更新和回滚也走 up()，不再硬编码 --build', () => {
+    const s = src();
+    for (const fn of ['do_update', 'do_rollback', 'do_domain']) {
+      const body = funcBody(s, fn);
+      expect(body).not.toMatch(/docker compose up -d --build/);
+    }
+    expect(funcBody(src(), 'do_update')).toMatch(/^\s+up\s*$/m);
+  });
+});

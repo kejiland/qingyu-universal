@@ -1,7 +1,7 @@
 # ============================================================
 # 轻语博客 · 自托管通用版
 # ------------------------------------------------------------
-# 启动：docker compose up -d --build
+# 启动：docker compose up -d
 # 日志：docker compose logs -f app
 # 停止：docker compose down
 #
@@ -11,15 +11,10 @@ name: qingyu-universal
 
 services:
   app:
-    build:
-      context: .
-      dockerfile: deploy/Dockerfile
-      args:
-        # 由部署脚本解析后注入；取不到则为空
-        BUILD_REVISION: ${BUILD_REVISION:-}
-        # 国内加速（--mirror）时由 .env 提供 npmmirror 源；留空走官方源
-        NPM_REGISTRY: ${NPM_REGISTRY:-}
-    image: ${QINGYU_IMAGE:-qingyu-universal:local}
+    # 默认直接用 GHCR 上 CI 构建好的镜像：拉取约 1~2 分钟，
+    # 在服务器上现场 build 要跑 tsc + vue-tsc，1G 小机器实测 6~10 分钟还容易 OOM。
+    # 需要改代码/自建镜像时用 compose.build.yaml 覆盖（见文件末尾说明）。
+    image: ${QINGYU_IMAGE:-ghcr.io/kejiland/qingyu-universal:latest}
     container_name: qingyu-app
     restart: unless-stopped
     env_file:

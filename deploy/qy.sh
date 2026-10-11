@@ -104,6 +104,29 @@ need_root() { [ "$(id -u)" = "0" ] || die "这一步需要 root，请用 root �
 installed() { [ -f "$ENV_FILE" ]; }
 dc() { ( cd "$INSTALL_DIR" && docker compose "$@" ); }
 
+# 部署方式：预构建镜像（默认，快）还是源码构建（慢，要 1G+ 内存）。
+# 存在 compose.build.yaml 且 .env 里 QINGYU_SOURCE_BUILD=1 时走源码构建。
+use_source_build() { [ "$(read_env QINGYU_SOURCE_BUILD)" = "1" ]; }
+
+# 统一的启动入口：预构建模式先 docker compose pull 拿最新版，
+# 源码模式加 -f compose.build.yaml 并 --build。
+up() {
+  if use_source_build; then
+    ( cd "$INSTALL_DIR" && docker compose -f compose.yaml -f compose.build.yaml up -d --build "$@" )
+  else
+    # 拉不到就明确报错。GHCR 包如果是私有的，或者服务器网络受限，
+    # 这里必须说清楚，不能让 compose 偷偷回退去现场 build（那正是要避免的慢路径）。
+    if ! ( cd "$INSTALL_DIR" && docker compose pull app >&2 ); then
+      echo
+      err "拉取预构建镜像失败"
+      warn "常见原因：GHCR 包是私有的、或服务器访问 ghcr.io 受限"
+      warn "改用源码构建：把 $ENV_FILE 里的 QINGYU_SOURCE_BUILD 改成 1，再重新执行本项"
+      return 1
+    fi
+    ( cd "$INSTALL_DIR" && docker compose up -d "$@" )
+  fi
+}
+
 check_docker() {
   have docker || die "没装 Docker，请先装好 Docker"
   docker info >/dev/null 2>&1 || die "Docker 没在运行，或当前用户没有权限"
@@ -141,7 +164,7 @@ public_ip() {
 
 # ---------- .env ----------
 write_env() {
-  local port="$1" domain="$2" db="$3" dburl="$4"
+  local port="$1" domain="$2" db="$3" dburl="$4" srcbuild="${5:-0}"
   local profiles="" pg_block=""
   case "$db" in
     2) pg_block="POSTGRES_DB=qingyu
@@ -169,6 +192,8 @@ POSTGRES_PASSWORD=$(rand)
 # 轻语博客 · 由 deploy/qy.sh 生成
 # 改完执行：cd $INSTALL_DIR && docker compose up -d
 
+QINGYU_IMAGE=ghcr.io/kejiland/qingyu-universal:latest
+QINGYU_SOURCE_BUILD=$srcbuild
 SITE_URL=$site_url
 SITE_DOMAIN=$domain
 PORT=$port
@@ -229,16 +254,26 @@ do_install() {
     [ -n "$dburl" ] || die "连接串不能为空"
   fi
 
+  local srcbuild
+  srcbuild=$(pick "镜像从哪来？" \
+    "预构建镜像（推荐）：拉 ghcr.io 上的成品，1~2 分钟" \
+    "从源码构建：在服务器上现场编译，要 2G 内存、6~10 分钟")
+  [ "$srcbuild" = "2" ] || srcbuild=0
+
   ensure_dir
   fetch_code
   [ -f "$INSTALL_DIR/compose.yaml" ] || die "没拿到 compose.yaml，请检查网络"
 
-  write_env "$port" "$domain" "$db" "$dburl"
+  write_env "$port" "$domain" "$db" "$dburl" "$srcbuild"
   echo
   warn "先用 IP + 端口 $port 访问。想绑自定义域名和 HTTPS，装完走菜单第 7 项"
 
-  step "构建并启动（第一次要下载依赖，可能几分钟）"
-  ( cd "$INSTALL_DIR" && docker compose up -d --build )
+  if [ "$srcbuild" = "1" ]; then
+    step "从源码构建并启动（要 2G 内存，第一次可能 10 分钟）"
+  else
+    step "拉取预构建镜像并启动"
+  fi
+  up
   wait_healthy || warn "暂时没通过健康检查，可以用菜单第 8 项体检排查"
   print_access
 }
@@ -250,8 +285,8 @@ do_update() {
   step "更新"
   do_backup quiet || warn "备份失败，仍继续（更新本身不动数据）"
   fetch_code
-  step "重建容器"
-  ( cd "$INSTALL_DIR" && docker compose up -d --build )
+  step "更新容器"
+  up
   wait_healthy || warn "健康检查没通过，跑一下菜单第 8 项体检"
   ok "更新完成。出问题用菜单第 3 项回滚"
 }
@@ -267,7 +302,7 @@ do_rollback() {
   [ -n "$target" ] || { ok "已取消"; return 0; }
   do_backup quiet || warn "备份失败，仍继续"
   git -C "$INSTALL_DIR" checkout --quiet "$target"
-  ( cd "$INSTALL_DIR" && docker compose up -d --build )
+  up
   ok "已回滚到 $target（表结构迁移是幂等的，不会回退数据表）"
 }
 
@@ -354,7 +389,7 @@ do_domain() {
       sed -i "s|^APP_BIND=.*|APP_BIND=127.0.0.1:8787|; s|^TRUST_PROXY=.*|TRUST_PROXY=1|" "$ENV_FILE"
       grep -q '^COMPOSE_PROFILES=.*domain' "$ENV_FILE" \
         || sed -i "s|^COMPOSE_PROFILES=.*|COMPOSE_PROFILES=$(read_env COMPOSE_PROFILES) domain|" "$ENV_FILE"
-      ( cd "$INSTALL_DIR" && docker compose --profile domain up -d )
+      up --profile domain
       ok "已切换到 https://$d"
       warn "签证书要求域名已解析到本机、且 80/443 连得通，不行就跑体检"
       ;;
@@ -374,7 +409,7 @@ do_domain() {
       sed -i "s|^SITE_DOMAIN=.*|SITE_DOMAIN=|; s|^SITE_URL=.*|SITE_URL=http://$(public_ip):$port|" "$ENV_FILE"
       sed -i "s|^APP_BIND=.*|APP_BIND=0.0.0.0:$port|; s|^TRUST_PROXY=.*|TRUST_PROXY=0|" "$ENV_FILE"
       sed -i "s|^COMPOSE_PROFILES=.*|COMPOSE_PROFILES=|" "$ENV_FILE"
-      ( cd "$INSTALL_DIR" && docker compose up -d )
+      up
       ok "已改回 IP+端口：http://$(public_ip):$port"
       ;;
     3) return 0 ;;

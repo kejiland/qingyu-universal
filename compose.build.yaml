@@ -1,0 +1,22 @@
+# ============================================================
+# 源码构建覆盖文件（可选）
+# ------------------------------------------------------------
+# 默认部署走 GHCR 预构建镜像（compose.yaml 里已经配好），不用这个文件。
+# 只有下面这些情况才需要现场 build：
+#   · 你改了代码，想在自己的服务器上先验证
+#   · GHCR 拉不动（网络受限），且服务器内存够（建议 ≥2G，现场 build 峰值吃 1G+）
+#
+# 用法：
+#   docker compose -f compose.yaml -f compose.build.yaml up -d --build
+# 部署脚本里选「从源码构建」时会自动加上 -f compose.build.yaml。
+# ============================================================
+services:
+  app:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+      args:
+        # 由部署脚本解析后注入；取不到则为空
+        BUILD_REVISION: ${BUILD_REVISION:-}
+        # 国内加速（--mirror）时由 .env 提供 npmmirror 源；留空走官方源
+        NPM_REGISTRY: ${NPM_REGISTRY:-}

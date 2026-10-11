@@ -79,10 +79,18 @@ cp .env.example .env
 并填好 `POSTGRES_*`；要接云数据库则设 `DATABASE_URL`。详见
 [docs/POSTGRES.md](docs/POSTGRES.md)。
 
-**2. 构建并启动**
+**2. 启动**
+
+默认拉 CI 预构建好的镜像（快）：
 
 ```bash
-docker compose up -d --build
+docker compose up -d
+```
+
+要改代码、现场编译（慢，建议 ≥2G 内存）：
+
+```bash
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
 ```
 
 **3. 确认起来了**
@@ -114,7 +122,7 @@ docker compose down              # 停止（数据保留）
 docker compose exec app node dist/cli/backup.js /data/backups
 ```
 
-**更新**：`git pull && docker compose up -d --build`。
+**更新**：`docker compose pull app && docker compose up -d`（源码构建模式才需要先 `git pull`）。
 升级前建议先备份；出问题了用 `git log` 找到上一个提交再 `git revert`。
 
 **回滚表结构**：迁移是幂等的，回退代码后已执行的迁移不会重复跑。
