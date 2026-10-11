@@ -290,7 +290,7 @@ describe('已安装检测与卸载', () => {
 
   it('主菜单里有第 10 项卸载，且读数上限放宽到 10', () => {
     expect(funcBody(qy(), 'menu')).toContain('10) do_uninstall');
-    expect(funcBody(qy(), 'menu_read')).toContain('-le 10');
+    expect(funcBody(qy(), 'menu_read')).toContain('-le 11');
   });
 
   it('菜单顶部会显示是否已安装', () => {
@@ -468,5 +468,33 @@ describe('更换域名', () => {
     expect(body).toContain('沿用当前端口');
     // 端口仍然要校验
     expect(body).toContain('端口必须是数字');
+  });
+});
+
+describe('快捷键（回到主菜单）', () => {
+  const qy = () => src();
+  it('默认快捷键是 k，且大小写都认', () => {
+    expect(qy()).toContain('HOTKEY_DEFAULT="k"');
+    expect(funcBody(qy(), 'is_hotkey')).toContain('${ans,,}');
+  });
+
+  it('pause 提示里带上快捷键，按下就 exec 重启脚本回到菜单', () => {
+    const body = funcBody(qy(), 'pause');
+    expect(body).toContain('按回车继续');
+    expect(body).toContain('回到主菜单');
+    expect(body).toContain('exec bash "$QY_SCRIPT" menu');
+  });
+
+  it('快捷键可自定义，配置写进 .qyrc 而不是 .env', () => {
+    expect(qy()).toContain('RC_FILE=');
+    expect(funcBody(qy(), 'save_hotkey')).toContain('> "$RC_FILE"');
+    expect(funcBody(qy(), 'save_hotkey')).not.toContain('.env');
+    expect(qy()).toContain('11) 设置快捷键');
+    expect(qy()).toContain('hotkey|key) do_keyset');
+  });
+
+  it('运行时会读取 .qyrc 里的自定义键', () => {
+    expect(funcBody(qy(), 'load_rc')).toContain('. "$RC_FILE"');
+    expect(funcBody(qy(), 'main')).toContain('load_rc');
   });
 });

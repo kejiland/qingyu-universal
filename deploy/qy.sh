@@ -17,6 +17,11 @@ REPO="kejiland/qingyu-universal"
 BRANCH="main"
 INSTALL_DIR="${QINGYU_DIR:-/opt/qingyu-universal}"
 ENV_FILE="$INSTALL_DIR/.env"
+# 快捷键配置单独放 .qyrc，不混进 .env（.env 是给 compose 用的）
+RC_FILE="${QINGYU_RC:-$INSTALL_DIR/.qyrc}"
+HOTKEY_DEFAULT="k"
+# 记住脚本自己的路径：按快捷键重启时要用 exec bash "$QY_SCRIPT"
+QY_SCRIPT="$0"
 
 # ---------- 显示 ----------
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -33,7 +38,20 @@ ok()   { printf '  %s✓%s %s\n' "$C_G" "$C_0" "$*"; }
 warn() { printf '  %s!%s %s\n' "$C_Y" "$C_0" "$*" >&2; }
 err()  { printf '  %s✗%s %s\n' "$C_R" "$C_0" "$*" >&2; }
 die()  { err "$*"; exit 1; }
-pause() { printf '\n按回车继续...'; read -r _ || { echo >&2; no_tty_die; }; }
+# 回车 = 继续往下走；按快捷键（默认 k/K）= 直接重启脚本、回到主菜单。
+# 用 exec bash "$0" 重启而不是函数递归，是为了让用户感觉「重新开了一次」，
+# 菜单重新画一遍，之前选的分支状态全部清空，也不会越嵌越深。
+pause() {
+  local k ans=""
+  k="$(hotkey)"
+  printf '\n按回车继续，按 %s 回到主菜单：' "$k"
+  if ! read -r ans; then echo >&2; return 0; fi
+  if is_hotkey "$ans"; then
+    step "重新启动 $QY_SCRIPT"
+    # --menu 是必须的：子命令模式（比如 install）重启后也要回到数字菜单
+    exec bash "$QY_SCRIPT" menu
+  fi
+}
 
 # 问一个问题，带默认值：ask 问题 默认值 变量名
 ask() {
@@ -75,7 +93,7 @@ menu_read() {
     case "$ans" in
       *[!0-9]*) err "请输入数字" >&2; continue ;;
     esac
-    if [ "$ans" -le 10 ]; then printf '%s' "$ans"; return 0; fi
+    if [ "$ans" -le 11 ]; then printf '%s' "$ans"; return 0; fi
     err "没有 $ans 这个选项" >&2
   done
 }
@@ -94,6 +112,22 @@ no_tty_die() {
   两种解决办法：
     1) 用一键引导脚本（它会自动接管终端）：curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh | bash
     2) 已经克隆了仓库就直接跑：bash deploy/qy.sh"
+}
+
+# ---------- 快捷键 ----------
+# 优先级：.qyrc 里保存的键 > 环境变量 QINGYU_KEY > 默认 k
+# 大小写都认：按 K 和按 k 效果一样。
+load_rc() { [ -f "$RC_FILE" ] && . "$RC_FILE" || true; }
+hotkey() {
+  local k="${QINGYU_KEY:-$HOTKEY_DEFAULT}"
+  [ -n "$k" ] || k="$HOTKEY_DEFAULT"
+  printf '%s' "$k"
+}
+is_hotkey() {
+  local ans="$1" k
+  [ -n "$ans" ] || return 1
+  k="$(hotkey)"
+  [ "${ans,,}" = "${k,,}" ]
 }
 
 rand() { head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
@@ -627,6 +661,38 @@ do_uninstall() {
   esac
 }
 
+# ---------- 设置快捷键 ----------
+# 快捷键存在 .qyrc 里，不写进 .env —— .env 是给 docker compose 读的。
+save_hotkey() {
+  local k="$1"
+  mkdir -p "$(dirname "$RC_FILE")"
+  printf '# 轻语博客部署助手 · 本地配置（删掉就回到默认 k）\nQINGYU_KEY=%s\n' "$k" > "$RC_FILE"
+  QINGYU_KEY="$k"
+}
+
+do_keyset() {
+  echo "  快捷键：每做完一步，按一下就直接重启脚本、回到主菜单"
+  echo "  当前快捷键：$(hotkey)（大小写都行）"
+  echo
+  local c k=""
+  c=$(pick "换成哪个键？" \
+    "k（默认，域名与 HTTPS）" \
+    "d（域名 domain）" \
+    "h（https）" \
+    "q（quit 的 q，这里用来快速进域名）" \
+    "回到默认 k" \
+    "取消")
+  case "$c" in
+    1|5) k="k" ;;
+    2) k="d" ;;
+    3) k="h" ;;
+    4) k="q" ;;
+    6) ok "没改，还是 $(hotkey)" ; return 0 ;;
+  esac
+  save_hotkey "$k"
+  ok "快捷键已改成 $k（大写 $k 也一样）"
+}
+
 # ---------- 入口 ----------
 usage() {
   cat <<'EOF'
@@ -648,6 +714,7 @@ usage() {
   doctor     体检（网站打不开先跑这个）
   clean      清理 Docker 缓存
   uninstall  卸载（可选保留数据，或连数据一起删）
+  hotkey     设置快捷键（默认 k，直接进域名菜单）
 EOF
 }
 
@@ -668,7 +735,10 @@ menu() {
   8) 体检         网站打不开、传不了图，先跑这个
   9) 清理磁盘     清 Docker 缓存（不碰数据）
   10) 卸载/重装   删程序，或连数据一起删
+  11) 设置快捷键   换快捷键（当前：$(hotkey)）
   0) 退出
+
+  提示：每步结束后按 $(hotkey) 就能直接回到这个主菜单
 
 EOF
   if installed; then
@@ -687,6 +757,7 @@ EOF
       8) do_doctor ;;
       9) do_clean ;;
       10) do_uninstall ;;
+      11) do_keyset ;;
       0) echo "再见，数据都留在 $INSTALL_DIR"; exit 0 ;;
     esac
     pause
@@ -694,8 +765,9 @@ EOF
 }
 
 main() {
+  load_rc
   case "${1:-}" in
-    "") menu ;;
+    ""|menu) menu ;;
     install) do_install ;;
     update) do_update ;;
     rollback) do_rollback ;;
@@ -710,6 +782,7 @@ main() {
     doctor) do_doctor ;;
     clean) do_clean ;;
     uninstall|remove) do_uninstall ;;
+    hotkey|key) do_keyset ;;
     -h|--help|help) usage ;;
     *) usage; die "不认识「$1」这个命令" ;;
   esac
