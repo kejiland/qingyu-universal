@@ -403,70 +403,148 @@ do_status() {
 }
 
 # ---------- 7. 域名与 HTTPS ----------
-do_domain() {
-  installed || die "还没安装过"
-  local c; c=$(pick "域名与 HTTPS" "设置主域名（自动签 HTTPS 证书）" "解除域名（改回 IP+端口）" "返回")
-  case "$c" in
-    1)
-      local d=""
-      ask "域名（例如 blog.example.com）" "" d
-      [ -n "$d" ] || { err "域名不能为空"; return 1; }
-      # 用户经常连协议和路径一起粘进来，这里统一洗成裸域名
-      d="${d#*://}"       # 去掉 https://
-      d="${d%%/*}"        # 去掉 /path
-      d="${d%%:*}"        # 去掉 :8080
-      d="${d%.}"          # 去掉结尾的点
-      case "$d" in
-        *.*) ;;
-        *) err "「$d」看起来不像域名（少了点号），比如 blog.example.com"; return 1 ;;
-      esac
-      need_root
-      sed -i "s|^SITE_DOMAIN=.*|SITE_DOMAIN=$d|; s|^SITE_URL=.*|SITE_URL=https://$d|" "$ENV_FILE"
-      sed -i "s|^APP_BIND=.*|APP_BIND=127.0.0.1:8787|; s|^TRUST_PROXY=.*|TRUST_PROXY=1|" "$ENV_FILE"
-      grep -q '^COMPOSE_PROFILES=.*domain' "$ENV_FILE" \
-        || sed -i "s|^COMPOSE_PROFILES=.*|COMPOSE_PROFILES=$(read_env COMPOSE_PROFILES) domain|" "$ENV_FILE"
-      step "启动应用和 Caddy，Caddy 会自动向 Let's Encrypt 申请证书"
-      up domain || { err "启动失败"; return 1; }
-      ok "已切换到 https://$d"
-      echo
-      warn "证书签发要 10~60 秒。如果一直转圈或报错，先看这几条："
-      echo "  1) 域名要先解析到本机：dig $d 要看到本机公网 IP"
-      echo "  2) 服务器 80 和 443 端口不能被 Nginx/宝塔之类占用"
-      echo
-      warn "域名托管在 Cloudflare 的话，签证书期间先把 DNS 记录切成「仅 DNS」（灰云）"
-      warn "证书签好之后可以再打开小云朵（橙云）；SSL/TLS 模式选「完全」即可，"
-      warn "「完全（严格）」要求源站证书有效，签发前会报 525。"
-      echo
-      warn "想看实时日志：菜单第 5 项 → 日志；还是打不开就跑菜单第 8 项体检"
-      ;;
-    2)
-      need_root
-      local pc port
-      pc=$(pick "改用哪个端口？" "8080" "8787（默认）" "3000" "其他（手动输入）")
-      case "$pc" in
-        1) port=8080 ;;
-        2) port=8787 ;;
-        3) port=3000 ;;
-        4) ask "端口号" "8080" port ;;
-      esac
-      case "$port" in
-        ''|*[!0-9]*) err "端口必须是数字"; return 1 ;;
-      esac
-      sed -i "s|^SITE_DOMAIN=.*|SITE_DOMAIN=|; s|^SITE_URL=.*|SITE_URL=http://$(public_ip):$port|" "$ENV_FILE"
-      sed -i "s|^APP_BIND=.*|APP_BIND=0.0.0.0:$port|; s|^TRUST_PROXY=.*|TRUST_PROXY=0|" "$ENV_FILE"
-      sed -i "s|^COMPOSE_PROFILES=.*|COMPOSE_PROFILES=|" "$ENV_FILE"
-      # 必须先停 Caddy：它还占着 80/443，而且会拿着旧证书继续应答
-      step "停掉 Caddy（它占着 80/443）"
-      dc --profile domain stop caddy 2>/dev/null \
-        || dc --profile domain rm -f caddy 2>/dev/null \
-        || warn "没找到 Caddy 容器，跳过"
-      up
-      ok "已改回 IP+端口：http://$(public_ip):$port"
-      ;;
-    3) return 0 ;;
-  esac
+# 把用户随手粘进来的东西洗成裸域名：
+# https://blog.example.com/  →  blog.example.com
+normalize_domain() {
+  local d="$1"
+  d="${d#*://}"   # 去掉 https://
+  d="${d%%/*}"    # 去掉 /path
+  d="${d%%:*}"    # 去掉 :8080
+  d="${d%.}"      # 去掉结尾的点
+  d="${d,,}"      # 域名统一小写
+  printf '%s' "$d"
 }
 
+# mode = first（首次设置）| change（更换已有域名）
+set_domain() {
+  local mode="$1"
+  local old; old="$(read_env SITE_DOMAIN)"
+
+  if [ "$mode" = "change" ]; then
+    if [ -z "$old" ]; then
+      warn "现在还没配域名，直接走「设置主域名」就行"
+      return 0
+    fi
+    echo "  当前域名：$old"
+    echo
+  fi
+
+  local d=""
+  ask "新域名（例如 blog.example.com）" "$old" d
+  d="$(normalize_domain "$d")"
+  [ -n "$d" ] || { err "域名不能为空"; return 1; }
+  case "$d" in
+    *.*) ;;
+    *) err "「$d」看起来不像域名（少了点号），比如 blog.example.com"; return 1 ;;
+  esac
+
+  if [ "$mode" = "change" ] && [ "$d" = "$old" ]; then
+    ok "和现在的域名一样，不用改"
+    return 0
+  fi
+  need_root
+  # 更换 = 先把旧域名解除掉（停 Caddy、清掉 SITE_DOMAIN），再配新的。
+  # 不这么做的话，旧证书和旧域名会继续留在 Caddy 里，新域名签证书时容易出岔子。
+  if [ "$mode" = "change" ]; then
+    warn "接下来会先解除 $old，再配置 $d"
+    warn "过程中网站会短暂打不开，属正常"
+    echo
+    unset_domain internal
+    echo
+  fi
+  sed -i "s|^SITE_DOMAIN=.*|SITE_DOMAIN=$d|; s|^SITE_URL=.*|SITE_URL=https://$d|" "$ENV_FILE"
+  sed -i "s|^APP_BIND=.*|APP_BIND=127.0.0.1:8787|; s|^TRUST_PROXY=.*|TRUST_PROXY=1|" "$ENV_FILE"
+  grep -q '^COMPOSE_PROFILES=.*domain' "$ENV_FILE" \
+    || sed -i "s|^COMPOSE_PROFILES=.*|COMPOSE_PROFILES=$(read_env COMPOSE_PROFILES) domain|" "$ENV_FILE"
+
+  step "启动应用和 Caddy，Caddy 会自动向 Let's Encrypt 申请证书"
+  up domain || { err "启动失败"; return 1; }
+  ok "已切换到 https://$d"
+  echo
+  if [ "$mode" = "change" ]; then
+    echo "  接下来要你自己确认的两件事："
+    echo "  · 把新域名的 DNS 记录（灰云或橙云都行）指向本机公网 IP"
+    echo "  · 旧域名如果还在用，删掉它的 DNS 记录，否则 CF 那边的老缓存还会打过来"
+    echo
+  fi
+  warn "证书签发要 10~60 秒。如果一直转圈或报错，先看这几条："
+  echo "  1) 域名要先解析到本机：dig $d 要看到本机公网 IP"
+  echo "  2) 服务器 80 和 443 端口不能被 Nginx/宝塔之类占用"
+  echo
+  warn "域名托管在 Cloudflare 的话，签证书期间先把 DNS 记录切成「仅 DNS」（灰云）"
+  warn "证书签好之后可以再打开小云朵（橙云）；SSL/TLS 模式选「完全」即可，"
+  warn "「完全（严格）」要求源站证书有效，签发前会报 525。"
+  echo
+  warn "想看实时日志：菜单第 5 项 → 日志；还是打不开就跑菜单第 8 项体检"
+}
+
+do_domain() {
+  installed || die "还没安装过"
+  local cur; cur="$(read_env SITE_DOMAIN)"
+  if [ -n "$cur" ]; then
+    echo "  当前域名：https://$cur"
+  else
+    echo "  当前：没有域名，用 IP + 端口访问"
+  fi
+  echo
+
+  local c
+  if [ -n "$cur" ]; then
+    c=$(pick "域名与 HTTPS" \
+      "更换主域名（换成新域名，自动重新签证书）" \
+      "解除域名（改回 IP+端口）" \
+      "返回")
+    case "$c" in
+      1) set_domain change ;;
+      2) unset_domain ;;
+      3) return 0 ;;
+    esac
+  else
+    c=$(pick "域名与 HTTPS" \
+      "设置主域名（自动签 HTTPS 证书）" \
+      "返回")
+    case "$c" in
+      1) set_domain first ;;
+      2) return 0 ;;
+    esac
+  fi
+}
+
+# ---------- 解除域名 ----------
+# internal = 由更换域名流程内部调用，沿用当前端口，不再问一次
+unset_domain() {
+  need_root
+  local mode="${1:-}" port=""
+  if [ "$mode" = "internal" ]; then
+    # APP_BIND 形如 0.0.0.0:8080，取冒号后面那段
+    port="$(read_env APP_BIND)"
+    port="${port##*:}"
+    [ -n "$port" ] || port=8787
+    ok "沿用当前端口 $port"
+  else
+    local pc
+    pc=$(pick "改用哪个端口？" "8080" "8787（默认）" "3000" "其他（手动输入）")
+    case "$pc" in
+      1) port=8080 ;;
+      2) port=8787 ;;
+      3) port=3000 ;;
+      4) ask "端口号" "8080" port ;;
+    esac
+  fi
+  case "$port" in
+    ''|*[!0-9]*) err "端口必须是数字"; return 1 ;;
+  esac
+  sed -i "s|^SITE_DOMAIN=.*|SITE_DOMAIN=|; s|^SITE_URL=.*|SITE_URL=http://$(public_ip):$port|" "$ENV_FILE"
+  sed -i "s|^APP_BIND=.*|APP_BIND=0.0.0.0:$port|; s|^TRUST_PROXY=.*|TRUST_PROXY=0|" "$ENV_FILE"
+  sed -i "s|^COMPOSE_PROFILES=.*|COMPOSE_PROFILES=|" "$ENV_FILE"
+  # 必须先停 Caddy：它还占着 80/443，而且会拿着旧证书继续应答
+  step "停掉 Caddy（它占着 80/443）"
+  dc --profile domain stop caddy 2>/dev/null \
+    || dc --profile domain rm -f caddy 2>/dev/null \
+    || warn "没找到 Caddy 容器，跳过"
+  up
+  ok "已改回 IP+端口：http://$(public_ip):$port"
+}
 # ---------- 8. 体检 ----------
 do_doctor() {
   echo "  项目体检"

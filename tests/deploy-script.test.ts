@@ -165,7 +165,7 @@ describe('deploy/qy.sh', () => {
   });
 
   it('解除域名的端口也是数字选择，且校验非法端口', () => {
-    const body = funcBody(src(), 'do_domain');
+    const body = funcBody(src(), 'unset_domain');
     expect(body).toMatch(/pick "改用哪个端口？"/);
     expect(body).toMatch(/端口必须是数字/);
   });
@@ -353,7 +353,7 @@ describe('--profile 必须放在子命令前面（用户实测踩到 unknown fla
   });
 
   it('do_domain 用 up domain 传 profile，而不是把 --profile 塞进 up()', () => {
-    const body = funcBody(src(), 'do_domain');
+    const body = funcBody(src(), 'set_domain');
     expect(body).toContain('up domain');
     // --profile 只能出现在子命令前面（如 `dc --profile domain stop caddy`），
     // 绝不能跟在 up 后面
@@ -361,20 +361,112 @@ describe('--profile 必须放在子命令前面（用户实测踩到 unknown fla
   });
 
   it('解除域名会先停掉 Caddy，否则它一直占着 80/443', () => {
-    const body = funcBody(src(), 'do_domain');
-    const branches = body.slice(body.indexOf('\n    2)'));
+    const body = funcBody(src(), 'unset_domain');
+    const branches = body;
     expect(branches).toContain('stop caddy');
     // 停 Caddy 必须发生在重新 up 之前
-    expect(branches.indexOf('stop caddy')).toBeLessThan(branches.lastIndexOf('\n      up'));
+    expect(branches.indexOf('stop caddy')).toBeLessThan(branches.lastIndexOf('\n  up'));
   });
 
   it('域名输入会洗成裸域名并校验点号', () => {
-    const body = funcBody(src(), 'do_domain');
-    expect(body).toContain('${d#*://}');
+    const body = funcBody(src(), 'set_domain');
+    expect(body).toContain('normalize_domain');
     expect(body).toContain('看起来不像域名');
   });
 
   it('给出 Cloudflare 的具体提示（先灰云签证书，SSL 模式选完全）', () => {
-    expect(funcBody(src(), 'do_domain')).toContain('仅 DNS');
+    expect(funcBody(src(), 'set_domain')).toContain('仅 DNS');
+  });
+});
+describe('更换域名', () => {
+  const qy = () => src();
+
+  it('菜单按当前状态给不同选项：有域名才出现「更换」', () => {
+    const body = funcBody(qy(), 'do_domain');
+    // 两条分支各自的 pick
+    const branches = body.split('c=$(pick "域名与 HTTPS"');
+    expect(branches.length).toBe(3); // 头部 + 有域名 + 没域名
+    expect(branches[1]).toContain('更换主域名');
+    expect(branches[1]).toContain('set_domain change');
+    expect(branches[1]).not.toContain('设置主域名（自动签');
+    expect(branches[2]).toContain('设置主域名（自动签');
+    expect(branches[2]).not.toContain('更换主域名');
+  });
+
+  it('菜单顶部先报当前域名状态', () => {
+    const body = funcBody(qy(), 'do_domain');
+    expect(body).toContain('read_env SITE_DOMAIN');
+    expect(body).toContain('没有域名，用 IP + 端口访问');
+  });
+
+  it('set_domain 支持 first 和 change 两种模式', () => {
+    const body = funcBody(qy(), 'set_domain');
+    expect(body).toContain('mode="$1"');
+    expect(body).toContain('[ "$mode" = "change" ]');
+    // 更换时会明确告知旧域名要作废、期间会短暂中断
+    expect(body).toContain('先解除');
+    expect(body).toContain('短暂打不开');
+  });
+
+  it('没配域名时误选「更换」会引导去设置，而不是报错', () => {
+    const body = funcBody(qy(), 'set_domain');
+    expect(body).toMatch(/if \[ -z "\$old" \][\s\S]{0,200}直接走「设置主域名」/);
+  });
+
+  it('新域名和当前一样时直接说不用改，不重启容器', () => {
+    const body = funcBody(qy(), 'set_domain');
+    expect(body).toMatch(/\[ "\$d" = "\$old" \][\s\S]{0,120}不用改/);
+    expect(body.indexOf('不用改')).toBeLessThan(body.indexOf('need_root'));
+  });
+
+  it('输入框默认填当前域名，回车即保持不变', () => {
+    const body = funcBody(qy(), 'set_domain');
+    expect(body).toContain('ask "新域名（例如 blog.example.com）" "$old" d');
+  });
+
+  it('域名清洗独立成函数：去协议、去路径、去端口、去尾点、转小写', () => {
+    const body = funcBody(qy(), 'normalize_domain');
+    expect(body).toContain('${d#*://}');
+    expect(body).toContain('${d%%/*}');
+    expect(body).toContain('${d%%:*}');
+    expect(body).toContain('${d%.}');
+    expect(body).toContain('${d,,}');
+    // set_domain 必须走这个函数，不能各自洗一遍
+    expect(funcBody(qy(), 'set_domain')).toContain('normalize_domain "$d"');
+  });
+
+  it('解除域名是独立函数，且仍在停止 Caddy 之后才重启', () => {
+    const body = funcBody(qy(), 'unset_domain');
+    expect(body).toContain('stop caddy');
+    expect(body.indexOf('stop caddy')).toBeLessThan(body.lastIndexOf('\n  up'));
+    // 注意：函数名 unset_domain 本身就含子串 set_domain，只能查具体调用
+    expect(body).not.toMatch(/set_domain (first|change)/);
+  });
+
+  it('两条路径都不会把 --profile 放到子命令后面', () => {
+    for (const fn of ['set_domain', 'unset_domain']) {
+      expect(funcBody(qy(), fn)).not.toMatch(/up[^\n]*--profile/);
+    }
+    expect(funcBody(qy(), 'set_domain')).toContain('up domain');
+  });
+
+  it('更换域名 = 先解除旧域名，再配置新域名', () => {
+    const body = funcBody(qy(), 'set_domain');
+    const unsetAt = body.indexOf('unset_domain internal');
+    const setAt = body.indexOf('SITE_DOMAIN=$d');
+    expect(unsetAt).toBeGreaterThan(-1);
+    // 顺序不能反：先解除，再写入新域名
+    expect(unsetAt).toBeLessThan(setAt);
+    // 且新域名和旧域名相同时不该白折腾一场
+    expect(body.indexOf('不用改')).toBeLessThan(unsetAt);
+  });
+
+  it('内部调用解除域名时沿用当前端口，不重新问用户', () => {
+    const body = funcBody(qy(), 'unset_domain');
+    expect(body).toContain('[ "$mode" = "internal" ]');
+    expect(body).toContain('read_env APP_BIND');
+    expect(body).toContain('沿用当前端口');
+    // 端口仍然要校验
+    expect(body).toContain('端口必须是数字');
   });
 });
