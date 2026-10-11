@@ -108,22 +108,33 @@ dc() { ( cd "$INSTALL_DIR" && docker compose "$@" ); }
 # 存在 compose.build.yaml 且 .env 里 QINGYU_SOURCE_BUILD=1 时走源码构建。
 use_source_build() { [ "$(read_env QINGYU_SOURCE_BUILD)" = "1" ]; }
 
-# 统一的启动入口：预构建模式先 docker compose pull 拿最新版，
-# 源码模式加 -f compose.build.yaml 并 --build。
+# 统一的启动入口。
+#   up            普通启动
+#   up domain     顺带启动 Caddy（自动 HTTPS）
+#   up postgres   顺带启动内置 PostgreSQL
+#
+# 注意：--profile 必须放在子命令**前面**。
+# 之前写成 `up -d --profile domain`，compose 直接报 unknown flag: --profile，
+# 结果 Caddy 没起来，访问域名只看到 "Web server is down"（用户实测踩到）。
 up() {
+  local profs="${1:-}"
+  [ "$#" -gt 0 ] && shift || true
+  local prof=() p
+  for p in $profs; do prof+=(--profile "$p"); done
+
   if use_source_build; then
-    ( cd "$INSTALL_DIR" && docker compose -f compose.yaml -f compose.build.yaml up -d --build "$@" )
+    ( cd "$INSTALL_DIR" && docker compose "${prof[@]}" -f compose.yaml -f compose.build.yaml up -d --build "$@" )
   else
     # 拉不到就明确报错。GHCR 包如果是私有的，或者服务器网络受限，
     # 这里必须说清楚，不能让 compose 偷偷回退去现场 build（那正是要避免的慢路径）。
-    if ! ( cd "$INSTALL_DIR" && docker compose pull app >&2 ); then
+    if ! ( cd "$INSTALL_DIR" && docker compose "${prof[@]}" pull app >&2 ); then
       echo
       err "拉取预构建镜像失败"
       warn "常见原因：GHCR 包是私有的、或服务器访问 ghcr.io 受限"
       warn "改用源码构建：把 $ENV_FILE 里的 QINGYU_SOURCE_BUILD 改成 1，再重新执行本项"
       return 1
     fi
-    ( cd "$INSTALL_DIR" && docker compose up -d "$@" )
+    ( cd "$INSTALL_DIR" && docker compose "${prof[@]}" up -d "$@" )
   fi
 }
 
@@ -400,14 +411,33 @@ do_domain() {
       local d=""
       ask "域名（例如 blog.example.com）" "" d
       [ -n "$d" ] || { err "域名不能为空"; return 1; }
+      # 用户经常连协议和路径一起粘进来，这里统一洗成裸域名
+      d="${d#*://}"       # 去掉 https://
+      d="${d%%/*}"        # 去掉 /path
+      d="${d%%:*}"        # 去掉 :8080
+      d="${d%.}"          # 去掉结尾的点
+      case "$d" in
+        *.*) ;;
+        *) err "「$d」看起来不像域名（少了点号），比如 blog.example.com"; return 1 ;;
+      esac
       need_root
       sed -i "s|^SITE_DOMAIN=.*|SITE_DOMAIN=$d|; s|^SITE_URL=.*|SITE_URL=https://$d|" "$ENV_FILE"
       sed -i "s|^APP_BIND=.*|APP_BIND=127.0.0.1:8787|; s|^TRUST_PROXY=.*|TRUST_PROXY=1|" "$ENV_FILE"
       grep -q '^COMPOSE_PROFILES=.*domain' "$ENV_FILE" \
         || sed -i "s|^COMPOSE_PROFILES=.*|COMPOSE_PROFILES=$(read_env COMPOSE_PROFILES) domain|" "$ENV_FILE"
-      up --profile domain
+      step "启动应用和 Caddy，Caddy 会自动向 Let's Encrypt 申请证书"
+      up domain || { err "启动失败"; return 1; }
       ok "已切换到 https://$d"
-      warn "签证书要求域名已解析到本机、且 80/443 连得通，不行就跑体检"
+      echo
+      warn "证书签发要 10~60 秒。如果一直转圈或报错，先看这几条："
+      echo "  1) 域名要先解析到本机：dig $d 要看到本机公网 IP"
+      echo "  2) 服务器 80 和 443 端口不能被 Nginx/宝塔之类占用"
+      echo
+      warn "域名托管在 Cloudflare 的话，签证书期间先把 DNS 记录切成「仅 DNS」（灰云）"
+      warn "证书签好之后可以再打开小云朵（橙云）；SSL/TLS 模式选「完全」即可，"
+      warn "「完全（严格）」要求源站证书有效，签发前会报 525。"
+      echo
+      warn "想看实时日志：菜单第 5 项 → 日志；还是打不开就跑菜单第 8 项体检"
       ;;
     2)
       need_root
@@ -425,6 +455,11 @@ do_domain() {
       sed -i "s|^SITE_DOMAIN=.*|SITE_DOMAIN=|; s|^SITE_URL=.*|SITE_URL=http://$(public_ip):$port|" "$ENV_FILE"
       sed -i "s|^APP_BIND=.*|APP_BIND=0.0.0.0:$port|; s|^TRUST_PROXY=.*|TRUST_PROXY=0|" "$ENV_FILE"
       sed -i "s|^COMPOSE_PROFILES=.*|COMPOSE_PROFILES=|" "$ENV_FILE"
+      # 必须先停 Caddy：它还占着 80/443，而且会拿着旧证书继续应答
+      step "停掉 Caddy（它占着 80/443）"
+      dc --profile domain stop caddy 2>/dev/null \
+        || dc --profile domain rm -f caddy 2>/dev/null \
+        || warn "没找到 Caddy 容器，跳过"
       up
       ok "已改回 IP+端口：http://$(public_ip):$port"
       ;;

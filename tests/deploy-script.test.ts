@@ -256,7 +256,7 @@ describe('预构建镜像（GHCR）默认路径', () => {
 
   it('默认走 pull，源码模式才 --build', () => {
     const body = funcBody(src(), 'up');
-    expect(body).toContain('docker compose pull app');
+    expect(body).toMatch(/docker compose .*pull app/);
     expect(body).toContain('compose.build.yaml up -d --build');
     expect(body).toMatch(/use_source_build/);
   });
@@ -341,5 +341,40 @@ describe('已安装检测与卸载', () => {
 
   it('uninstall 也能当子命令直接跑', () => {
     expect(funcBody(qy(), 'main')).toContain('uninstall|remove) do_uninstall');
+  });
+});
+describe('--profile 必须放在子命令前面（用户实测踩到 unknown flag）', () => {
+  it('up() 把 profile 展开到 docker compose 的子命令之前', () => {
+    const body = funcBody(src(), 'up');
+    // 形如 docker compose "${prof[@]}" ... up -d，不能是 up -d --profile x
+    expect(body).toMatch(/docker compose "\$\{prof\[@\]\}"[^\n]*\bup -d/);
+    expect(body).not.toMatch(/up -d --profile/);
+    expect(body).not.toMatch(/up -d "\$\{@\}".*--profile/);
+  });
+
+  it('do_domain 用 up domain 传 profile，而不是把 --profile 塞进 up()', () => {
+    const body = funcBody(src(), 'do_domain');
+    expect(body).toContain('up domain');
+    // --profile 只能出现在子命令前面（如 `dc --profile domain stop caddy`），
+    // 绝不能跟在 up 后面
+    expect(body).not.toMatch(/up[^\n]*--profile/);
+  });
+
+  it('解除域名会先停掉 Caddy，否则它一直占着 80/443', () => {
+    const body = funcBody(src(), 'do_domain');
+    const branches = body.slice(body.indexOf('\n    2)'));
+    expect(branches).toContain('stop caddy');
+    // 停 Caddy 必须发生在重新 up 之前
+    expect(branches.indexOf('stop caddy')).toBeLessThan(branches.lastIndexOf('\n      up'));
+  });
+
+  it('域名输入会洗成裸域名并校验点号', () => {
+    const body = funcBody(src(), 'do_domain');
+    expect(body).toContain('${d#*://}');
+    expect(body).toContain('看起来不像域名');
+  });
+
+  it('给出 Cloudflare 的具体提示（先灰云签证书，SSL 模式选完全）', () => {
+    expect(funcBody(src(), 'do_domain')).toContain('仅 DNS');
   });
 });
