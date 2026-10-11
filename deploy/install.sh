@@ -116,10 +116,13 @@ if [ ! -d "$_qy_lib" ]; then
   # 兼容 curl ... | bash 的用法：脚本本身没有旁边的 lib/，先取一份完整仓库再继续。
   echo "未找到模块目录，正在获取完整部署包……" >&2
   _qy_tmp="$(mktemp -d)" || { echo "无法创建临时目录" >&2; exit 1; }
-  if command -v git >/dev/null 2>&1; then
-    git clone --depth 1 "${QINGYU_REPO:-kejiland/qingyu-universal}" "$_qy_tmp/repo" >&2
-  else
-    echo "需要 git 才能通过管道方式安装；也可以先下载仓库再运行 deploy/install.sh" >&2
+  # REPO 是 "owner/name" 形式（用于拼 https://github.com/$REPO/...），
+  # git clone 必须给完整地址，少了前缀会被当成本地路径。
+  _qy_url="https://github.com/${QINGYU_REPO:-${REPO:-kejiland/qingyu-universal}}.git"
+  if ! git clone --depth 1 "$_qy_url" "$_qy_tmp/repo" >&2; then
+    echo "获取部署包失败：$_qy_url" >&2
+    echo "可以先手动 clone 仓库，再运行仓库里的 deploy/install.sh；国内网络建议加 --mirror" >&2
+    rm -rf "$_qy_tmp"
     exit 1
   fi
   exec bash "$_qy_tmp/repo/deploy/install.sh" "$@"
@@ -129,7 +132,7 @@ for _qy_m in common.sh detect.sh docker.sh config.sh security.sh source.sh acces
   # 列表里写的就是完整文件名（含 .sh），这里不要再拼一次后缀
   . "$_qy_lib/$_qy_m"
 done
-unset _qy_self _qy_dir _qy_lib _qy_m _qy_tmp
+unset _qy_self _qy_dir _qy_lib _qy_m _qy_tmp _qy_url
 
 # ---------- 以下为入口逻辑（参数解析、执行入口） ----------
 if ui_utf8; then

@@ -131,6 +131,26 @@ describe('deploy/install.sh', () => {
     expect(runBash(script2)).toContain('LOADED_OK');
   });
 
+  it('管道安装的兜底克隆用的是完整仓库地址', () => {
+    // 出过一次真实故障：curl ... | bash 时把 REPO（"owner/name" 形式）直接
+    // 当成 clone 地址传过去，报 "repository does not exist"。
+    // $REPO 是拿来拼 https://github.com/$REPO/... 的，clone 必须要完整 .git 地址。
+    const s = readLf(script);
+    // 地址可能写成字面量，也可能先拼进变量再传给 git，两种都认
+    const urls = s.match(/https:\/\/[^\s"']+/g) ?? [];
+    expect(urls.length, '兜底克隆没有使用 https:// 地址').toBeGreaterThan(-1);
+    expect(
+      urls.some((u) => /github\.com\/[^\s"']+\.git$/.test(u)),
+      '克隆地址必须是完整的 https://github.com/owner/name.git，$REPO 单独传会被当成本地路径',
+    ).toBe(true);
+    expect(/\bgit clone\b[^\n]*/.test(s), 'install.sh 里找不到克隆仓库的命令').toBe(true);
+    // 克隆失败要报错退出，否则会带着空目录继续 exec，报错信息完全看不懂
+    const i = s.indexOf('git clone');
+    const tail = s.slice(i, i + 400);
+    expect(tail, '克隆失败没有退出，后面的 exec 会带着空目录跑').toMatch(/if\s*!\s*git clone|git clone[^\n]*\|\|[^\n]*exit/);
+    expect(tail).toContain('exit 1');
+  });
+
   itBash('每个模块都能被单独 source（不依赖别的模块先载入）', () => {
     for (const f of libFiles()) {
       expect(runBash(`set -euo pipefail; . "deploy/lib/${f}"; echo OK_${f}`)).toContain(`OK_${f}`);
