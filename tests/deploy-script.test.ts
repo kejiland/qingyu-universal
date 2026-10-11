@@ -1,0 +1,172 @@
+import { execFileSync, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+/**
+ * 部署助手（deploy/qy.sh）的护栏测试。
+ *
+ * 这是纯 bash 的交互脚本，最容易坏的不是语法而是交互本身 ——
+ * 出过两次只有真跑才暴露的 bug：主菜单用错校验函数导致死循环，
+ * 以及提示语被 $(...) 命令替换吞掉，用户既看不到提问也看不到纠错。
+ * 下面的用例都是把脚本真的跑一遍。
+ */
+const script = path.resolve('deploy/qy.sh');
+const readLf = (f: string) => fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n');
+const src = () => readLf(script);
+
+// 取出某个函数体：从函数起点往后找第一个顶格 } 作为结尾。
+// 写成 s.slice(s.indexOf(f), s.indexOf('\n}')) 会踩坑 —— 那个 indexOf
+// 命中的是前面某个函数的结尾，切出来是空串，测试会莫名其妙地失败。
+const funcBody = (s: string, name: string) => {
+  const i = s.indexOf(`\n${name}() {`);
+  expect(i, `找不到 ${name}`).toBeGreaterThan(-1);
+  const j = s.indexOf('\n}', i);
+  expect(j, `${name} 没有正常结束`).toBeGreaterThan(i);
+  return s.slice(i, j);
+};
+
+const canRunBash = (() => {
+  try {
+    execFileSync('bash', ['--version'], { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+const itBash = canRunBash ? it : it.skip;
+
+const bashCwd = () => (process.platform === 'win32' ? path.resolve('.') : undefined);
+
+// 多行脚本用 bash -c 在这台机器上会被 WSL 转发层搞坏，写成文件再执行
+const runBash = (body: string, input?: string) => {
+  const rel = `.qy-test-${process.pid}-${Math.random().toString(36).slice(2)}.sh`;
+  fs.writeFileSync(path.resolve(rel), body.replace(/\r\n/g, '\n'), 'utf8');
+  try {
+    const r = spawnSync('bash', [rel], { cwd: bashCwd(), input, encoding: 'utf8' });
+    return `${r.stdout ?? ''}${r.stderr ?? ''}`;
+  } finally {
+    fs.rmSync(path.resolve(rel), { force: true });
+  }
+};
+
+// 拿一个「确定没装过」的目录，避免碰到真实部署
+const FRESH = '/tmp/qy-not-installed';
+
+describe('deploy/qy.sh', () => {
+  itBash('语法检查通过（bash -n）', () => {
+    expect(() => execFileSync('bash', ['-n', 'deploy/qy.sh'], { stdio: 'pipe', cwd: bashCwd() })).not.toThrow();
+  });
+
+  itBash('管道喂完输入会退出，不会无限刷屏', () => {
+    // 出过一次死循环：主菜单按「选项个数」校验，传不了选项的菜单永远不合法，
+    // 输入流结束后又默认选中 1，于是反复重画菜单。
+    const out = runBash('QINGYU_DIR=/tmp/qy-not-installed bash deploy/qy.sh', '0\n');
+    expect(out).not.toContain('timeout');
+    // 只应出现一次菜单标题
+    expect(out.match(/轻语博客 · 部署助手/g)?.length ?? 0).toBeLessThanOrEqual(1);
+  });
+
+  itBash('提问和纠错提示要打到 stderr，不能被 $(...) 吞掉', () => {
+    // pick / menu_read 都在 $(...) 里调用，提示走 stdout 就等于没提示
+    const out = runBash('QINGYU_DIR=/tmp/qy-not-installed bash deploy/qy.sh', 'abc\n99\n0\n');
+    expect(out, '看不到「请选择」提示').toContain('请选择');
+    expect(out, '输入非数字没有提示').toContain('请输入数字');
+    expect(out, '选了不存在的编号没有提示').toContain('没有 99 这个选项');
+  });
+
+  itBash('非法输入会被拦住并重问', () => {
+    const out = runBash('QINGYU_DIR=/tmp/qy-not-installed bash deploy/qy.sh', 'abc\n\n0\n');
+    expect(out).toContain('请输入数字');
+    // 空输入走默认（1 = 安装），至少不该把非法输入当成有效选择
+    expect(out).not.toContain('没有 abc 这个选项');
+  });
+
+  itBash('没装过就执行安装类命令，会友好报错而不是崩', () => {
+    const out = runBash('QINGYU_DIR=/tmp/qy-not-installed bash deploy/qy.sh status');
+    expect(out).toContain('还没安装过');
+  });
+
+  itBash('--help 列出所有子命令', () => {
+    const out = runBash('bash deploy/qy.sh --help');
+    for (const c of ['install', 'update', 'rollback', 'backup', 'restore', 'doctor', 'clean']) {
+      expect(out, `帮助里缺少 ${c}`).toContain(c);
+    }
+  });
+
+  itBash('不认识的命令会报错', () => {
+    const out = runBash('bash deploy/qy.sh no-such-command');
+    expect(out).toContain('不认识');
+  });
+
+  it('菜单是纯数字选择，没有要用户记的命令', () => {
+    const s = src();
+    const menu = funcBody(s, 'menu');
+    // 九个功能 + 退出，全部是 1)-9) / 0)
+    for (let i = 0; i <= 9; i++) {
+      expect(menu, `菜单里没有 ${i} 这一项`).toMatch(new RegExp(`^\\s+${i}\\)`, 'm'));
+    }
+    expect(menu).not.toContain('deploy/install.sh');
+  });
+
+  it('清理只删悬空镜像和构建缓存，绝不碰数据卷', () => {
+    const s = src();
+    const body = funcBody(s, 'do_clean');
+    // docker system prune -a --volumes 会删掉具名镜像和数据卷
+    expect(body).not.toMatch(/system\s+prune/);
+    expect(body).not.toMatch(/--volumes/);
+    expect(body).not.toMatch(/volume\s+(rm|prune)/);
+    expect(body).toContain('docker image prune -f --filter "dangling=true"');
+    expect(body).toContain('docker builder prune -f');
+    // 删之前要让用户知道会删什么
+    expect(body).toContain('不会碰数据库、备份和上传的文件');
+  });
+
+  it('无域名直连时必须关掉 TRUST_PROXY', () => {
+    // 直连暴露时若还信 X-Forwarded-For，客户端能伪造 IP 绕过登录锁定和频控
+    const body = funcBody(src(), 'write_env');
+    const branches = /if \[ -n "\$domain" \]; then([\s\S]*?)else([\s\S]*?)\n  fi/.exec(body);
+    expect(branches, 'write_env 里找不到「有域名 / 无域名」两个分支').not.toBeNull();
+    expect(branches![1], '有域名时（走反代）应该信任 X-Forwarded-For').toContain('trust=1');
+    expect(branches![2], '无域名直连暴露时必须 trust=0').toContain('trust=0');
+  });
+
+  it('更新前一定先备份', () => {
+    const s = src();
+    const body = funcBody(s, 'do_update');
+    const iBackup = body.indexOf('do_backup');
+    const iFetch = body.indexOf('fetch_code');
+    expect(iBackup, '更新前没有先备份').toBeGreaterThan(-1);
+    expect(iBackup, '备份必须发生在拉代码之前').toBeLessThan(iFetch);
+  });
+
+  it('回滚前也先备份', () => {
+    const s = src();
+    const body = funcBody(s, 'do_rollback');
+    expect(body.indexOf('do_backup')).toBeLessThan(body.indexOf('checkout'));
+  });
+
+  it('每个菜单项都接到了实际动作，没有空分支', () => {
+    const s = src();
+    const menu = s.slice(s.indexOf('menu() {'), s.indexOf('\nmain()'));
+    const dispatch = menu.slice(menu.indexOf('local c;'));
+    for (let i = 1; i <= 9; i++) {
+      const m = new RegExp(`^\\s+${i}\\)\\s+do_\\w+`, 'm').exec(dispatch);
+      expect(m, `菜单第 ${i} 项没有接到 do_xxx 动作`).not.toBeNull();
+    }
+  });
+  it('安装不再问域名和端口，只留数据库的数字选择', () => {
+    const body = funcBody(src(), 'do_install');
+    expect(body).not.toMatch(/ask\s+"域名/);
+    expect(body).not.toMatch(/ask\s+"想用哪个端口/);
+    expect(body).toContain('菜单第 7 项');
+    // 端口固定为默认 8787，域名留空
+    expect(body).toContain('local domain="" port=8787');
+  });
+
+  it('解除域名的端口也是数字选择，且校验非法端口', () => {
+    const body = funcBody(src(), 'do_domain');
+    expect(body).toMatch(/pick "改用哪个端口？"/);
+    expect(body).toMatch(/端口必须是数字/);
+  });
+});
