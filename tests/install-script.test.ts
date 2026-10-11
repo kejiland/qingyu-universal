@@ -415,6 +415,28 @@ it('边框不再用 tr 拼重复字符（非 UTF-8 locale 下会变乱码）', (
       expect(fn, `少了 ${unit} 的换算`).toContain(unit);
     }
   });
+  const s = src();
+  // 用户不该被要求记路径或敲子命令：全局 qingyu 命令必须随安装就位，
+  // 且任何目录（含 ~）敲 qingyu 都能打开数字菜单。
+  it('安装后提供全局 qingyu 命令入口', () => {
+    expect(s).toContain('GLOBAL_LINK_DIRS="/usr/local/bin /usr/bin"');
+    expect(s).toContain('global_link_write() {');
+    expect(s).toContain('global_link_remove() {');
+    expect(s).toContain('exec bash "%s" "$@"');
+    // 删除时靠标记识别，避免误删同名文件
+    expect(s).toContain("grep -q 'qingyu-universal'");
+    // 非 root 安静跳过，绝不让安装因装不上入口而失败
+    expect(s).toContain('global_link_maybe() {');
+    expect(s).toContain('[ "$(id -u)" = "0" ] || return 0');
+  });
+
+  it('菜单与提示只让用户选数字，不教长命令', () => {
+    expect(s).toContain('直接输入数字即可，全程不用敲命令');
+    expect(s).toContain('敲 qingyu 打开菜单 → 选 14');
+    expect(s).not.toContain('换成域名 + 自动 HTTPS：./deploy/install.sh domain set');
+    // 菜单每次打开都顺手补装一次入口，忘了也能自愈
+    expect(s).toContain('[ "$(id -u)" = "0" ] && global_link_maybe');
+  });
 });
 
 // 抽出 tune_* 函数体的范围（tune 的写操作都在这些辅助函数里）

@@ -2958,7 +2958,7 @@ domain_status() {
 
   if [ -z "$domain" ]; then
     echo
-    ui_hint "换成域名 + 自动 HTTPS：./deploy/install.sh domain set  （不带域名会交互提问）"
+    ui_hint "换成域名 + 自动 HTTPS：敲 qingyu 打开菜单 → 选 14（改域名），按提示填域名即可"
     return 0
   fi
 
@@ -2967,7 +2967,7 @@ domain_status() {
   resolved="$(domain_resolved_ips "$domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
   if [ -z "$resolved" ]; then
     ui_warn "解析不到 ${domain}"
-    ui_hint "到 DNS 控制台加一条 A 记录指向本机公网 IP；解析生效后重跑本命令"
+    ui_hint "到 DNS 控制台加一条 A 记录指向本机公网 IP；解析生效后再敲 qingyu → 3 复查"
   elif domain_points_here "$domain"; then
     ui_ok "${domain} → ${resolved}（已指向本机）"
   else
@@ -3238,7 +3238,7 @@ domain_set() {
     ok=0
   fi
   if [ "$ok" -eq 0 ]; then
-    ui_hint "以上问题不影响配置写入；补好之后重跑本命令即可签发证书"
+    ui_hint "以上问题不影响配置写入；DNS 补好后敲 qingyu → 14 再走一遍即可签发证书"
     if ! can_ask || [ "$ASSUME_YES" != "1" ]; then
       step_end
       warn "前提条件未满足，仍会继续写入配置（可加 -y 跳过此提示）"
@@ -3287,7 +3287,7 @@ domain_set() {
   if domain_https_ok "$d"; then
     ui_ok "https://${d} 已可访问（HTTPS 证书已签发）"
   elif [ -z "$resolved" ]; then
-    ui_warn "域名还没解析到本机，证书暂时签不了 —— 解析生效后重跑：./deploy/install.sh domain set ${d}"
+    ui_warn "域名还没解析到本机，证书暂时签不了 —— DNS 生效后敲 qingyu → 14 再走一遍即可"
   else
     ui_warn "HTTPS 还没通，常见原因：80/443 被占或 DNS 尚未生效"
     ui_hint "查看详情：./deploy/install.sh doctor"
@@ -4845,6 +4845,7 @@ cmd_shortcut() {
 $(shortcut_rcs)
 EOF
     log "已移除快捷键（清理了 $n 个配置文件）；当前终端里执行 hash -r 即可生效"
+    global_link_remove 2>/dev/null && log "已移除全局命令：$(global_link_path 2>/dev/null || echo qingyu)"
     return 0
   fi
 
@@ -4873,6 +4874,12 @@ EOF
   fi
   ok "快捷键已设置：以后在终端里敲 ${SHORTCUT_KEY} 就能打开运维菜单"
   ui_hint "已写入 $n 个配置文件（当前终端立即可用： source ~/.bashrc）"
+  if global_link_maybe && [ -n "$(global_link_path 2>/dev/null)" ]; then
+    ok "全局命令已就绪：任何目录直接敲 qingyu 回车即可打开菜单"
+    ui_hint "当前终端若不认这个命令，执行一次： hash -r"
+  else
+    ui_hint "全局命令没装上（需要 root 且 /usr/local/bin 可写），仍可用快捷键 ${SHORTCUT_KEY}"
+  fi
   ui_hint "想换别的键： $target shortcut x    不想用了： $target shortcut --remove"
 }
 
@@ -4914,6 +4921,64 @@ cmd_uninstall() {
 }
 
 # ----------------------------------------------------------
+# 全局入口：装一个 qingyu 命令到 PATH 里。
+# 目的：用户在任何目录（包括 ~ ）直接敲 qingyu 就能打开数字菜单，
+# 不用记安装路径、不用先 cd、不用敲 ./deploy/install.sh。
+# 用独立的小脚本而不是软链接：软链接在部分精简系统上会被
+# 「按脚本真实路径找安装目录」的逻辑坑到，写死绝对路径最稳。
+# ----------------------------------------------------------
+GLOBAL_LINK_DIRS="/usr/local/bin /usr/bin"
+
+# 挑一个可写的 PATH 目录
+global_link_dir() {
+  local d
+  for d in $GLOBAL_LINK_DIRS; do
+    if [ -d "$d" ] && [ -w "$d" ]; then printf '%s' "$d"; return 0; fi
+  done
+  return 1
+}
+
+global_link_path() {
+  local d
+  d="$(global_link_dir)" || return 1
+  printf '%s/qingyu' "$d"
+}
+
+# 入口脚本里带一行本项目的标记，删除时据此判断，避免误删同名文件
+global_link_write() {
+  local path tmp target
+  path="$(global_link_path)" || return 1
+  target="$(shortcut_target)"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/qy-link.XXXXXX")" || return 1
+  {
+    printf '#!/bin/sh\n'
+    printf '# qingyu-universal 运维菜单入口（由 deploy/install.sh 自动生成，可直接删）\n'
+    printf 'exec bash "%s" "$@"\n' "$target"
+  } > "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+  cat "$tmp" > "$path" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+  rm -f "$tmp" 2>/dev/null
+  chmod 0755 "$path" 2>/dev/null || true
+  return 0
+}
+
+global_link_remove() {
+  local d p removed=0
+  for d in $GLOBAL_LINK_DIRS; do
+    p="$d/qingyu"
+    [ -f "$p" ] || continue
+    grep -q 'qingyu-universal' "$p" 2>/dev/null || continue
+    rm -f "$p" 2>/dev/null && removed=1
+  done
+  [ "$removed" = "1" ]
+}
+
+# 装入口（非 root 或目录不可写时安静跳过，绝不因此让安装失败）
+global_link_maybe() {
+  [ "$(id -u)" = "0" ] || return 0
+  global_link_write 2>/dev/null || return 0
+  return 0
+}
+# ----------------------------------------------------------
 # 傻瓜式：已经部署过、又没写具体子命令时，弹一个数字菜单
 # 只在「交互终端 + 没加 -y + 目录里已有 .env」时出现，
 # 所以 CI、管道（curl|bash）、脚本互调都不会被它卡住。
@@ -4922,11 +4987,14 @@ maybe_show_menu() {
   [ "${COMMAND_SET:-0}" = "0" ] || return 0
   [ -f "$INSTALL_DIR/.env" ] || return 0
   can_ask || return 0
+  # 自愈：菜单每次打开都顺手确认一次全局 qingyu 命令在不在。
+  # 这样「我不记得命令怎么敲」的人只要能打开菜单，敲 qingyu 就永远可用。
+  [ "$(id -u)" = "0" ] && global_link_maybe
   local site shortcut_key
   site="$(env_value SITE_URL 2>/dev/null || true)"
   shortcut_key="$(shortcut_current_key)"
   {
-    ui_banner "运维菜单" "检测到 ${INSTALL_DIR} 已经部署过了"
+    ui_banner "运维菜单" "直接输入数字即可，全程不用敲命令"
     [ -n "$site" ] && ui_kv "当前站点" "${C_B}${site}${C_RESET}"
     if [ -n "$shortcut_key" ]; then
       ui_kv "终端快捷键" "在终端敲 ${C_B}${shortcut_key}${C_RESET} 直接打开本菜单"
