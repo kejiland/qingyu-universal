@@ -1019,7 +1019,8 @@ src/
   cli/                  migrate / seed / health / backup / restore / smoke
 tests/                  vitest 单元测试
 scripts/                 上游适配补丁 / 前端分包与压缩构建工具（.mjs）
-deploy/                 Dockerfile / Caddyfile / install.sh / install.ps1
+deploy/                 一键部署（install.sh + lib/ 模块）、Dockerfile / Caddyfile / install.ps1
+                        详见 [deploy/README.md](deploy/README.md)
 admin/                  新版后台（Vue + Vite + Tailwind）
 compose.yaml            app + Caddy 编排
 data/                   运行时数据（不入库）：qingyu.db、uploads/、backups/
@@ -1203,6 +1204,17 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
     比较的两端都拿到 SHA 才敢判「已是最新」、check-update 不装 git；
     另在 Linux 容器实测 9 条分支（含压缩包安装 / Atom feed 兜底 / 短 SHA 判等）
     与真实 GitHub 仓库冒烟
+- [x] **一键脚本模块化**：`deploy/install.sh` 从 5201 行 / 200 个函数按职责拆成
+  15 个模块（`deploy/lib/*.sh`），入口只留全局变量、模块载入、参数解析和分发。
+  功能与行为**未做任何改变**，拆分的目的是让改一处不用通读全文件、出问题能单独测。
+  - 用能识别 heredoc 的解析器切分，逐字节验证 15 个模块按序拼回等于原文件、
+    200 个函数一个不少（`daemon.json` 里的 `}` 会骗过朴素正则，是切分的关键）
+  - 新增护栏：每模块单独 `bash -n`、模块是否都被载入、真执行一遍载入循环、
+    每个模块能被单独 source、模块内不允许顶层代码；CI 同步覆盖
+  - **`curl | bash` 兼容**：管道里只有单个文件没有 `lib/`，入口会自动 clone
+    完整仓库再转执行，参数原样透传
+  - 顺带修两个真 bug：载入循环拼出 `common.sh.sh`（`bash -n` 查不出，只有执行才暴露）；
+    兜底克隆把 `$REPO`（`owner/name` 形式）直接当地址传，导致管道安装 100% 失败
 - [x] **v0.3** 路径级契约覆盖完成（60 条路径；兼容接口响应字段将逐步收紧）
 - [x] **v0.3.1-a** Redis / Valkey 可选限流（配置 `REDIS_URL` 即启用）
 - [x] **v0.3.1-b** PostgreSQL 运行时适配（配置 `DATABASE_URL` 即切换）
