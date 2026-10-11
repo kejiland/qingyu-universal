@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -14,8 +15,14 @@ import { describe, expect, it } from 'vitest';
  * 其余断言全部基于源码文本，任何平台都稳定可跑。
  */
 const script = path.resolve('deploy/install.sh');
+const libDir = path.resolve('deploy/lib');
+// 部署脚本已按职责拆成 install.sh（入口）+ lib/*.sh（函数）。
+// 这里按「先入口、后模块」拼成一份源码再断言，这样某个函数落在哪个文件都不影响护栏语义。
+const libFiles = () => fs.readdirSync(libDir).filter((f) => f.endsWith('.sh')).sort();
 // 工作树里可能是 CRLF（core.autocrlf），统一成 LF 再匹配，免得断言被换行符干扰
-const src = () => fs.readFileSync(script, 'utf8').replace(/\r\n/g, '\n');
+const readLf = (f: string) => fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n');
+const src = () =>
+  [script, ...libFiles().map((f) => path.join(libDir, f))].map(readLf).join('\n');
 
 const canRunBash = (() => {
   try {
@@ -35,6 +42,19 @@ const bashPath = () => {
   return 'deploy/install.sh';
 };
 const bashCwd = () => (process.platform === 'win32' ? path.resolve('.') : undefined);
+
+// Windows 上的 bash 是 WSL 转发器：既会把多行脚本塞进 bash -c 搞坏（实测报
+// ".: /: is a directory"），也不认 C:\... 这种绝对路径。所以多行脚本写成
+// 临时文件、放在仓库里、用相对路径执行 —— 两种环境都成立。
+const runBash = (body: string) => {
+  const rel = `.qy-test-${process.pid}-${Math.random().toString(36).slice(2)}.sh`;
+  fs.writeFileSync(path.resolve(rel), body.replace(/\r\n/g, '\n'), 'utf8');
+  try {
+    return execFileSync('bash', [rel], { stdio: 'pipe', cwd: bashCwd() }).toString();
+  } finally {
+    fs.rmSync(path.resolve(rel), { force: true });
+  }
+};
 
 const flagsIn = (text: string) => {
   const out = new Set<string>();
@@ -65,8 +85,114 @@ const parseRegion = () => {
 };
 
 describe('deploy/install.sh', () => {
-  itBash('语法检查通过（bash -n）', () => {
+  itBash('入口语法检查通过（bash -n）', () => {
     expect(() => execFileSync('bash', ['-n', bashPath()], { stdio: 'pipe', cwd: bashCwd() })).not.toThrow();
+  });
+
+  itBash('每个 lib 模块语法检查通过（bash -n）', () => {
+    for (const f of libFiles()) {
+      // Windows 上要用正斜杠：WSL 的 bash 转发器不认 "deploy\\lib\\x.sh"
+      const rel = `deploy/lib/${f}`;
+      expect(
+        () => execFileSync('bash', ['-n', rel], { stdio: 'pipe', cwd: bashCwd() }),
+        `${rel} 语法有问题`,
+      ).not.toThrow();
+    }
+  });
+
+  it('每个 lib 模块都被 install.sh 载入了', () => {
+    const loader = readLf(script);
+    const missing = libFiles().filter((f) => !loader.includes(f));
+    expect(missing, `这些模块没有被载入：${missing.join(', ')}`).toEqual([]);
+  });
+
+  itBash('入口里的载入循环真的能跑通（防止模块名拼错）', () => {
+    // 出过 .sh.sh 这类错误：列表里已经带后缀，拼接时又加了一次。
+    // bash -n 查不出来，只有真的执行一遍才会暴露。
+    const loop = /for _qy_m in ([^;]+); do([\s\S]*?)\ndone/.exec(src());
+    expect(loop, 'install.sh 里找不到载入模块的 for 循环').not.toBeNull();
+    const names = loop![1].trim().split(/\s+/);
+    const body = loop![2]
+      .split('\n')
+      .map((l) => l.replace(/^\s*#.*$/, '').trimEnd())
+      .filter(Boolean)
+      .join('\n');
+
+    expect([...names].sort(), '载入列表与 deploy/lib 下的文件对不上').toEqual(libFiles());
+
+    const script2 = [
+      'set -euo pipefail',
+      '_qy_lib=deploy/lib',
+      `for _qy_m in ${names.join(' ')}; do`,
+      body,
+      'done',
+      'echo LOADED_OK',
+    ].join('\n');
+    expect(runBash(script2)).toContain('LOADED_OK');
+  });
+
+  itBash('每个模块都能被单独 source（不依赖别的模块先载入）', () => {
+    for (const f of libFiles()) {
+      expect(runBash(`set -euo pipefail; . "deploy/lib/${f}"; echo OK_${f}`)).toContain(`OK_${f}`);
+    }
+  });
+
+  it('lib 模块里没有残留可执行顶层代码（只放函数定义）', () => {
+    // 模块是被 source 进主脚本的。顶层若还有赋值或流程控制，
+    // 执行顺序就会随着「拆到哪个文件」而变 —— 肉眼极难发现，所以钉死。
+    // 扫描方式和生成模块时一致：跳过 heredoc 正文，识别单行函数定义。
+    const fnDef = /^([A-Za-z_][A-Za-z0-9_]*)\(\)\s*\{(.*)$/;
+    const heredoc = /<<-?\s*(?:'([A-Za-z_][A-Za-z0-9_]*)'|"([A-Za-z_][A-Za-z0-9_]*)"|([A-Za-z_][A-Za-z0-9_]*))\s*$/;
+
+    const offenders: string[] = [];
+    for (const f of libFiles()) {
+      const lines = readLf(path.join(libDir, f)).split('\n');
+      const topLevel = new Set<number>();
+      let delim: string | null = null;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (delim) {
+          if (line.trim() === delim) delim = null;
+          continue;
+        }
+        const h = heredoc.exec(line);
+        if (h) {
+          delim = h[1] ?? h[2] ?? h[3] ?? null;
+          continue;
+        }
+        const m = fnDef.exec(line);
+        if (m) {
+          // 单行函数定义自成一体；多行函数定义的正文整段跳过。
+          // 正文里可能有 heredoc（daemon.json 就有一处），必须一起跳过，
+          // 否则正文里的 } 会被误当成函数结尾。
+          if (!/\}\s*$/.test(m[2])) {
+            let inner: string | null = null;
+            for (let j = i + 1; j < lines.length; j++) {
+              if (inner) {
+                if (lines[j].trim() === inner) inner = null;
+                continue;
+              }
+              const ih = heredoc.exec(lines[j]);
+              if (ih) {
+                inner = ih[1] ?? ih[2] ?? ih[3] ?? null;
+                continue;
+              }
+              if (/^\}/.test(lines[j])) {
+                i = j;
+                break;
+              }
+            }
+          }
+          continue;
+        }
+        topLevel.add(i);
+      }
+      topLevel.forEach((i) => {
+        const t2 = lines[i].trim();
+        if (t2 && !t2.startsWith('#')) offenders.push(`${f}:${i + 1}`);
+      });
+    }
+    expect(offenders, `模块里出现了顶层代码：${offenders.join(', ')}`).toEqual([]);
   });
 
   it('用法里列出的每个长选项都真的被解析', () => {

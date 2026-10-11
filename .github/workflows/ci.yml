@@ -56,8 +56,17 @@ jobs:
       - name: 界面对比度自检
         run: npm run check:contrast
 
-      - name: bash 语法检查
-        run: bash -n deploy/install.sh
+      - name: bash 语法检查（入口 + 每个模块）
+        run: |
+          bash -n deploy/install.sh
+          for f in deploy/lib/*.sh; do bash -n "$f"; done
+
+      - name: 每个模块都被入口载入
+        run: |
+          for f in deploy/lib/*.sh; do
+            grep -q "$(basename "$f")" deploy/install.sh \
+              || { echo "模块 $f 没有出现在 install.sh 的载入列表里"; exit 1; }
+          done
 
   smoke:
     name: 端到端冒烟测试
