@@ -433,6 +433,7 @@ while [ $# -gt 0 ]; do
     --key)      SHORTCUT_KEY="${2:-k}"; shift ;;
     --no-shortcut) SHORTCUT_OFF=1 ;;
     --check)          CHECK_ONLY=1 ;;
+    --all)            UPDATE_ALL=1 ;;
     --no-autobackup) NO_AUTOBACKUP=1 ;;
     # ---- 站点与运行参数（都能写进配置档，一键复现）----
     --admin-email)  ADMIN_EMAIL_OPT="${2:-}"; shift ;;
@@ -624,6 +625,7 @@ usage() {
   --key <字母>         自定义快捷键（默认 k，大小写都行）
   --remove            移除已设置的快捷键
   --no-shortcut        不设置快捷键
+  --all                更新时连「只改文档/测试」的远端提交也一并拉下来（默认跳过）
   -h, --help           显示本帮助
   换域名（已部署之后）：
     ./deploy/install.sh domain              查看当前域名、DNS 与证书状态
@@ -2684,6 +2686,67 @@ show_pending_commits() {
   echo "    （拿不到提交明细，不影响更新）"
 }
 
+# ----------------------------------------------------------
+# 「这次远端更新跟博客本身有没有关系」
+#
+# 远端每次提交都来自本仓库，所以不存在混进别的项目的问题；真正需要判断的是
+# 另一件事：有些提交只动了 README、tests、CI 配置 —— 它们对**正在运行的站点**
+# 没有任何影响。按「与博客无关就不必更新」的要求，这类提交不提示、也不执行，
+# 免得为了改个错别字去备份 + 重建 + 重启一次服务。
+#
+# 判定方式：看本地 → 远端之间实际改了哪些文件。
+#   返回 0 = 有影响站点运行的改动，该更新
+#   返回 1 = 只有文档 / 测试 / CI 改动，可以跳过
+#   返回 2 = 判断不了（压缩包安装、没有 git 历史等）→ 一律按「该更新」处理，绝不误杀
+# ----------------------------------------------------------
+
+# 与站点运行无关的路径：文档、测试、CI、编辑器配置、许可证
+UPDATE_DOCONLY_PATTERNS='(^|/)(README|CHANGELOG|LICENSE|CONTRIBUTING|CODE_OF_CONDUCT)([^/]*)$|^docs/|^tests?/|^test/|^\.github/|^\.vscode/|^\.idea/|^\.gitattributes$|^\.gitignore$|^tmp/|\.(md|markdown|rst|txt)$'
+
+# 本地 → 远端之间改过的文件清单。取不到就返回非 0，交给上层按「判断不了」处理。
+pending_changed_files() {
+  [ -d "$INSTALL_DIR/.git" ] || return 1
+  have git || return 1
+  # 远端新 commit 的对象本地没有，先 fetch（只更新远端引用，不动工作区与 HEAD）
+  git -C "$INSTALL_DIR" fetch --quiet --tags >/dev/null 2>&1 || true
+  git -C "$INSTALL_DIR" diff --name-only "${UPDATE_CUR}..${UPDATE_REMOTE}" 2>/dev/null
+}
+
+# 0=有相关改动  1=只有文档  2=判断不了
+update_scope() {
+  local files f relevant=0 any=0
+  files="$(pending_changed_files)" || return 2
+  [ -n "$files" ] || return 2
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    any=1
+    # 命中「无关清单」就跳过；其余一律当成与站点相关（宁可多更新，不要漏更新）
+    printf '%s\n' "$f" | grep -Eq "$UPDATE_DOCONLY_PATTERNS" && continue
+    relevant=1
+  done <<EOF
+$files
+EOF
+  [ "$any" = "1" ] || return 2
+  [ "$relevant" = "1" ] && return 0
+  return 1
+}
+
+# 只列文件（比列 commit 直观：用户关心的是「改了什么」，不是「谁提交的」）
+show_pending_files() {
+  local files
+  files="$(pending_changed_files)" || return 0
+  [ -n "$files" ] || return 0
+  echo "    改动文件："
+  printf '%s\n' "$files" | head -n 20 | sed 's/^/      /'
+}
+
+# 判定为「与博客无关」时统一走这里：说清楚为什么跳过，以及怎么强制拉
+skip_docs_only_update() {
+  ui_hint "远端这批改动只涉及 README / 测试 / CI，不影响正在运行的站点 → 按你的要求跳过"
+  show_pending_files
+  ui_hint "确实想连文档一起拉下来（比如想让本地 README 跟上）：$0 update --all"
+  return 0
+}
 # 只检查：不动任何东西。退出码 0 = 检查成功（有没有新版都算成功，方便定时任务只在
 # 「查不到」时告警）；1 = 拿不到远端版本号。想「有新版就更新」直接跑 update，
 # 它在没有新版时是零操作、零风险的。
@@ -2706,6 +2769,16 @@ cmd_check_update() {
     echo "  可能原因：网络不通 / 代理配错 / 仓库或分支名写错了"
     echo "  可以试试：$0 check-update --mirror --repo <owner/repo> --ref <分支>"
     return 1
+  fi
+
+  # 只改了文档 / 测试 / CI 的提交不必推给用户：对正在跑的站点没有任何影响
+  local scope=0
+  update_scope || scope=$?
+  if [ "$scope" = "1" ] && [ "$UPDATE_ALL" != "1" ]; then
+    echo
+    log "远端有新提交，但都与博客运行无关"
+    skip_docs_only_update
+    return 0
   fi
 
   echo
@@ -2741,12 +2814,30 @@ cmd_update() {
 
   # --check：只报结果就走，和 cmd_check_update 同义
   if [ "$CHECK_ONLY" = "1" ]; then
+    local cscope=0
+    update_scope || cscope=$?
+    if [ "$cscope" = "1" ] && [ "$UPDATE_ALL" != "1" ]; then
+      log "远端有新提交，但都与博客运行无关"
+      skip_docs_only_update
+      return 0
+    fi
     log "有新版！本地 $(printf '%.7s' "$UPDATE_CUR") → 远端 $(printf '%.7s' "$UPDATE_REMOTE")"
     show_pending_commits
     return 0
   fi
 
   # 没新版但明确要求 --check 时，上面已处理；走到这里一定是 behind
+  # 与博客运行无关的提交（只动 README / tests / CI）直接跳过：
+  # 不备份、不拉代码、不重建、不重启 —— 站点全程无感。
+  local scope=0
+  update_scope || scope=$?
+  if [ "$scope" = "1" ] && [ "$UPDATE_ALL" != "1" ]; then
+    echo
+    log "远端有新提交，但都与博客运行无关 —— 跳过更新（站点不需要动）"
+    skip_docs_only_update
+    return 0
+  fi
+
   echo
   log "版本变化：$(printf '%.7s' "$UPDATE_CUR") → $(printf '%.7s' "$UPDATE_REMOTE")"
   show_pending_commits

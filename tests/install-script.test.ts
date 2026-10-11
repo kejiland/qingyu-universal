@@ -437,6 +437,34 @@ it('边框不再用 tr 拼重复字符（非 UTF-8 locale 下会变乱码）', (
     // 菜单每次打开都顺手补装一次入口，忘了也能自愈
     expect(s).toContain('[ "$(id -u)" = "0" ] && global_link_maybe');
   });
+  // 「与博客运行无关的远端提交就不必更新」：只看文档/测试/CI 的提交要跳过，
+  // 一旦碰到 app/deploy/compose 等运行相关文件就必须更新，判断不了时保守放行。
+  it('更新会跳过只改文档测试的提交', () => {
+    expect(s).toContain('UPDATE_DOCONLY_PATTERNS=');
+    // README/LICENSE/docs/tests/.github/.vscode/markdown 一律算「无关」
+    for (const pat of ['README', 'LICENSE', '^docs/', '^tests?/', '^\\.github/', '\\.(md|markdown|rst|txt)$']) {
+      expect(s).toContain(pat);
+    }
+    // 三态返回：0 相关 / 1 仅文档 / 2 判断不了
+    expect(s).toContain('update_scope() {');
+    expect(s).toContain('show_pending_files() {');
+    expect(s).toContain('skip_docs_only_update() {');
+  });
+
+  it('check-update / update / update --check 三处都接了相关性判定', () => {
+    // 三条路径各出现一次 update_scope
+    expect((s.match(/update_scope \|\| /g) || []).length).toBe(3);
+    // 默认跳过，--all 才强制拉
+    expect(s).toContain('[ "$scope" = "1" ] && [ "$UPDATE_ALL" != "1" ]');
+    expect(s).toContain('[ "$cscope" = "1" ] && [ "$UPDATE_ALL" != "1" ]');
+    expect(s).toContain('--all)            UPDATE_ALL=1 ;;');
+    // 跳过的分支必须在备份/拉代码之前 return，不能半途才决定不更新
+    const upd = s.slice(s.indexOf('cmd_update() {'));
+    const iScope = upd.indexOf('update_scope || scope=$?');
+    const iBackup = upd.indexOf('step_begin "备份当前数据"');
+    expect(iScope).toBeGreaterThan(-1);
+    expect(iBackup).toBeGreaterThan(iScope);
+  });
 });
 
 // 抽出 tune_* 函数体的范围（tune 的写操作都在这些辅助函数里）
