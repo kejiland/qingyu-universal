@@ -1957,7 +1957,9 @@ export async function handleTags(request, env) {
       if (x !== from) { if (next.indexOf(x) < 0) next.push(x); return; }
       if (op === 'rename' && to && next.indexOf(to) < 0) next.push(to);
     });
-    stmts.push({ sql: 'UPDATE posts SET tags = ? WHERE id = ?', params: [JSON.stringify(next), r.id] });
+    // 标签变了也是文章变了：不动 updated_at 的话，改完标签的文章对缓存而言「没变」。
+    const tagStamp = nowIso();
+    stmts.push({ sql: 'UPDATE posts SET tags = ?, updated_at = ? WHERE id = ?', params: [JSON.stringify(next), tagStamp, r.id] });
   });
   if (stmts.length) await dbBatch(env.DB, stmts);
   await recordAudit(env, request, op === 'rename' ? 'tag.rename' : 'tag.delete', from, to);

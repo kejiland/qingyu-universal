@@ -191,6 +191,9 @@ KEEP=7
     3) 确认 SITE_URL 是真实域名（现在若是 localhost / 内网 IP 就改 .env 后 restart）
 
   出问题先跑： ./deploy/install.sh doctor
+
+不确定机器什么配置、或者怀疑「服务器本身慢」：先跑 `./deploy/install.sh sysinfo` 看家底，
+再跑 `./deploy/install.sh speedtest` 看网络。两条都是只读的，不改任何配置、不装任何东西。
 ```
 
 ### 有终端时会先检测、再让你选
@@ -404,6 +407,28 @@ WSL2（Docker Desktop）默认只把端口映射到 Windows 的 `localhost`。�
 
 脚本会自动添加 Windows 端口转发、放行防火墙，并尝试通过 UPnP 配置路由器。若公网端口检测仍为关闭，需要在路由器把公网 TCP 8080 转发到本机局域网地址的 8080 端口；没有公网入站条件时，改用 README 前面的 Cloudflare Tunnel / Tailscale Funnel。WSL 重启后 IP 可能变化，重新运行此脚本即可。
 
+### 一个站点绑多个域名
+
+绑了主域名之后，还可以把别的域名指到同一个站点（比如同时要 `example.com` 和 `www.example.com`，或新旧域名并存）。它们共用同一份内容、同一套反代，各自签发 HTTPS 证书：
+
+```bash
+# 绑定别名（先把该域名的 A 记录指向本机 IP，再执行）
+./deploy/install.sh domain add www.example.com
+
+# 看当前主域名 + 所有别名 + 各自证书的到期时间
+./deploy/install.sh domain status
+
+# 解绑别名（只重建 Caddy，不会重新 build 应用镜像）
+./deploy/install.sh domain rm www.example.com
+```
+
+几个说明：
+
+- 别名存在 `.env` 的 `SITE_ALIASES`（空格分隔），Caddy 会把它写进同一个站点块的证书申请里。
+- 换主域名（`domain set`）时，如果新主域名恰好是旧别名，脚本会自动把它从别名里摘掉，不会出现重复。
+- 目前跑在「IP + 端口」模式下没有域名可加别名，先 `domain set` 切成域名模式。
+- `doctor` 会逐个检查别名是否解析到本机、证书是否有效（过期算失败，15 天内到期算警告）。
+- 只有主域名会被用于生成站点链接（`SITE_URL`）等，别名是「额外的访问入口」。
 ### 更新到新版本
 
 **一条命令，永远有效**（从任何目录执行都行）：
@@ -461,10 +486,49 @@ cd ~/qingyu-universal          # 你的源码目录
 ./deploy/install.sh logs             # 查看日志
 ./deploy/install.sh status           # 容器与健康状态
 ./deploy/install.sh info             # 查看访问地址、初始化密钥、版本、文章数等部署信息
+./deploy/install.sh sysinfo          # 服务器家底：CPU/内存/磁盘/负载/网卡流量/公网 IP 与归属地
+./deploy/install.sh speedtest        # 网络测速：到 Cloudflare/Google/百度 的延迟 + 上下行带宽
 ./deploy/install.sh doctor           # 一键体检：网站打不开/传不了图先跑它，每项给 ✅⚠️❌ 和修复命令
 ./deploy/install.sh uninstall        # 停止并删除容器（数据卷保留）
+./deploy/install.sh tune             # 服务器调优（可选，见下）
+./deploy/install.sh clean            # 清理 Docker 悬空镜像与构建缓存（可回收量见下）
 ```
 
+Windows 版（Docker Desktop）同样支持 `sysinfo` 和 `speedtest`，其余子命令以 `install.ps1 -Command` 为准。
+
+### 服务器调优（可选）
+
+海外 VPS 尤其从美国西海岸、日本走回国访问时，默认的拥塞控制在高延迟丢包链路上丢包一高就发懵。这个项目编译过一次 BBR 开销很低：
+
+```bash
+./deploy/install.sh tune            # 先看当前状态，再问你一句要不要调
+./deploy/install.sh tune --apply    # 不询问，直接调
+./deploy/install.sh tune --restore  # 撤销，把参数写回内核默认值
+```
+
+会调的项：拥塞控制 BBR（配 `fq` 队列才生效）、队列算法、TCP Fast Open 双向打开、`vm.swappiness` 降到 10（少用 swap，小内存机器更不容易 OOM）、连接队列上限。配置写在 `/etc/sysctl.d/99-qingyu-tune.conf`，随时可以整个删掉。
+
+几个边界说明，部署脚本不会越线：
+
+- **完全不碰 SSH 配置**（不改端口、不动 root 登录、不装 fail2ban）。部署脚本擅自改登录方式，最容易把自己锁在门外，这类操作请你自己按需处理。
+- **不改防火墙规则**。开放端口由安装时的预检查按需提示，不在调优里代劳。
+- **不是安装流程的一部分**。不显式执行 `tune` 就完全不会改动内核。
+- 内核不支持 BBR（低于 4.9）时自动跳过该项，其余照常。
+
+### 清理磁盘（Docker 缓存越滚越大）
+
+小内存 / 小硬盘的 VPS 上跑久了，docker images 里全是悬空镜像和构建缓存，硬盘能吃掉好几 GB：
+
+`ash
+./deploy/install.sh clean            # 看能回收多少，问一句再删
+./deploy/install.sh clean --apply    # 不询问，直接清理
+`
+
+只删两类**重建即可再生**的东西：悬空镜像（dangling=true）和构建缓存（docker builder prune）。
+
+绝不用 docker system prune -a --volumes —— 那会把没用上的镜像连同数据卷一起清掉，文章和上传的图片一起没了。
+
+doctor 体检的「磁盘与内存」一节会直接算出这部分可回收量，并在不足时把 clean 作为修复建议给出来。
 ### 备份与迁移（服务器坏了也不怕）
 
 **开定时备份（一条命令）**

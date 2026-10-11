@@ -108,6 +108,8 @@ services:
       - domain
     environment:
       SITE_DOMAIN: ${SITE_DOMAIN:-localhost}
+      # 别名域名（空格分隔），一个站点可以同时用多个域名访问；未配置时为空
+      SITE_ALIASES: ${SITE_ALIASES:-}
     ports:
       - "80:80"
       - "443:443"

@@ -468,6 +468,217 @@ function Show-Status {
   Write-Host ""
 }
 
+# ---------- 系统信息查询 ----------
+# 与 Linux 版 install.sh 的 sysinfo 对齐（借鉴 kejilion.sh 的系统信息查询）：
+# 买机器、机器变卡、或想知道「这台机器到底什么家底」时，一条命令看完。
+# 全程只读，不装任何东西、不改任何配置；读不到的项留空，不中断。
+
+function Get-KB([double]$kb) {
+  # Win32_* 的内存字段单位是 KB：1GB = 1048576 KB，1TB = 1073741824 KB
+  if ($kb -ge 1073741824) { return ('{0:N2} TB' -f ($kb / 1073741824)) }
+  if ($kb -ge 1048576)    { return ('{0:N2} GB' -f ($kb / 1048576)) }
+  if ($kb -ge 1024)       { return ('{0:N0} MB' -f ($kb / 1024)) }
+  return ('{0:N0} KB' -f $kb)
+}
+
+function Get-ByteSize([double]$b) {
+  if ($b -ge 1TB) { return ('{0:N2} TB' -f ($b / 1TB)) }
+  if ($b -ge 1GB) { return ('{0:N2} GB' -f ($b / 1GB)) }
+  if ($b -ge 1MB) { return ('{0:N0} MB' -f ($b / 1MB)) }
+  if ($b -ge 1KB) { return ('{0:N0} KB' -f ($b / 1KB)) }
+  return "$b B"
+}
+
+function Get-UptimeText {
+  try {
+    $boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+    $span = (Get-Date) - $boot
+    $d = [int]$span.TotalDays
+    $h = $span.Hours
+    $m = $span.Minutes
+    if ($d -gt 0) { return "$d 天 $h 小时 $m 分" }
+    if ($h -gt 0) { return "$h 小时 $m 分" }
+    return "$m 分"
+  } catch { return "" }
+}
+
+function Show-SysInfo {
+  Write-Host ""
+  Write-Host "== 系统信息 ==" -ForegroundColor Cyan
+  Write-Host "   这台机器的家底（只读，不改动任何配置）`n" -ForegroundColor DarkGray
+
+  Write-Host "-- 主机 --" -ForegroundColor Cyan
+  $os = $null
+  try { $os = Get-CimInstance Win32_OperatingSystem } catch { }
+  $kv = "  {0,-12} {1}"
+  Write-Host ($kv -f '主机名', [Environment]::MachineName)
+  if ($os) { Write-Host ($kv -f '系统版本', ("{0} (build {1})" -f $os.Caption, $os.BuildNumber)) }
+  $arch = $env:PROCESSOR_ARCHITECTURE
+  if (-not $arch) {
+    try { $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() } catch { $arch = '未知' }
+  }
+  Write-Host ($kv -f '架构', $arch)
+  Write-Host ($kv -f '时区', (Get-TimeZone).Id)
+  $up = Get-UptimeText
+  if ($up) { Write-Host ($kv -f '运行时长', $up) }
+
+  Write-Host "`n-- CPU --" -ForegroundColor Cyan
+  try {
+    $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+    $load = [int]$cpu.LoadPercentage
+    Write-Host ($kv -f '型号', $cpu.Name.Trim())
+    Write-Host ($kv -f '核心数', ("$($cpu.NumberOfCores) 核 / $($cpu.NumberOfLogicalProcessors) 线程"))
+    if ($cpu.CurrentClockSpeed) { Write-Host ($kv -f '当前频率', ("{0:N2} GHz" -f ($cpu.CurrentClockSpeed / 1000))) }
+    Write-Host ($kv -f 'CPU 占用', "$load%（系统采样）")
+  } catch { Write-Warn "读不到 CPU 信息" }
+
+  Write-Host "`n-- 内存与磁盘 --" -ForegroundColor Cyan
+  if ($os) {
+    Write-Host ($kv -f '物理内存', (Get-KB $os.TotalVisibleMemorySize))
+    if ($os.FreePhysicalMemory) { Write-Host ($kv -f '可用内存', (Get-KB $os.FreePhysicalMemory)) }
+  }
+  $swap = $null
+  try { $swap = Get-CimInstance Win32_PageFileUsage | Select-Object -First 1 } catch { }
+  if ($swap) { Write-Host ($kv -f '虚拟内存', ("{0:N0} MB" -f ($swap.AllocatedBaseSize))) }
+  try {
+    $d = Get-CimInstance Win32_LogicalDisk -Filter 'DeviceID="C:"'
+    if ($d) {
+      $used = $d.Size - $d.FreeSpace
+      Write-Host ($kv -f '系统盘 C:', ("{0} / {1}（已用 {2:N0}%）" -f (Get-ByteSize $used), (Get-ByteSize $d.Size), ($used / $d.Size * 100)))
+    }
+  } catch { }
+
+  Write-Host "`n-- 网络 --" -ForegroundColor Cyan
+  $ip4 = ''
+  try { $ip4 = (Invoke-RestMethod -Uri 'https://api.ipify.org' -TimeoutSec 6).ip } catch { }
+  if (-not $ip4) {
+    try { $ip4 = (Invoke-RestMethod -Uri 'https://ipv4.icanhazip.com' -TimeoutSec 6).Trim() } catch { }
+  }
+  Write-Host ($kv -f '公网 IPv4', $(if ($ip4) { $ip4 } else { '探测失败（不影响使用）' }))
+
+  $ip6 = ''
+  try {
+    $v6 = Get-NetIPAddress -AddressFamily IPv6 -ErrorAction Stop |
+          Where-Object { $_.IPAddress -notlike 'fe80*' -and $_.IPAddress -ne '::1' } |
+          Select-Object -First 1
+    if ($v6) { $ip6 = $v6.IPAddress }
+  } catch { }
+  Write-Host ($kv -f '公网 IPv6', $(if ($ip6) { $ip6 } else { '（没有或未启用）' }))
+
+  # 归属地查询走 ipinfo.io，国内网络经常连不上 —— 拿不到就跳过，不报错
+  try {
+    $geo = Invoke-RestMethod -Uri 'https://ipinfo.io' -TimeoutSec 5
+    if ($geo.org)     { Write-Host ($kv -f '运营商 / 归属组织', $geo.org) }
+    if ($geo.country) { Write-Host ($kv -f '归属地', ("$($geo.country) $($geo.city)").Trim()) }
+  } catch { }
+
+  try {
+    $st = Get-NetAdapterStatistics -ErrorAction Stop
+    $rx = ($st | Measure-Object -Property ReceivedBytes -Sum).Sum
+    $tx = ($st | Measure-Object -Property SentBytes -Sum).Sum
+    Write-Host ($kv -f '网卡累计收 / 发', ("{0} / {1}" -f (Get-ByteSize $rx), (Get-ByteSize $tx)))
+  } catch { }
+
+  Write-Host "`n-- 站点 --" -ForegroundColor Cyan
+  $siteUrl = Get-EnvValue 'SITE_URL'
+  if ($siteUrl) {
+    Write-Host ($kv -f '访问地址', $siteUrl)
+    Write-Host ($kv -f '安装目录', $InstallDir)
+    if (Get-Command docker -ErrorAction SilentlyContinue) {
+      $st = (& docker inspect -f '{{.State.Status}}' qingyu-app 2>$null)
+      if (-not $st) { $st = (& docker inspect -f '{{.State.Status}}' qingyu-linux 2>$null) }
+      if (-not $st) { $st = (& docker ps --filter 'name=qingyu-' --format '{{.Status}}' 2>$null | Select-Object -First 1) }
+      Write-Host ($kv -f '应用容器', $(if ($st) { $st } else { '未找到' }))
+    } else {
+      Write-Host ($kv -f '应用容器', '读不到（Docker 没运行）')
+    }
+  } else {
+    Write-Host "  这台机器还没部署过 —— 跑一次 .\deploy\install.ps1 就能建站" -ForegroundColor DarkGray
+  }
+  Write-Host ""
+}
+
+# ---------- 网络测速 ----------
+# 与 Linux 版 speedtest 对齐：先看延迟，再看带宽。
+# 用 Cloudflare 公开端点，只发请求，不改任何配置。
+
+function Test-Curl {
+  # 本机有 http_proxy/https_proxy 时 curl 会走代理，必须显式排除，否则测的是代理而不是本机带宽
+  & curl.exe -s --noproxy '*' -o NUL @args 2>$null
+  return ($LASTEXITCODE -eq 0)
+}
+
+function Format-Sec($sec) {
+  if ($null -eq $sec) { return '?' }
+  # 必须显式转 double：PowerShell 里 "0.23" * 1000 是字符串重复，不是乘法
+  [double]$s = 0
+  if (-not [double]::TryParse([string]$sec, [ref]$s)) { return '?' }
+  if ($s -ge 1) { return ('{0:N2} s' -f $s) }
+  return ('{0:N0} ms' -f ($s * 1000))
+}
+
+function Measure-Latency([string]$url, [string]$label) {
+  # curl 失败时也会打印一行全 0，所以必须先看退出码
+  $out = & curl.exe -s -o NUL --noproxy '*' --max-time 8 `
+    -w 'connect=%{time_connect} ttfb=%{time_starttransfer} total=%{time_total}' $url 2>$null
+  if ($LASTEXITCODE -ne 0) { return $false }
+  $digits = ([string]$out) -replace '[^0-9.]', ''
+  if (-not $digits -or $digits -eq '0000') { return $false }
+  if (([string]$out) -match 'connect=([\d.]+)\s+ttfb=([\d.]+)\s+total=([\d.]+)') {
+    $line = "  {0,-14} DNS/首连 {1,-10} 首字节 {2,-10} 总计 {3}" -f $label, (Format-Sec $Matches[1]), (Format-Sec $Matches[2]), (Format-Sec $Matches[3])
+    Write-Host $line -ForegroundColor Gray
+    return $true
+  }
+  return $false
+}
+
+function Measure-Download {
+  # 25MB 单线程下载，折算成 MB/s（近似值，误差可达 20%）
+  $url = 'https://speed.cloudflare.com/__down?bytes=25000000'
+  $out = & curl.exe -s --noproxy '*' --max-time 30 -o NUL `
+    -w '%{size_download} %{speed_download}' $url 2>$null
+  if ($LASTEXITCODE -ne 0) { return '' }
+  $parts = $out.Trim() -split '\s+'
+  if ($parts.Count -lt 2) { return '' }
+  $speed = [double]$parts[1]
+  if ($speed -le 0) { return '' }
+  return ('{0:N2} MB/s' -f ($speed / 1MB))
+}
+
+function Show-Speedtest {
+  Write-Host ""
+  Write-Host "== 网络测速 ==" -ForegroundColor Cyan
+  Write-Host "   先看延迟，再看带宽（只发请求，不改任何配置）`n" -ForegroundColor DarkGray
+
+  $kv = "  {0,-12} {1}"
+  try { $ip4 = (Invoke-RestMethod -Uri 'https://api.ipify.org' -TimeoutSec 6).ip } catch { $ip4 = '' }
+  if ($ip4) { Write-Host ($kv -f '本机出口 IP', $ip4) }
+
+  if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
+    Write-Warn "系统里没有 curl.exe，跳过测速"
+    return
+  }
+
+  Write-Host "-- 延迟（建连 / 首字节）--" -ForegroundColor Cyan
+  if (-not (Measure-Latency 'https://www.cloudflare.com/' 'Cloudflare')) {
+    Write-Warn "Cloudflare 探测失败（可能是网络不通或被墙）"
+  }
+  Measure-Latency 'https://www.baidu.com/'     '百度（国内）'   | Out-Null
+  Measure-Latency 'https://mirrors.aliyun.com/' '阿里云镜像'   | Out-Null
+
+  Write-Host "`n-- 下载带宽（近似值）--" -ForegroundColor Cyan
+  Write-Host "  系统里没有 speedtest-cli，用 Cloudflare 端点估算（误差可达 20%）" -ForegroundColor DarkGray
+  $dl = Measure-Download
+  if ($dl) { Write-Host ($kv -f '单线程下载', $dl) }
+  else { Write-Warn "下载测速失败（出网被限速或 Cloudflare 不可达）" }
+  Write-Host "  上传测不出来（很多机房禁了出站 POST，不一定是故障）" -ForegroundColor DarkGray
+
+  Write-Host ""
+  Write-Host "  延迟高不代表网站慢 —— 图片有反代加速，实际观感以真实访问为准" -ForegroundColor DarkGray
+  Write-Host "  服务器本身没问题时，先跑：.\deploy\install.ps1 doctor" -ForegroundColor DarkGray
+  Write-Host ""
+}
+
 # ---------- 子命令 ----------
 function Cmd-Install {
   Resolve-Docker
@@ -529,6 +740,8 @@ function Show-Usage {
   logs                    查看应用日志
   info                    查看部署信息（访问地址、初始化密钥、版本…）
   doctor                  一键体检
+  sysinfo                 服务器家底（CPU / 内存 / 磁盘 / 网络 / 站点，只读）
+  speedtest               网络测速（延迟 + 下载带宽）
   backup                  生成数据库快照
   restore <快照文件>       从快照恢复
   uninstall               停止并删除容器（数据卷保留）
@@ -556,6 +769,8 @@ switch ($Command.ToLower()) {
   'logs'      { Resolve-Docker; Invoke-Compose @('logs','-f','app') }
   'info'      { Resolve-Docker; Show-Info }
   'doctor'    { Resolve-Docker; Show-Doctor }
+  'sysinfo'   { Show-SysInfo }
+  'speedtest' { Show-Speedtest }
   'backup'    { Cmd-Backup }
   'restore'   { Cmd-Restore }
   'uninstall' {
@@ -564,5 +779,5 @@ switch ($Command.ToLower()) {
     Invoke-Compose @('down')
   }
   'help'      { Show-Usage }
-  default     { Write-Die "未知子命令：$Command（可用：install / upgrade / start / stop / restart / status / logs / info / doctor / backup / restore / uninstall / help）" }
+  default     { Write-Die "未知子命令：$Command（可用：install / upgrade / start / stop / restart / status / logs / info / doctor / sysinfo / speedtest / backup / restore / uninstall / help）" }
 }

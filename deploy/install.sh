@@ -10,7 +10,7 @@
 #
 # 常用子命令：
 #   install（默认） | update | check-update | upgrade | rollback
-#   backup | restore <file> | logs | status | info | doctor
+#   backup | restore <file> | logs | status | info | sysinfo | speedtest | tune | clean | doctor
 #   start | stop | restart | uninstall | autobackup | migrate
 #
 # 设计原则：可重复执行；已存在的 .env 与数据库绝不覆盖。
@@ -45,6 +45,9 @@ AUTOBACKUP_OFF=0
 BUNDLE_OUT=""
 PURGE=0
 # ---- 安装向导 / 配置档 / 演练 / 断点续跑 ----
+# tune：--apply 直接调优 / --restore 撤销。不带参数则先看状态再询问
+TUNE_APPLY=0
+TUNE_RESTORE=0
 DRY_RUN=0            # --dry-run：只打印将要做什么，不实际改动系统
 WIZARD_FORCE=0       # --wizard：即使已有参数也强制走一次问答向导
 NO_WIZARD=1          # 默认零配置不提问；--wizard 才走问答向导（--no-wizard 保留为兼容写法）
@@ -373,7 +376,7 @@ SUBCMD_ARGS=""
 DATABASE_URL_OPT="${DATABASE_URL_OPT:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
-    install|upgrade|backup|restore|logs|status|info|start|stop|restart|rollback|uninstall|help) COMMAND="$1"; COMMAND_SET=1 ;;
+    install|upgrade|backup|restore|logs|status|info|sysinfo|speedtest|tune|clean|start|stop|restart|rollback|uninstall|help) COMMAND="$1"; COMMAND_SET=1 ;;
     doctor)                 COMMAND="$1"; COMMAND_SET=1 ;;
   domain)                 COMMAND="$1"; COMMAND_SET=1
                                  shift; SUBCMD_ARGS="$*"; break ;;
@@ -422,6 +425,8 @@ while [ $# -gt 0 ]; do
     --wizard)        WIZARD_FORCE=1 ;;
     --no-wizard)     NO_WIZARD=1 ;;
     --dry-run)       DRY_RUN=1 ;;
+    --apply)         TUNE_APPLY=1 ;;
+    --restore)       TUNE_RESTORE=1 ;;
     --skip-preflight) SKIP_PREFLIGHT=1 ;;
     --no-doctor)     SKIP_DOCTOR=1 ;;
     --reset|--fresh) RESET_STATE=1 ;;
@@ -580,12 +585,18 @@ usage() {
   check-update         只看有没有新代码，不改动任何东西
   upgrade              强制拉最新代码并重建（保留数据）
   rollback             回滚到上一版（回滚前自动备份）
-  domain               域名与 HTTPS：status / set [域名] / port [端口] / off
+  domain               域名与 HTTPS：status（DNS 指向 + 证书到期）/ set [域名]
+                       / add [别名域名] / rm [别名域名] / port [端口] / off
   restart              重启（改完 .env 后用它生效）
   start / stop         启动 / 停止（配置和数据都保留）
   logs                 查看应用日志
   status               容器与健康状态
   info                 部署信息（访问地址、初始化密钥、版本、文章数…）
+  sysinfo              服务器家底：CPU / 内存 / 磁盘 / 负载 / 网卡流量 / 公网 IP 与归属地
+  speedtest            网络测速：到几个目标地址的延迟 + 上下行带宽（只测不改）
+  clean                 清理磁盘：只删 Docker 的悬空镜像 + 构建缓存，不碰数据和运行中的容器
+  tune                 服务器调优（可选）：BBR + 队列 + 内存策略；不碰 SSH，带 --restore 可撤销
+                         tune --apply 直接调优不询问；tune --restore 撤销调优
   doctor               一键体检：Docker / 容器 / 端口 / 防火墙 / 公网 / 磁盘
   backup               立刻生成一份数据库快照
   autobackup           安装每日定时备份
@@ -618,6 +629,8 @@ usage() {
     ./deploy/install.sh domain              查看当前域名、DNS 与证书状态
     ./deploy/install.sh domain set blog.example.com   切到新域名（自动 HTTPS）
     ./deploy/install.sh domain set                 不带域名则交互提问，走同一套流程
+    ./deploy/install.sh domain add www.example.com   再绑一个域名（同一站点，自动 HTTPS）
+    ./deploy/install.sh domain rm  www.example.com   解绑别名
     ./deploy/install.sh domain port [8080]  退回 IP + 端口模式
 
   配置档示例（KEY=VALUE，# 开头是注释；命令行参数优先级更高）：
@@ -1206,6 +1219,14 @@ detect_ip() {
   [ -z "$ip" ] && ip=$(hostname -I 2>/dev/null | awk '{print $1}')
   printf '%s' "${ip:-127.0.0.1}"
 }
+# 公网 IPv6：机器没配 v6 路由时 curl 会立刻失败，返回空即可，不能拖慢命令
+detect_ip6() {
+  have curl || { printf ''; return 0; }
+  curl -6 -fsS --max-time 5 https://api6.ipify.org 2>/dev/null \
+    || curl -6 -fsS --max-time 5 https://ifconfig.co 2>/dev/null \
+    || true
+}
+
 rand_short() { head -c 9 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 
 ensure_env() {
@@ -1275,6 +1296,8 @@ PORT=8787
 HOST=0.0.0.0
 SITE_URL=$site_url
 SITE_DOMAIN=$DOMAIN
+# 别名域名（空格分隔）：主域名之外再绑几个域名指向同一站点，各自带一张 HTTPS 证书
+SITE_ALIASES=
 DATA_DIR=${DATA_DIR_OPT:-./data}
 # 数据库：留空使用 SQLite 文件；填写连接串则切换到 PostgreSQL
 # 数据库类型由 deploy/install.sh 决定（--db sqlite|postgres 或交互选择）
@@ -1837,7 +1860,7 @@ run_wizard() {
     echo
     ui_hint "接下来几个问题，每个都给好了推荐答案 —— 直接回车就是推荐方案。"
     ui_hint "输入 b 回到上一题，输入 q 放弃安装。"
-  } > /dev/tty 2>/dev/null || true
+  } 2>/dev/null > /dev/tty || true
 
   local i=0 n=${#WIZ_STEPS[@]}
   WIZ_MODE=""
@@ -2058,7 +2081,7 @@ resolve_mode() {
   port_in_use 443 && conflict=1
 
   local resolved dns_ok=1
-  resolved=$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | head -n1)
+  resolved=$(domain_resolved_ips "$DOMAIN")
   [ -n "$resolved" ] || dns_ok=0
 
   if [ "$conflict" -eq 0 ] && [ "$dns_ok" -eq 1 ]; then
@@ -2299,10 +2322,10 @@ preflight() {
   # DNS：域名没指过来时 Caddy 会反复重试，表现是「HTTPS 打不开但日志不直观」
   if [ -n "$DOMAIN" ]; then
     local resolved
-    resolved=$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | head -n1)
+    resolved=$(domain_resolved_ips "$DOMAIN" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
     if [ -z "$resolved" ]; then
       warn "域名 ${DOMAIN} 解析不出来 —— Let's Encrypt 签发证书会失败"
-      warn "请先添加 A 记录指向本机公网 IP，再重新执行"
+      warn "请先添加 A 记录（指向本机公网 IP）再重新执行；只加 AAAA 记录是不够的"
       ok=0
     else
       log "  ${DOMAIN} 解析到 ${resolved}"
@@ -2873,20 +2896,50 @@ ui_warn() { printf '    %s%s%s %s\n' "$C_YELLOW" "${G_WARN:-!}" "$C_RESET" "$*";
 #   domain off          同 port，但保留原来的端口号
 
 # 域名当前是否解析到本机（拿本机公网 IP 比对，私有网段 / 未探测到时只报解析结果）
+# 域名解析到的全部地址（A + AAAA）。getent ahosts 在 Debian/Ubuntu 上都有；
+# 个别精简系统上没有，就退回只查 A 记录，至少能看到 IPv4。
+domain_resolved_ips() {
+  local d="$1" out=""
+  out="$(getent ahosts "$d" 2>/dev/null | awk '{print $1}' | sort -u)"
+  [ -n "$out" ] || out="$(getent hosts "$d" 2>/dev/null | awk '{print $1}' | head -n1)"
+  printf '%s' "$out"
+}
+
+# 只要解析结果里有一个地址指向本机就算过 —— 域名同时有 A 和 AAAA 时，
+# 旧写法「取第一条再和 IPv4 比」会因为取到 v6 而误报不一致。
 domain_points_here() {
-  local d="$1" resolved ip
-  resolved="$(getent hosts "$d" 2>/dev/null | awk '{print $1}' | head -n1)"
-  [ -n "$resolved" ] || return 1
+  local d="$1" list ip
+  list="$(domain_resolved_ips "$d")"
+  [ -n "$list" ] || return 1
   ip="$(detect_ip 2>/dev/null || true)"
   case "$ip" in
     ''|10.*|192.168.*|127.*) return 0 ;;
   esac
-  [ "$resolved" = "$ip" ]
+  printf '%s\n' "$list" | grep -Fxq "$ip"
+}
+
+# 证书到期时间：直接读 Caddy 落在数据卷里的证书文件，不联网、不要求 root。
+# 没装 openssl 或证书还没签发时返回空，调用方自己降级显示。
+cert_expiry_date() {
+  local cert="$1"
+  [ -f "$cert" ] && have openssl || return 0
+  openssl x509 -in "$cert" -noout -enddate 2>/dev/null | cut -d= -f2
+}
+
+# 剩余天数（负数 = 已过期）。只有 GNU date 认 -d；读不到就返回空，只显示到期日期。
+cert_days_left() {
+  local end="${1:-}" end_ts now
+  [ -n "$end" ] || return 0
+  end_ts="$(date -d "$end" +%s 2>/dev/null || true)"
+  case "$end_ts" in ''|*[!0-9]*) return 0 ;; esac
+  now="$(date +%s 2>/dev/null || true)"
+  case "$now" in ''|*[!0-9]*) return 0 ;; esac
+  printf '%s' $(((end_ts - now) / 86400))
 }
 
 # 只看不改：当前模式、解析指向、端口占用、证书是否已经签发
 domain_status() {
-  local profiles domain site_url app_bind port caddy=0 resolved cert
+  local profiles domain site_url app_bind port caddy=0 resolved cert cert_end cert_left aliases
   profiles="$(env_value COMPOSE_PROFILES)"
   domain="$(env_value SITE_DOMAIN)"
   site_url="$(env_value SITE_URL)"
@@ -2897,6 +2950,8 @@ domain_status() {
   ui_banner "域名状态" "轻语博客 · 域名与 HTTPS"
   ui_kv "站点地址" "${C_B}${site_url:-（未设置）}${C_RESET}"
   ui_kv "域名" "${domain:-（无 —— 当前是 IP + 端口模式）}"
+  aliases="$(domain_aliases | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+  ui_kv "别名域名" "${aliases:-（无）}"
   ui_kv "反向代理" "$([ "$caddy" -eq 1 ] && echo 'Caddy（自动 HTTPS）' || echo '未启用（纯 HTTP）')"
   ui_kv "应用监听" "${app_bind:-（未设置）}"
   ui_kv "本机健康检查端口" "$port"
@@ -2909,15 +2964,25 @@ domain_status() {
 
   echo
   ui_section "DNS 解析"
-  resolved="$(getent hosts "$domain" 2>/dev/null | awk '{print $1}' | head -n1)"
+  resolved="$(domain_resolved_ips "$domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
   if [ -z "$resolved" ]; then
     ui_warn "解析不到 ${domain}"
     ui_hint "到 DNS 控制台加一条 A 记录指向本机公网 IP；解析生效后重跑本命令"
   elif domain_points_here "$domain"; then
-    ui_ok "${domain} → ${resolved}（指向本机）"
+    ui_ok "${domain} → ${resolved}（已指向本机）"
   else
     ui_warn "${domain} → ${resolved}（与本机公网 IP 不一致，Let's Encrypt 会签发失败）"
   fi
+  # 域名配了 AAAA 但这台机器没有公网 IPv6：证书照样签得下来，
+  # 但走 IPv6 的访客会打不开 —— 这种「一半能开一半打不开」最值得提前说。
+  case "$resolved" in
+    *:*:*)
+      if [ -z "$(detect_ip6 2>/dev/null || true)" ]; then
+        ui_warn "域名有 IPv6（AAAA）记录，但这台机器探测不到公网 IPv6"
+        ui_hint "要么给机器开 IPv6，要么删掉 AAAA 记录，否则部分访客打不开"
+      fi
+      ;;
+  esac
 
   ui_section "端口与证书"
   if port_in_use_pair; then
@@ -2928,12 +2993,48 @@ domain_status() {
   fi
   cert="$INSTALL_DIR/data/caddy/certificates/${domain}/${domain}.crt"
   if [ -f "$cert" ]; then
-    ui_ok "证书已签发"
+    cert_end="$(cert_expiry_date "$cert")"
+    cert_left="$(cert_days_left "$cert_end")"
+    if [ -n "$cert_end" ]; then
+      if [ -n "$cert_left" ] && [ "$cert_left" -lt 0 ]; then
+        ui_warn "证书已于 ${cert_end} 过期（-$((cert_left * -1)) 天）"
+      elif [ -n "$cert_left" ] && [ "$cert_left" -le 15 ]; then
+        ui_warn "证书 ${cert_end} 到期，只剩 ${cert_left} 天（Caddy 会自动续签）"
+      else
+        ui_ok "证书已签发，到期时间 ${cert_end}${cert_left:+（还剩 ${cert_left} 天）}"
+      fi
+    else
+      ui_ok "证书已签发"
+    fi
   elif [ "$caddy" -eq 1 ]; then
     ui_hint "证书还没签发（Caddy 首次启动后自动申请，DNS 指过来即可）"
   fi
   echo
   ui_hint "改回 IP + 端口：./deploy/install.sh domain port"
+}
+
+# 别名域名列表：.env 里用空格分隔（SITE_ALIASES="a.com b.com"）。
+# 读出来统一去重 + 去空行，写回时再压成一行，保证 .env 不会越写越乱。
+domain_aliases() {
+  local v a out=""
+  v="$(env_value SITE_ALIASES 2>/dev/null || true)"
+  for a in $v; do
+    case " $out " in *" $a "*) continue ;; esac
+    out="$out $a"
+  done
+  for a in $out; do
+    [ -n "$a" ] && printf '%s\n' "$a"
+  done
+}
+
+domain_aliases_write() {
+  local a out=""
+  # 纯 bash 去重：locale 不是 UTF-8 时 tr/sed 会把多字节字符切碎
+  for a in $1; do
+    case " $out " in *" $a "*) continue ;; esac
+    out="$out $a"
+  done
+  env_set SITE_ALIASES "${out# }"
 }
 
 # 把「域名模式」和「端口模式」落到 .env，四个字段必须一起改，否则出现半 HTTPS 半明文的怪状态
@@ -2952,6 +3053,8 @@ domain_apply() {
     env_set COMPOSE_PROFILES "$profiles"
   else
     env_set SITE_DOMAIN ""
+    # 端口模式没有 Caddy，别名域名无处可用；留着会让下次切回域名时莫名多出几个站点标签
+    env_set SITE_ALIASES ""
     env_set SITE_URL "http://$(detect_ip):$port"
     env_set APP_BIND "0.0.0.0:$port"
     env_set TRUST_PROXY "0"
@@ -3017,11 +3120,78 @@ cmd_domain() {
     status|"") domain_status ;;
 
     set) domain_set "$target" ;;
+    add|alias) domain_alias_add "$target" ;;
+    rm|unalias) domain_alias_rm "$target" ;;
     port|off) domain_port "$target" "$action" ;;
-    *) usage; die "未知用法：domain ${action}（可用：status / set <域名> / port [端口] / off）" ;;
+    *) usage; die "未知用法：domain ${action}（可用：status / set <域名> / add <别名> / rm <别名> / port [端口] / off）" ;;
   esac
 }
 
+# ---------------- 别名域名：一个站点绑多个域名 ----------------
+# 借鉴 kejilion 的「为现有站点再关联一个新域名」：主域名负责对外形象，
+# 别名域名（老域名、备用域名、www 和不带 www 同时存在）都指向同一个站点，各自带一张证书。
+# SITE_ALIASES 在 .env 里空格分隔，Caddy 会为每个域名都自动签发。
+domain_alias_add() {
+  local main a
+  main="$(env_value SITE_DOMAIN)"
+  [ -n "$main" ] || die "当前是 IP + 端口模式，没有域名可加别名 —— 先执行：$0 domain set 你的域名"
+
+  a="$(domain_normalize "${1:-}")"
+  if [ -z "$a" ] && can_ask; then
+    ui_section "别名域名" > /dev/tty
+    ui_hint "只写域名本身，不要带 https://，例如 www.example.com" > /dev/tty
+    ask "要绑定的域名" ""
+    a="$(domain_normalize "$REPLY")"
+  fi
+  [ -n "$a" ] || die "没给域名，已取消（也可以写成：$0 domain add www.example.com）"
+  is_valid_domain "$a" || die "「$a」不像一个合法域名（示例：www.example.com）"
+  if [ "$a" = "$main" ]; then
+    die "$a 已经是主域名了，不用再加"
+  fi
+  if domain_aliases | grep -Fxq "$a"; then
+    die "$a 已经是别名域名了（当前别名：$(domain_aliases | tr '\n' ' ')）"
+  fi
+
+  ui_kv "主域名" "$main"
+  ui_kv "新增别名" "${C_B}${a}${C_RESET}"
+  ui_hint "别名同样会自动申请 HTTPS 证书；请先把 ${a} 的 A 记录指向本机 IP"
+
+  domain_aliases_write "$(domain_aliases; echo "$a")"
+
+  # 只重建 Caddy：换别名不影响应用镜像，更不该重新 build
+  compose up -d --force-recreate --no-build caddy 2>/dev/null || compose up -d --force-recreate caddy
+
+  local tries=0
+  while [ "$tries" -lt 6 ]; do
+    domain_https_ok "$a" && break
+    tries=$((tries + 1))
+    [ "$tries" -ge 6 ] && break
+    printf "  等待 ${a} 证书签发…（第 %d/6 次）\n" "$tries"
+    sleep 5
+  done
+  if domain_https_ok "$a"; then
+    ui_ok "https://${a} 已可访问"
+  else
+    ui_warn "https://${a} 暂时不通：多半是 DNS 还没解析到本机"
+    ui_hint "解析生效后重跑：$0 domain status"
+  fi
+  return 0
+}
+
+domain_alias_rm() {
+  local a found=0 current
+  a="$(domain_normalize "${1:-}")"
+  [ -n "$a" ] || die "没给域名，已取消（也可以写成：$0 domain rm www.example.com）"
+  current="$(domain_aliases)"
+  printf '%s\n' "$current" | grep -Fxq "$a" && found=1
+  [ "$found" -eq 1 ] || die "${a} 不在别名列表里（当前别名：$(printf '%s' "$current" | tr '\n' ' ')）"
+
+  ui_kv "移除别名" "${C_B}${a}${C_RESET}"
+  domain_aliases_write "$(printf '%s\n' "$current" | grep -Fvx "$a")"
+  compose up -d --force-recreate --no-build caddy 2>/dev/null || compose up -d --force-recreate caddy
+  log "别名 ${a} 已移除（证书文件留在数据卷里，不影响主域名）"
+  domain_status
+}
 # ---------------- 切到域名 + 自动 HTTPS ----------------
 domain_set() {
   local d="$1"
@@ -3048,7 +3218,7 @@ domain_set() {
   step_begin "检查前提条件（DNS 与 80/443）"
   local ip resolved ok=1
   ip="$(detect_ip)"
-  resolved="$(getent hosts "$d" 2>/dev/null | awk '{print $1}' | head -n1)"
+  resolved="$(domain_resolved_ips "$d" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
   ui_kv "本机公网 IP" "${ip:-（探测失败）}"
   if [ -z "$resolved" ]; then
     ui_warn "${d} 还解析不出 IP"
@@ -3085,8 +3255,13 @@ domain_set() {
 
   step_begin "写入配置"
   domain_apply "$d"
+  # 别名里如果正好有旧主域名，会和新主域名重复成同一个站点标签 —— 顺手摘掉
+  local keep
+  keep="$(domain_aliases | grep -Fvx "$d" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+  [ "$(env_value SITE_ALIASES)" != "$keep" ] && env_set SITE_ALIASES "$keep"
   ui_kv "SITE_URL" "$(env_value SITE_URL)"
   ui_kv "SITE_DOMAIN" "$(env_value SITE_DOMAIN)"
+  ui_kv "SITE_ALIASES" "$(env_value SITE_ALIASES)"
   ui_kv "APP_BIND" "$(env_value APP_BIND)"
   ui_kv "TRUST_PROXY" "$(env_value TRUST_PROXY)"
   ui_kv "COMPOSE_PROFILES" "$(env_value COMPOSE_PROFILES)"
@@ -3668,6 +3843,537 @@ cmd_info() {
   echo
   return 0
 }
+# ---------- 网络测速 ----------
+# 借鉴 kejilion.sh 测试脚本合集里的「网络测速」：先看延迟，再看带宽。
+# 全程只发请求不装任何东西；系统里没有 speedtest-cli 时用 curl 拉固定大小文件近似测速，
+# 并明确告诉用户这是近似值，免得把估算当精确结果。
+
+# 单个目标的握手 + 首字节 + 总耗时（毫秒）。走 curl 而非 ping，测的是「真实访问」路径。
+speedtest_probe() {
+  local url="$1" label="$2" out
+  # curl 失败时也会输出 -w 模板（全 0），所以必须看退出码，否则会把超时显示成「0 ms」
+  if ! out="$(curl -o /dev/null -sS --max-time 10 \
+    -w '%{time_namelookup} %{time_connect} %{time_starttransfer} %{time_total}' \
+    "$url" 2>/dev/null)"; then
+    printf '  %-22s 探测失败（超时或不可达）\n' "$label"
+    return 0
+  fi
+  # 只留数字和点再判断是否全是 0（curl 失败时会输出 "0 0 0 0"）
+  case "${out//[!0-9.]/}" in
+    0000|000) printf '  %-22s 探测失败（无响应）\n' "$label"; return 0 ;;
+  esac
+  awk -v l="$label" '{
+    printf "  %-22s DNS %5.0f ms   建连 %5.0f ms   首字节 %6.0f ms   总耗时 %6.0f ms\n",
+           l, $1*1000, $2*1000, $3*1000, $4*1000
+  }' <<<"$out"
+}
+
+# 下载 n MB 文件的平均速度（字节/秒）。用 3 秒内的实际传输量估算。
+speedtest_dl() {
+  local url="$1" bytes sec
+  sec=3
+  bytes="$(curl -sS --max-time "$sec" -o /dev/null -w '%{size_download}' "$url" 2>/dev/null || true)"
+  case "$bytes" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$bytes" -lt 100000 ] && return 0
+  awk -v b="$bytes" -v s="$sec" 'BEGIN{printf "%.2f MB/s（≈ %.0f Mbps）", b/s/1048576, b/s*8/1000000}'
+}
+
+# 上行：把 10 MB 内存数据 POST 到 Cloudflare 的公开 __up 端点，同样无需注册。
+# 上传内容全在内存里现造，不落盘、不读任何本机文件。
+speedtest_up() {
+  have curl || return 0
+  local posted
+  posted="$(head -c 10000000 /dev/zero 2>/dev/null | curl -fsS --max-time 15 -o /dev/null \
+    -w '%{size_upload} %{time_total}' -X POST \
+    --data-binary @- 'https://speed.cloudflare.com/__up' 2>/dev/null || true)"
+  case "$posted" in
+    ''|*[!0-9.]*|*" 0"*) printf ''; return 0 ;;
+  esac
+  awk '{
+    if ($2 > 0 && $1 > 0) printf "%.2f MB/s（≈ %.0f Mbps）", $1/$2/1048576, $1/$2*8/1000000
+  }' <<<"$posted"
+}
+
+# ---------- 服务器调优（可选） ----------
+# 借鉴 kejilion 的「内核优化」，但**刻意收窄范围**：只调网络队列和内存策略，
+# 绝不碰 SSH 配置、端口、防火墙 —— 部署脚本擅自改登录方式，最容易把自己锁在门外。
+# 也不是安装流程的一部分，必须显式执行 tune 才会生效。
+
+TUNE_CONF="/etc/sysctl.d/99-qingyu-tune.conf"
+
+# 调优项：键 值 说明
+tune_items() {
+  printf '%s\t%s\t%s\n' \
+    "net.core.default_qdisc"        "fq"        "队列算法；BBR 必须配 fq 才生效" \
+    "net.ipv4.tcp_congestion_control" "bbr"     "拥塞控制；高延迟丢包链路上明显更稳" \
+    "net.ipv4.tcp_fastopen"         "3"         "1=客户端 2=服务端 3=双向，减少握手往返" \
+    "vm.swappiness"                 "10"        "少用 swap；小内存机器更不容易 OOM" \
+    "net.ipv4.tcp_max_syn_backlog"  "4096"      "抗突发连接，抗小流量攻击" \
+    "net.core.somaxconn"            "4096"      "同上：accept 队列上限"
+}
+
+tune_get() { sysctl -n "$1" 2>/dev/null || echo ""; }
+
+tune_status() {
+  local key want have_v
+  ui_banner "服务器调优" "看看这台机器的网络栈调到什么状态了（只读）"
+  ui_section "当前内核参数"
+  while IFS="$(printf '\t')" read -r key want note; do
+    [ -n "$key" ] || continue
+    have_v="$(tune_get "$key")"
+    if [ -z "$have_v" ]; then
+      ui_kv "$key" "读不到（可能不支持）"
+    elif [ "$have_v" = "$want" ]; then
+      ui_kv "$key" "${have_v}（已调优）"
+    else
+      ui_kv "$key" "${have_v}（建议 ${want}）"
+    fi
+  done < <(tune_items)
+
+  ui_section "支持情况"
+  local avail cc
+  avail="$(tune_get net.ipv4.tcp_available_congestion_control)"
+  cc="$(tune_get net.ipv4.tcp_congestion_control)"
+  ui_kv "内核可用算法" "${avail:-读不到}"
+  ui_kv "当前算法" "${cc:-读不到}"
+  case "$avail" in
+    *bbr*) ui_ok "内核支持 BBR，可以调优" ;;
+    *) ui_warn "这个内核不支持 BBR（需要 4.9 以上），调优时会跳过拥塞控制那项" ;;
+  esac
+  if [ -f "$TUNE_CONF" ]; then
+    ui_kv "配置文件" "$TUNE_CONF（已生效）"
+  else
+    ui_kv "配置文件" "还没有（跑 $0 tune 会创建）"
+  fi
+}
+
+tune_apply() {
+  need_root
+  if [ -f "$TUNE_CONF" ]; then
+    ui_warn "已经调过优了，配置文件在 ${TUNE_CONF}"
+    ui_hint "想改回默认：$0 tune --restore"
+    return 0
+  fi
+  have sysctl || die "这台机器没有 sysctl，调不了"
+
+  local avail
+  avail="$(tune_get net.ipv4.tcp_available_congestion_control)"
+
+  {
+    printf '# 由 %s tune 生成 —— 网络队列与内存策略，不涉及 SSH / 防火墙\n' "$0"
+    printf '# 想撤销：%s tune --restore\n' "$0"
+    tune_items | while IFS="$(printf '\t')" read -r key want note; do
+      case "$key" in
+        net.ipv4.tcp_congestion_control)
+          case "$avail" in
+            *bbr*) printf '%s = %s\n' "$key" "$want" ;;
+            *) continue ;;   # 内核不支持就别写，写了 sysctl -p 会报错
+          esac
+          ;;
+        *) printf '%s = %s\n' "$key" "$want" ;;
+      esac
+    done
+  } > "$TUNE_CONF"
+
+  if sysctl -p "$TUNE_CONF" >/dev/null 2>&1; then
+    ui_ok "已写入 ${TUNE_CONF} 并立即生效"
+  else
+    ui_warn "配置写好了，但 sysctl -p 报了错，逐项看一下："
+    sysctl -p "$TUNE_CONF" 2>&1 | while IFS= read -r line; do ui_hint "$line"; done
+  fi
+
+  echo
+  ui_section "调优后"
+  local key want
+  while IFS="$(printf '\t')" read -r key want note; do
+    [ -n "$key" ] || continue
+    ui_kv "$key" "$(tune_get "$key")"
+  done < <(tune_items)
+
+  echo
+  ui_hint "拥塞控制改成 bbr 会立刻生效，但观察期建议至少跑满 24 小时再看效果"
+  ui_hint "想撤销：$0 tune --restore"
+  return 0
+}
+
+tune_restore() {
+  need_root
+  [ -f "$TUNE_CONF" ] || die "没有调过优（找不到 ${TUNE_CONF}），没什么可撤销的"
+  rm -f "$TUNE_CONF"
+  # 删掉配置只保证「以后不再加载」；当前内核里的值要显式写回默认才真的变回去
+  sysctl -w net.core.default_qdisc=pfifo_fast >/dev/null 2>&1 || true
+  sysctl -w net.ipv4.tcp_fastopen=1 >/dev/null 2>&1 || true
+  sysctl -w vm.swappiness=60 >/dev/null 2>&1 || true
+  sysctl -w net.ipv4.tcp_max_syn_backlog=128 >/dev/null 2>&1 || true
+  sysctl -w net.core.somaxconn=128 >/dev/null 2>&1 || true
+  ui_ok "已删除 ${TUNE_CONF}，并把上面几项写回内核默认值"
+  ui_hint "拥塞控制（tcp_congestion_control）在多数发行版上会保持当前值直到重启"
+  ui_hint "重启机器后就彻底回到默认了"
+  return 0
+}
+
+cmd_tune() {
+  if [ "$TUNE_RESTORE" = "1" ]; then
+    tune_restore
+    return 0
+  fi
+
+  tune_status
+  echo
+
+  if [ "$TUNE_APPLY" = "1" ]; then
+    tune_apply
+    return 0
+  fi
+
+  ui_section "要现在调优吗"
+  ui_hint "只改网络队列和内存策略，不碰 SSH / 端口 / 防火墙"
+  ui_hint "随时可以 $0 tune --restore 撤销"
+  # can_ask 只看 /dev/tty 的权限位；容器里没有控制终端时权限看着可读、实际 open 会失败，
+  # 所以这里再做一次真实探测，避免直接崩在重定向上。
+  local tty_ok=0
+  : 2>/dev/null > /dev/tty && tty_ok=1
+  if [ "$ASSUME_YES" = "1" ]; then
+    REPLY="y"
+  elif [ "$tty_ok" = "1" ] && can_ask; then
+    ui_section "确认" 2>/dev/null > /dev/tty
+    ui_hint "输入 y 执行调优，其他任意键跳过" 2>/dev/null > /dev/tty
+    ask "要调优吗" "n"
+  else
+    REPLY="n"
+  fi
+  case "$REPLY" in
+    y|Y|yes|YES) tune_apply ;;
+    *) ui_hint "已跳过。想调的时候：$0 tune" ;;
+  esac
+  return 0
+}
+cmd_speedtest() {
+  local ip
+  ui_banner "网络测速" "先看延迟，再看带宽（只发请求，不改任何配置）"
+
+  ip="$(detect_ip 2>/dev/null || true)"
+  [ -n "$ip" ] && ui_kv "本机出口 IP" "$ip"
+  ui_kv "拥塞控制" "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '读不到')"
+
+  ui_section "延迟（DNS / 建连 / 首字节）"
+  if have curl; then
+    speedtest_probe "https://www.cloudflare.com/" "Cloudflare" || ui_warn "Cloudflare 探测失败（可能是网络不通或被墙）"
+    speedtest_probe "https://www.google.com/" "Google" || true
+    speedtest_probe "https://www.baidu.com/" "百度（国内）" || true
+    speedtest_probe "https://mirrors.aliyun.com/" "阿里云镜像" || true
+  else
+    ui_warn "没装 curl，跳过延迟探测" "apt-get install -y curl"
+  fi
+
+  ui_section "下载带宽（近似值）"
+  if have speedtest-cli || have speedtest; then
+    ui_hint "检测到 speedtest-cli，直接跑官方测速"
+    have speedtest-cli && speedtest-cli --simple 2>/dev/null || speedtest --simple 2>/dev/null || ui_warn "speedtest 执行失败"
+  else
+    ui_hint "系统里没有 speedtest-cli，用 Cloudflare 端点估算（误差可达 20%）"
+    ui_hint "想要准确值可自行安装：apt-get install -y speedtest-cli"
+    local dl up
+    dl="$(speedtest_dl "https://speed.cloudflare.com/__down?bytes=25000000")"
+    [ -n "$dl" ] && ui_kv "单线程下载" "$dl" || ui_warn "下载测速失败（出网被限速或 Cloudflare 不可达）"
+    up="$(speedtest_up)"
+    if [ -n "$up" ]; then
+      ui_kv "单线程上传" "$up"
+    else
+      ui_hint "上传测不出来（很多机房禁了出站 POST，不一定是故障）"
+    fi
+  fi
+
+  echo
+  ui_hint "延迟高不代表网站慢 —— 我们的图片有反代加速，实际观感以真实访问为准"
+  ui_hint "服务器本身没问题时，先跑：./deploy/install.sh doctor"
+  return 0
+}
+# ---------- 系统信息查询 ----------
+# 借鉴 kejilion.sh 的「系统信息查询」：买机器、机器变卡、或者想知道「这台 VPS 到底什么家底」时，
+# 一条命令看完 CPU / 内存 / 磁盘 / 负载 / 网络 / 归属地。
+# 全程只读，不装任何东西，也不要求 root；读不到的项直接留空，不会中断。
+
+# CPU 占用：取两次 /proc/stat 的差值算 1 秒内的平均值（读不到就返回空）
+sysinfo_cpu_usage() {
+  [ -r /proc/stat ] || return 0
+  local a b
+  a="$(awk '/^cpu /{print $2,$3,$4,$5,$6,$7,$8,$9; exit}' /proc/stat)"
+  sleep 1
+  b="$(awk '/^cpu /{print $2,$3,$4,$5,$6,$7,$8,$9; exit}' /proc/stat)"
+  printf '%s\n%s\n' "$a" "$b" | awk '
+    function busy(){ return $1+$2+$3+$6+$7+$8 }              # user+nice+system+irq+softirq+steal
+    function total(){ return $1+$2+$3+$4+$5+$6+$7+$8 }
+    NR==1 { u1=busy(); t1=total(); next }
+    { u=busy(); t=total(); d=t-t1; printf "%.0f", (d>0 && t>0) ? (u-u1)*100/d : 0 }'
+}
+
+sysinfo_mem() {
+  [ -r /proc/meminfo ] || return 0
+  awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{
+    if (t>0) printf "%.2f/%.2f GB（已用 %.0f%%）", (t-a)/1048576, t/1048576, (t-a)*100/t }' /proc/meminfo
+}
+
+sysinfo_mem_free() {
+  [ -r /proc/meminfo ] || return 0
+  awk '/^MemAvailable:/{printf "%.0f MB", $2/1024}' /proc/meminfo
+}
+
+sysinfo_swap() {
+  [ -r /proc/meminfo ] || return 0
+  awk '/^SwapTotal:/{t=$2} /^SwapFree:/{f=$2} END{
+    if (t==0) printf "无"; else printf "%.0f/%.0f MB（已用 %.0f%%）", (t-f)/1024, t/1024, (t-f)*100/t }' /proc/meminfo
+}
+
+sysinfo_disk() {
+  local path="$1"
+  [ -n "$path" ] && [ -e "$path" ] || return 0
+  df -h "$path" 2>/dev/null | awk 'NR==2 {printf "%s / %s（已用 %s）", $3, $2, $5}'
+}
+
+sysinfo_net_total() {
+  [ -r /proc/net/dev ] || return 0
+  local col=2
+  [ "${1:-rx}" = "tx" ] && col=10
+  awk -v c="$col" 'NR>2 && $1 !~ /^lo:/ {s+=$c} END{printf "%.2f GB", s/1073741824}' /proc/net/dev
+}
+
+# 系统运行时长（/proc/uptime，单位秒 → 人话）
+sysinfo_uptime() {
+  [ -r /proc/uptime ] || return 0
+  local s d h m
+  s="$(cut -d. -f1 /proc/uptime 2>/dev/null | tr -d ' ')"
+  case "$s" in ''|*[!0-9]*) return 0 ;; esac
+  d=$((s / 86400)); h=$(((s % 86400) / 3600)); m=$(((s % 3600) / 60))
+  if [ "$d" -gt 0 ]; then printf '%d 天 %d 小时' "$d" "$h"
+  elif [ "$h" -gt 0 ]; then printf '%d 小时 %d 分' "$h" "$m"
+  else printf '%d 分' "$m"; fi
+}
+
+# TCP / UDP 连接数（ss 是标配；没有就退回 netstat，都没有就留空）
+sysinfo_conn_count() {
+  local proto="$1" flag="-t" n=""
+  [ "$proto" = "u" ] && flag="-u"
+  if have ss; then
+    n="$(ss -H "$flag" 2>/dev/null | wc -l | tr -d ' ')"
+    # 老版本的 ss 不支持 -H：多出来的一行是表头，减掉即可
+    [ -n "$n" ] || n="$(ss "$flag" 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')"
+  elif have netstat; then
+    n="$(netstat "$flag" 2>/dev/null | awk 'NR>2 && ($1 ~ /^tcp/ || $1 ~ /^udp/){c++} END{print c+0}')"
+  fi
+  printf '%s' "$n"
+}
+
+# ---------- 清理磁盘（Docker 侧） ----------
+# 反复 upgrade 的代价：本机构建每次都会留下悬空镜像和构建缓存。
+# 20G 的小机器上跑一年，这两项能悄悄吃掉十几 G，而磁盘告警只会说「清理备份」—— 指错方向。
+# 这里只删「一定没人再用」的东西：悬空镜像（dangling）和构建缓存。
+# 绝不碰运行中的镜像、具名镜像和数据卷 —— `docker system prune -a --volumes` 那套太危险，不做。
+
+clean_docker_usage() {
+  # docker system df --format 在旧版本 Docker 上不支持，退回可读输出
+  docker system df 2>/dev/null || echo "读不到（Docker 版本太老）"
+}
+
+# 把 docker 报的 "1.234GB" / "0B" / "512.3MB (some)" 解析成 GB
+# 注意：awk 里调用未定义的函数是致命错误，不能拿函数名当条件用
+clean_size_gb() {
+  awk '
+    {
+      v = $1
+      sub(/[ \t(].*$/, "", v)      # 去掉 " (some)" 这类后缀
+      sub(/B$/, "", v)            # 去掉结尾的 B
+      u = tolower(substr(v, length(v), 1))
+      m = 1
+      if (u == "k") m = 1024
+      else if (u == "m") m = 1048576
+      else if (u == "g") m = 1073741824
+      else if (u == "t") m = 1099511627776
+      if (v + 0 > 0) printf "%.2f", (v + 0) * m / 1073741824
+    }'
+}
+
+# 构建缓存的可回收量：builder prune 能全额释放它，这个数是准的
+clean_build_cache_gb() {
+  docker system df --format '{{.Type}}\t{{.Reclaimable}}' 2>/dev/null |
+    awk -F'\t' 'tolower($1) ~ /build/ {print $2; exit}' | clean_size_gb
+}
+
+# 镜像可回收量：这是**上界**。里面混着「没人用的具名镜像」，
+# 而我们只删悬空镜像（dangling），所以实际释放会小于这个数。
+clean_images_upper_gb() {
+  docker system df --format '{{.Type}}\t{{.Reclaimable}}' 2>/dev/null |
+    awk -F'\t' 'tolower($1) ~ /image/ {print $2; exit}' | clean_size_gb
+}
+
+cmd_clean() {
+  ui_banner "清理磁盘" "看清 Docker 占了多少，再决定删什么"
+
+  if ! have docker || ! docker info >/dev/null 2>&1; then
+    ui_warn "Docker 没运行，没什么可清的"
+    return 0
+  fi
+
+  ui_section "当前占用"
+  clean_docker_usage
+
+  local cache_gb img_gb reclaim
+  cache_gb="$(clean_build_cache_gb)"
+  img_gb="$(clean_images_upper_gb)"
+  # 空字符串兜成 0，避免后面做数值比较时炸掉
+  [ -n "$cache_gb" ] || cache_gb=0
+  [ -n "$img_gb" ] || img_gb=0
+  reclaim="$(awk -v a="$cache_gb" -v b="$img_gb" 'BEGIN{printf "%.2f", a+b}')"
+  echo
+  ui_kv "构建缓存可回收" "${cache_gb} GB（builder prune 能全额释放）"
+  ui_kv "镜像可回收" "${img_gb} GB（上界；实际只删其中的悬空部分）"
+
+  if [ "$(awk -v a="$reclaim" 'BEGIN{print (a<0.01)?1:0}')" = "1" ]; then
+    echo
+    ui_ok "没什么可回收的，磁盘很干净"
+    return 0
+  fi
+
+  ui_section "会删掉什么"
+  ui_hint "悬空镜像：本地构建升级后没人再引用的中间层"
+  ui_hint "构建缓存：下次 build 会慢一点，但不会影响运行中的站点"
+  ui_hint "不会碰：运行中的镜像、具名镜像、数据库与上传的数据卷"
+
+  local tty_ok=0
+  : 2>/dev/null > /dev/tty && tty_ok=1
+  if [ "$ASSUME_YES" = "1" ]; then
+    REPLY="y"
+  elif [ "$tty_ok" = "1" ] && can_ask; then
+    ui_section "确认" 2>/dev/null > /dev/tty
+    ui_hint "输入 y 执行清理（可回收 ${reclaim} GB），其他任意键跳过" 2>/dev/null > /dev/tty
+    ask "要清理吗" "n"
+  else
+    REPLY="n"
+  fi
+
+  case "$REPLY" in
+    y|Y|yes|YES)
+      echo
+      # 只删悬空镜像：-f 少了这个会提示确认，且 --filter dangling 只匹配无标签镜像
+      docker image prune -f --filter "dangling=true" >/dev/null 2>&1 \
+        && ui_ok "悬空镜像已清理" \
+        || ui_warn "清理悬空镜像失败（权限不足？）" "docker image prune -f --filter dangling=true"
+      docker builder prune -f >/dev/null 2>&1 \
+        && ui_ok "构建缓存已清理" \
+        || ui_warn "清理构建缓存失败" "docker builder prune -f"
+      echo
+      ui_section "清理后"
+      clean_docker_usage
+      ;;
+    *)
+      ui_hint "已跳过。想清的时候：$0 clean"
+      ;;
+  esac
+  return 0
+}
+cmd_sysinfo() {
+  local hostname os kernel arch cpu_model cores cpu_freq cpu_used load site_url public_ip6
+  local mem mem_free swap disk_root disk_data tcp udp rx tx cc qdisc dns
+  local public_ip public_ip6 geo country city isp data_dir
+
+  hostname="$(uname -n 2>/dev/null || true)"
+  os="$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | head -n1 | tr -d '"')"
+  kernel="$(uname -r 2>/dev/null || true)"
+  arch="$(uname -m 2>/dev/null || true)"
+
+  ui_banner "系统信息" "这台机器的家底（只读，不改动任何配置）"
+
+  ui_section "主机"
+  ui_kv "主机名" "${hostname:-未知}"
+  ui_kv "系统版本" "${os:-未知}"
+  ui_kv "内核" "${kernel:-未知}"
+  ui_kv "架构" "${arch:-未知}"
+  ui_kv "时区" "$(date '+%Z %z' 2>/dev/null || true)"
+  ui_kv "运行时长" "$(sysinfo_uptime)"
+
+  ui_section "CPU"
+  cpu_model="$(lscpu 2>/dev/null | sed -n 's/^Model name:[[:space:]]*//p' | head -n1)"
+  [ -n "$cpu_model" ] || cpu_model="$(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo 2>/dev/null)"
+  cores="$(nproc 2>/dev/null || true)"
+  cpu_freq="$(awk -F': ' '/^cpu MHz/{printf "%.2f GHz", $2/1000; exit}' /proc/cpuinfo 2>/dev/null)"
+  cpu_used="$(sysinfo_cpu_usage)"
+  load="$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || true)"
+  ui_kv "型号" "${cpu_model:-未知}"
+  ui_kv "核心数" "${cores:-未知}"
+  [ -n "$cpu_freq" ] && ui_kv "当前频率" "$cpu_freq"
+  [ -n "$cpu_used" ] && ui_kv "CPU 占用" "${cpu_used}%（近 1 秒采样）"
+  ui_kv "系统负载" "${load:-未知}"
+
+  ui_section "内存与磁盘"
+  mem="$(sysinfo_mem)"
+  mem_free="$(sysinfo_mem_free)"
+  swap="$(sysinfo_swap)"
+  ui_kv "物理内存" "${mem:-读不到}"
+  [ -n "$mem_free" ] && ui_kv "可用内存" "$mem_free"
+  ui_kv "虚拟内存" "${swap:-读不到}"
+  disk_root="$(sysinfo_disk /)"
+  ui_kv "系统盘 /" "${disk_root:-读不到}"
+  data_dir="$(env_value DATA_DIR 2>/dev/null || true)"
+  [ -n "$data_dir" ] || data_dir="$INSTALL_DIR/data"
+  disk_data="$(sysinfo_disk "$data_dir")"
+  [ -n "$disk_data" ] && ui_kv "数据目录" "${data_dir}：${disk_data}"
+
+  ui_section "网络"
+  public_ip="$(detect_ip 2>/dev/null || true)"
+  public_ip6="$(detect_ip6 2>/dev/null || true)"
+  ui_kv "公网 IPv4" "${public_ip:-探测失败（不影响使用）}"
+  ui_kv "公网 IPv6" "${public_ip6:-（没有或未启用）}"
+  # 归属地查询走 ipinfo.io，国内机器经常连不上 —— 拿不到就留空，不报错
+  geo="$(curl -fsS --max-time 5 https://ipinfo.io 2>/dev/null || true)"
+  if [ -n "$geo" ]; then
+    country="$(printf '%s' "$geo" | tr -d '"' | sed -n 's/^country:[[:space:]]*//p' | head -n1)"
+    city="$(printf '%s' "$geo" | tr -d '"' | sed -n 's/^city:[[:space:]]*//p' | head -n1)"
+    isp="$(printf '%s' "$geo" | tr -d '"' | sed -n 's/^org:[[:space:]]*//p' | head -n1)"
+    [ -n "$isp" ] && ui_kv "运营商 / 归属组织" "$isp"
+    [ -n "$country$city" ] && ui_kv "归属地" "$(printf '%s %s' "$country" "$city" | sed 's/[[:space:]]*$//')"
+  fi
+  ui_kv "网卡累计收 / 发" "$(sysinfo_net_total rx) / $(sysinfo_net_total tx)"
+  cc="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)"
+  qdisc="$(sysctl -n net.core.default_qdisc 2>/dev/null || true)"
+  [ -n "$cc$qdisc" ] && ui_kv "拥塞控制 / 队列" "${cc:-?} ${qdisc:-?}"
+  dns="$(awk '/^nameserver/{printf "%s ", $2}' /etc/resolv.conf 2>/dev/null | sed 's/[[:space:]]*$//')"
+  [ -n "$dns" ] && ui_kv "DNS" "$dns"
+  tcp="$(sysinfo_conn_count t)"
+  udp="$(sysinfo_conn_count u)"
+  [ -n "$tcp" ] && ui_kv "TCP / UDP 连接" "${tcp} / ${udp:-?}"
+
+  # 顺带看一眼站点状态：机器是机器，站点是站点，两件事一起看更省事。
+  # 只在真的读到 SITE_URL 时才显示，避免打印出一堆空值。
+  site_url="$(env_value SITE_URL 2>/dev/null || true)"
+  if [ -n "$site_url" ]; then
+    ui_section "站点"
+    ui_kv "访问地址" "$site_url"
+    ui_kv "安装目录" "$INSTALL_DIR"
+    if have docker && docker info >/dev/null 2>&1; then
+      ui_kv "应用容器" "$(docker inspect -f '{{.State.Status}}' qingyu-app 2>/dev/null || echo '未找到')"
+    else
+      ui_kv "应用容器" "读不到（Docker 没运行）"
+    fi
+  else
+    ui_hint "这台机器还没部署过 —— 跑一次 bash $0 install 就能建站"
+  fi
+
+  echo
+  # 内存/磁盘的门槛直接给结论，免得用户还要自己换算
+  local mem_kb
+  mem_kb="$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null || true)"
+  if [ -n "$mem_kb" ] && [ "$mem_kb" -lt 1250000 ]; then
+    ui_hint "内存不足 1.2 GB：本地构建容易被系统杀掉，安装时建议加 --prebuilt 直接用现成镜像"
+  fi
+  if [ -n "$disk_root" ]; then
+    local disk_avail
+    disk_avail="$(df -Pk / 2>/dev/null | awk 'NR==2{print $4}' || true)"
+    [ -n "$disk_avail" ] && [ "$disk_avail" -lt 204800 ] \
+      && ui_hint "系统盘可用不足 200 MB：先清理空间再部署 / 更新"
+  fi
+  ui_hint "想逐项排查网站本身的问题：bash $0 doctor"
+  return 0
+}
 # ---------- 一键体检 ----------
 # 用法：./deploy/install.sh doctor
 # 把「网站打不开 / 图片传不上去 / 评论报错」这类问题拆成一组可判定的小项，
@@ -3856,20 +4562,29 @@ cmd_doctor() {
   local ip
   ip="$(detect_ip)"
   if uses_caddy; then
-    local domain resolved probe
+    local domain resolved probe cert cert_end cert_left
     domain="$(env_value SITE_DOMAIN)"
     if [ -z "$domain" ]; then
-      doc_warn "没有配置域名" "用 bash ${install_script} upgrade --domain 你的域名 启用 HTTPS"
+      doc_warn "没有配置域名" "用 bash ${install_script} domain set 你的域名 启用 HTTPS"
     else
-      resolved="$(getent hosts "$domain" 2>/dev/null | awk '{print $1}' | head -n1 || true)"
-      if [ -z "$resolved" ]; then
-        doc_fail "域名 ${domain} 解析不到（证书也签发不了）" "到 DNS 控制台加 A 记录指向 ${ip}"
+      # doctor 里也要用「A + AAAA 全量比对」：域名同时有 v4/v6 记录时，
+      # 只看第一条会误判成解析不一致（老逻辑的坑）
+      if domain_points_here "$domain"; then
+        doc_ok "域名 ${domain} 解析到 $(domain_resolved_ips "$domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')，与本机一致"
       else
-        doc_ok "域名 ${domain} 解析到 ${resolved}"
-        if [ "$resolved" = "$ip" ]; then
-          doc_ok "解析结果与本机公网 IP 一致"
+        resolved="$(domain_resolved_ips "$domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+        if [ -z "$resolved" ]; then
+          doc_fail "域名 ${domain} 解析不到（证书也签发不了）" "到 DNS 控制台加 A 记录指向 ${ip}"
         else
-          doc_warn "解析到 ${resolved}，本机公网 IP 是 ${ip}" "确认 A 记录指向 ${ip}"
+          doc_warn "域名 ${domain} 解析到 ${resolved}，本机公网 IP 是 ${ip}" "确认 A 记录指向 ${ip}"
+        fi
+      fi
+      # AAAA 有记录但机器没有 v6 出口：证书照签，但走 v6 的访客打不开
+      if domain_resolved_ips "$domain" | grep -q ':'; then
+        if [ -z "$(detect_ip6 2>/dev/null || true)" ]; then
+          doc_warn "域名有 AAAA 记录，但这台机器没有公网 IPv6" "给机器开 IPv6，或删掉 AAAA 记录，否则部分访客打不开"
+        else
+          doc_ok "IPv6 记录与本机 IPv6 出口都正常"
         fi
       fi
       probe="$(curl -ksS --max-time 6 "https://${domain}/healthz" 2>/dev/null || true)"
@@ -3877,6 +4592,35 @@ cmd_doctor() {
         doc_ok "HTTPS 对外可访问"
       else
         doc_warn "HTTPS 从本机探测不到（证书未签发，或安全组没放行 443）" "docker logs --tail 30 qingyu-caddy"
+      fi
+      # 别名域名同样要各自解析到本机、各自证书有效 —— 少了 alias 检查，
+      # 「主域名正常但备用域名 502」这类问题只能靠用户自己撞出来
+      local alias
+      for alias in $(domain_aliases); do
+        if [ "$alias" = "$domain" ]; then
+          doc_warn "别名 ${alias} 与主域名重复" "domain rm ${alias} 把它摘掉"
+          continue
+        fi
+        if ! domain_points_here "$alias"; then
+          doc_warn "别名域名 ${alias} 没解析到本机" "到 DNS 控制台加 A 记录指向 ${ip}；否则这个域名打不开"
+        elif ! curl -ksS --max-time 6 -o /dev/null "https://${alias}/healthz" 2>/dev/null; then
+          doc_warn "别名域名 ${alias} 的 HTTPS 探测失败" "证书可能还没签发：docker logs --tail 30 qingyu-caddy"
+        else
+          doc_ok "别名域名 ${alias} 正常"
+        fi
+      done
+      # 证书到期时间：签发成功不等于长期有效，到期前 15 天就要提醒
+      cert="$INSTALL_DIR/data/caddy/certificates/${domain}/${domain}.crt"
+      cert_end="$(cert_expiry_date "$cert")"
+      cert_left="$(cert_days_left "$cert_end")"
+      if [ -n "$cert_end" ] && [ -n "$cert_left" ]; then
+        if [ "$cert_left" -lt 0 ]; then
+          doc_fail "HTTPS 证书已于 ${cert_end} 过期" "确认 80/443 通畅后执行：bash ${install_script} restart"
+        elif [ "$cert_left" -le 15 ]; then
+          doc_warn "HTTPS 证书 ${cert_end} 到期，只剩 ${cert_left} 天" "Caddy 会自动续签；若未更新看：docker logs --tail 30 qingyu-caddy"
+        else
+          doc_ok "HTTPS 证书有效，${cert_end} 到期（还剩 ${cert_left} 天）"
+        fi
       fi
     fi
   else
@@ -3906,13 +4650,22 @@ cmd_doctor() {
   doc_head "磁盘与内存"
   local avail_kb mem_free_mb
   avail_kb="$(df -Pk "$INSTALL_DIR" 2>/dev/null | awk 'NR==2 {print $4}' || true)"
+  # 磁盘紧张时要能指出「是谁吃掉的」：备份只占一点，真正的大头往往是 Docker 构建缓存
+  local reclaim_gb=0
+  # 只报构建缓存：它全额可回收，doctor 的提示才准
+  reclaim_gb="$(clean_build_cache_gb)"
+  [ -n "$reclaim_gb" ] || reclaim_gb=0
+  local fix_hint="清理 ${INSTALL_DIR}/data/backups，或扩容"
+  if [ -n "$reclaim_gb" ] && awk -v a="$reclaim_gb" 'BEGIN{exit !(a>=0.5)}'; then
+    fix_hint="bash $0 clean 可回收约 ${reclaim_gb} GB 的构建缓存（外加部分悬空镜像），数据不动"
+  fi
   if [ -n "$avail_kb" ]; then
     if [ "$avail_kb" -lt 204800 ]; then
-      doc_fail "磁盘只剩 $((avail_kb / 1024)) MB，随时会写满" "清理 ${INSTALL_DIR}/data/backups，或扩容"
+      doc_fail "磁盘只剩 $((avail_kb / 1024)) MB，随时会写满" "$fix_hint"
     elif [ "$avail_kb" -lt 1048576 ]; then
-      doc_warn "磁盘可用 $((avail_kb / 1024)) MB"
+      doc_warn "磁盘可用 $((avail_kb / 1024)) MB" "$fix_hint"
     else
-      doc_ok "磁盘可用 $((avail_kb / 1024)) MB"
+      doc_ok "磁盘可用 $((avail_kb / 1024)) MB（构建缓存可回收 ${reclaim_gb} GB）"
     fi
   else
     doc_warn "读不到磁盘容量"
@@ -4187,6 +4940,7 @@ maybe_show_menu() {
     ui_opt  3 "一键体检"     "Docker / 容器 / 端口 / 防火墙 / 公网逐项检查"
     ui_opt  4 "部署信息"     "访问地址、初始化密钥、版本、文章数"
     ui_opt  5 "运行状态"     "容器与健康检查"
+    ui_opt 17 "服务器家底"   "CPU / 内存 / 磁盘 / 负载 / 网络（借鉴 kejilion 的系统信息查询）"
     ui_opt  6 "备份数据"     "数据库快照到 data/backups"
     ui_opt  7 "查看日志"     "实时输出应用日志（Ctrl+C 退出）"
     echo
@@ -4199,6 +4953,9 @@ maybe_show_menu() {
     ui_opt 13 "打包迁移"     "打成 tar.gz，方便搬到新服务器"
     ui_opt 14 "改域名"       "查看 / 切换域名，自动申请 HTTPS 证书"
     ui_opt 15 "卸载"         "删除容器（数据卷保留）"
+    ui_opt 18 "电脑测速"     "回程延迟 + 上下行带宽，只出数字不改配置"
+    ui_opt 19 "服务器调优"   "BBR + 队列 + 内存策略；不碰 SSH，可撤销"
+    ui_opt 20 "清理磁盘"     "只删 Docker 悬空镜像 + 构建缓存，数据一律不动"
     echo
     ui_section "终端快捷键"
     if [ -n "$shortcut_key" ]; then
@@ -4210,7 +4967,7 @@ maybe_show_menu() {
     ui_opt  0 "退出" ""
     ui_rule
     ui_hint "改端口 / 站点地址 → 编辑 ${INSTALL_DIR}/.env 后选 8 生效"
-  } > /dev/tty 2>/dev/null || return 0
+  } 2>/dev/null > /dev/tty || return 0
   ask "请输入数字" "0"
   case "$REPLY" in
     1)  COMMAND="update" ;;
@@ -4228,6 +4985,10 @@ maybe_show_menu() {
     13) COMMAND="migrate" ;;
     14) COMMAND="domain" ;;
     15) COMMAND="uninstall" ;;
+    17) COMMAND="sysinfo" ;;
+    18) COMMAND="speedtest" ;;
+    19) COMMAND="tune" ;;
+    20) COMMAND="clean" ;;
     16)
       # 交互式改键：用户已在菜单里明确选择，忽略这次启动参数里的 --no-shortcut。
       SHORTCUT_OFF=0
@@ -4240,7 +5001,7 @@ maybe_show_menu() {
       esac
       ;;
     0)  log "已退出（再次运行本脚本可重新打开菜单）"; exit 0 ;;
-    *)  warn "没看懂这个选择（请输入 0-16），先退出"; exit 1 ;;
+    *)  warn "没看懂这个选择（请输入 0-20），先退出"; exit 1 ;;
   esac
 }
 
@@ -4265,6 +5026,10 @@ case "$COMMAND" in
   logs) cmd_logs ;;
   status) cmd_status ;;
   info) cmd_info ;;
+  sysinfo) cmd_sysinfo ;;
+  speedtest) cmd_speedtest ;;
+  tune) cmd_tune ;;
+  clean) cmd_clean ;;
   doctor) cmd_doctor ;;
   start) cmd_start ;;
   stop) cmd_stop ;;

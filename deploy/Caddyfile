@@ -11,7 +11,10 @@
 	}
 }
 
-{$SITE_DOMAIN:localhost} {
+# 站点标签 = 主域名 + 空格分隔的别名域名（借鉴 kejilion 的「一个站点绑多个域名」）。
+# 别名由 SITE_ALIASES 注入（空格分隔），Caddy 会为每一个都自动申请 HTTPS 证书。
+# 只有一个域名时别名是空的，行为与之前完全一致。
+{$SITE_DOMAIN:localhost} {$SITE_ALIASES} {
 	encode zstd gzip
 
 	# 上传（图片 10MB / 音乐 30MB / 备份）留足余量

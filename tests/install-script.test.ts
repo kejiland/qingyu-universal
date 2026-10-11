@@ -269,7 +269,7 @@ it('边框不再用 tr 拼重复字符（非 UTF-8 locale 下会变乱码）', (
     expect(menu).toContain('shortcut_key="$(shortcut_current_key)"');
     expect(menu).toContain('ui_kv "终端快捷键"');
     expect(menu).toContain('ui_opt 16 "自定义快捷键"');
-    expect(menu).toContain('请输入 0-16');
+    expect(menu).toContain('请输入 0-20');
     // 菜单里能改成字母 / 数字，也能用 - 移除
     expect(menu).toContain('SUBCMD_ARGS="$REPLY"');
     expect(menu).toContain('SUBCMD_ARGS="--remove"');
@@ -291,4 +291,135 @@ it('边框不再用 tr 拼重复字符（非 UTF-8 locale 下会变乱码）', (
     const up = s.slice(s.indexOf('cmd_upgrade() {'));
     expect(up.slice(0, 3000)).toContain('domain_apply "$DOMAIN"');
   });
+  it('系统信息与测速：借鉴 kejilion.sh，但保持只读、不装任何东西', () => {
+    const s = src();
+    // 子命令三处齐全：解析 → 分发 → 帮助
+    expect(s).toMatch(/^cmd_sysinfo\(\) \{/m);
+    expect(s).toMatch(/^cmd_speedtest\(\) \{/m);
+    expect(s).toMatch(/^  sysinfo\) cmd_sysinfo ;;$/m);
+    expect(s).toMatch(/^  speedtest\) cmd_speedtest ;;$/m);
+    expect(s).toMatch(/^    install\|upgrade\|.*\|speedtest\|/m);
+    const help = usageText();
+    expect(help).toContain('sysinfo');
+    expect(help).toContain('speedtest');
+    // 只读：不得出现装包 / 改系统的动作
+    for (const fn of ['cmd_sysinfo', 'cmd_speedtest']) {
+      const start = s.indexOf(`${fn}() {`);
+      const body = s.slice(start, s.indexOf('\n}\n', start));
+      // 只允许把安装命令写在提示文案里（「想装请自行 apt-get install」），不许真去执行
+      expect(body, `${fn} 不该真的执行装包或改系统`).not.toMatch(/^\s*(sudo\s+)?(apt-get|yum|dnf|apk|systemctl|docker)\b/m);
+      expect(body, `${fn} 不该把装包/改系统的命令塞进命令替换里`).not.toMatch(/\$\(\s*(sudo\s+)?(apt-get|yum|dnf|apk|systemctl\s+(start|stop|enable|restart))\b/);
+    }
+    // 兜底：读不到的项必须留空而不是让整条命令失败
+    expect(s).toMatch(/^sysinfo_uptime\(\) \{/m);
+    expect(s).toContain('[ -r /proc/meminfo ] || return 0');
+    expect(s).toMatch(/^detect_ip6\(\) \{/m);
+  });
+
+  it('测速：curl 失败会输出全 0，必须看退出码而不是直接打印', () => {
+    const s = src();
+    const start = s.indexOf('speedtest_probe() {');
+    const body = s.slice(start, s.indexOf('\n}\n', start));
+    // 不能只判空串：curl 失败时 -w 依然会吐 "0 0 0 0"
+    expect(body).toContain('if ! out="$(curl');
+    expect(body).toContain('探测失败');
+    // 下载测速同理：体积太小说明根本没下到东西
+    const dl = s.slice(s.indexOf('speedtest_dl() {'), s.indexOf('\n}\n', s.indexOf('speedtest_dl() {')));
+    expect(dl).toContain('[ "$bytes" -lt 100000 ] && return 0');
+  });
+
+  it('域名解析按 A+AAAA 全量比对，证书到期时间可查', () => {
+    const s = src();
+    // 老的「取第一条再和 IPv4 比」在双栈域名下会误报，必须换成全量包含判断
+    expect(s).toMatch(/^domain_resolved_ips\(\) \{/m);
+    const p = s.slice(s.indexOf('domain_points_here() {'), s.indexOf('\n}\n', s.indexOf('domain_points_here() {')));
+    expect(p).toContain('grep -Fxq "$ip"');
+    // 只留一处「取第一条」的旧逻辑
+    expect(s.match(/awk '\{print \$1\}' \| head -n1"$/gm) ?? []).toHaveLength(0);
+    // 证书到期：domain status 与 doctor 都要能看到
+    expect(s).toMatch(/^cert_expiry_date\(\) \{/m);
+    expect(s).toMatch(/^cert_days_left\(\) \{/m);
+    expect(s).toContain('cert_left" -le 15');
+    expect(s).toContain('HTTPS 证书有效');
+    // AAAA 有记录但机器没 v6 出口 → 提前提醒（这种「一半能开」最难查）
+    expect(s).toContain('没有公网 IPv6');
+  });
+
+  it('只读命令不用 doctor 的计数器（否则会污染体检统计）', () => {
+    const s = src();
+    for (const fn of ['cmd_sysinfo', 'cmd_speedtest', 'domain_status']) {
+      const start = s.indexOf(`${fn}() {`);
+      const body = s.slice(start, s.indexOf('\n}\n', start));
+      expect(body, `${fn} 是只读展示，不该用 doc_ok/doc_warn/doc_fail`).not.toMatch(/\bdoc_(ok|warn|fail|info)\b/);
+    }
+  });
+  it('tune 只调网络与内存，绝不碰 SSH / 端口 / 防火墙', () => {
+    const s = src();
+    const start = s.indexOf('cmd_tune() {');
+    expect(start).toBeGreaterThan(-1);
+    // tune 是唯一会改系统的命令，权限边界必须写死：改错了会把自己锁在门外
+    const whole = s.slice(start, s.indexOf('\n}\n', start));
+    const touched = [whole, ...tuneFuncs(s).map((f) => s.slice(f, s.indexOf('\n}\n', f)))].join('\n');
+    for (const danger of [
+      'sshd_config', 'sshd', 'PasswordAuthentication', 'PermitRootLogin',
+      'Port 22', 'ufw', 'iptables', 'firewall-cmd', 'systemctl restart ssh',
+      'fail2ban',
+    ]) {
+      expect(touched, `tune 不该碰 ${danger}`).not.toContain(danger);
+    }
+    // 调优项必须是白名单式声明，不允许出现任意键值对
+    expect(s).toContain('tune_items() {');
+    expect(whole).toContain('只改网络队列和内存策略');
+  });
+
+  it('tune 必须显式调用，安装流程不会顺手改内核', () => {
+    const s = src();
+    // cmd_tune 只应出现在 dispatch 与菜单里；安装主流程不得调用
+    const occurrences = (s.match(/cmd_tune/g) || []).length;
+    expect(occurrences).toBe(2); // 定义 + dispatch
+    expect(s).not.toMatch(/cmd_tune\s*$/m);
+    // 需要 root 的写操作放在 tune_apply / tune_restore 内部，并前置 need_root
+    for (const fn of ['tune_apply', 'tune_restore']) {
+      const body = s.slice(s.indexOf(`${fn}() {`), s.indexOf('\n}\n', s.indexOf(`${fn}() {`)));
+      expect(body.slice(0, 200), `${fn} 改系统前必须先要 root`).toContain('need_root');
+    }
+    // 有撤销路径
+    expect(s).toContain('tune --restore');
+    expect(s).toContain('rm -f "$TUNE_CONF"');
+  });
+  it('clean 只删悬空镜像和构建缓存，绝不碰数据卷或具名镜像', () => {
+    const s = src();
+    const start = s.indexOf('cmd_clean() {');
+    expect(start).toBeGreaterThan(-1);
+    const body = s.slice(start, s.indexOf('\n}\n', start));
+    // `docker system prune -a --volumes` 会删掉没被容器引用的具名镜像和数据卷，
+    // 备份、上传文件都可能被牵连 —— 这条命令绝不能出现
+    expect(body).not.toMatch(/system\s+prune/);
+    expect(body).not.toMatch(/--volumes|-a\s+--filter/);
+    expect(body).not.toMatch(/volume\s+(rm|prune)/);
+    // 只允许这两种清理
+    expect(body).toContain('docker image prune -f --filter "dangling=true"');
+    expect(body).toContain('docker builder prune -f');
+    // 删之前要让用户看见能回收多少、删的是哪一类
+    expect(body).toContain('clean_docker_usage');
+    expect(body).toContain('会删掉什么');
+  });
+
+  it('docker 体积解析用 awk 算术而不是字符串拼接', () => {
+    const s = src();
+    // 教训：awk 里调用未定义的函数是致命错误，不能拿函数名当条件用
+    const fn = s.slice(s.indexOf('clean_size_gb() {'), s.indexOf('\n}\n', s.indexOf('clean_size_gb() {')));
+    expect(fn).toContain('(v + 0) * m / 1073741824');
+    // 单位换算必须覆盖 GB/MB，不能只有一种
+    for (const unit of ['"k"', '"m"', '"g"', '"t"']) {
+      expect(fn, `少了 ${unit} 的换算`).toContain(unit);
+    }
+  });
 });
+
+// 抽出 tune_* 函数体的范围（tune 的写操作都在这些辅助函数里）
+function tuneFuncs(s: string): number[] {
+  return ['tune_items', 'tune_get', 'tune_status', 'tune_apply', 'tune_restore']
+    .map((f) => s.indexOf(`${f}() {`))
+    .filter((i) => i > -1);
+}
