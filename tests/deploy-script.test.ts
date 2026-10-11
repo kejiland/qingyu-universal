@@ -170,3 +170,35 @@ describe('deploy/qy.sh', () => {
     expect(body).toMatch(/端口必须是数字/);
   });
 });
+describe('deploy/install.sh（curl | bash 引导脚本）', () => {
+  const boot = () => readLf(path.resolve('deploy/install.sh'));
+
+  itBash('语法检查通过（bash -n）', () => {
+    expect(() =>
+      execFileSync('bash', ['-n', 'deploy/install.sh'], { stdio: 'pipe', cwd: bashCwd() })
+    ).not.toThrow();
+  });
+
+  it('下载地址带完整仓库前缀（老版本踩过的 fatal: repository does not exist）', () => {
+    expect(boot()).toContain('https://raw.githubusercontent.com/$REPO/$BRANCH/deploy/qy.sh');
+    // 不允许出现没有协议前缀的裸仓库名克隆
+    expect(boot()).not.toMatch(/git clone[^|]*"\$\{?REPO\}?"/);
+  });
+
+  it('只是薄引导：把活儿交给 qy.sh，不自己实现安装逻辑', () => {
+    const s = boot();
+    expect(s).toContain('exec bash "$TARGET" "$@"');
+    expect(s).not.toContain('docker compose');
+    expect(s.length).toBeLessThan(2500);
+  });
+
+  itBash('拿不到代码时给出可读的错误，而不是静默退出', () => {
+    // 用一个干净的目录，避免命中「已有仓库」那条分支
+    const s = boot()
+      .replace(/^REPO=.*$/m, 'REPO=kejiland/definitely-not-a-real-repo-xyz')
+      .replace(/^APP_DIR=.*$/m, 'APP_DIR=/tmp/qy-boot-test');
+    const out = runBash(s, '');
+    expect(out).toContain('✗');
+    expect(out).toMatch(/下载失败/);
+  });
+});

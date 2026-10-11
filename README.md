@@ -33,8 +33,31 @@
 
 ## 部署（Linux VPS）
 
-需要 Docker 和 Docker Compose，按下面三步手动部署。
-一键安装脚本已移除，正在重新构建中。
+### 方式一：一键脚本（推荐）
+
+需要 Docker、Docker Compose、curl、git，然后：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh | bash
+```
+
+进去就是数字菜单：1 安装 / 2 更新 / 3 回滚 / 4 备份恢复 / 5 启停与日志 / 6 查看状态 /
+7 域名与 HTTPS / 8 体检 / 9 清理磁盘 / 0 退出。全程不用手写 `.env`。
+
+也可以直接跑单个动作：
+
+```bash
+bash deploy/qy.sh install     # 安装
+bash deploy/qy.sh update      # 更新（自动先备份）
+bash deploy/qy.sh status      # 看状态
+bash deploy/qy.sh doctor      # 体检
+```
+
+默认装在 `/opt/qingyu-universal`，想换位置就 `export QINGYU_DIR=/你的路径`。
+
+### 方式二：手动部署
+
+需要 Docker 和 Docker Compose，按下面三步走。
 
 **1. 准备配置**
 
