@@ -1,7 +1,7 @@
 # ============================================================
 # 轻语博客 · 自托管通用版 —— Windows 一键部署（Docker Desktop）
 # ------------------------------------------------------------
-# 与 Linux 版 deploy/install.sh 能力对齐：同样的 .env 字段、同样的
+# 能力对齐说明：同样的 .env 字段、同样的
 # 端口/数据库选择、同样的日常运维子命令。
 #
 # 用法（PowerShell）：
@@ -68,7 +68,7 @@ function Ask($question, $default = "1") {
 
 $EnvFile = Join-Path $InstallDir '.env'
 
-# ---------- .env 读写（install.sh 生成的配置以 .env 为准）----------
+# ---------- .env 读写（配置以 .env 为准）----------
 function Get-EnvValue([string]$key, [string]$fallback = "") {
   if (-not (Test-Path $EnvFile)) { return $fallback }
   $line = Get-Content $EnvFile -ErrorAction SilentlyContinue |
@@ -469,7 +469,7 @@ function Show-Status {
 }
 
 # ---------- 系统信息查询 ----------
-# 与 Linux 版 install.sh 的 sysinfo 对齐（借鉴 kejilion.sh 的系统信息查询）：
+# 系统信息查询对齐 kejilion.sh 的做法：
 # 买机器、机器变卡、或想知道「这台机器到底什么家底」时，一条命令看完。
 # 全程只读，不装任何东西、不改任何配置；读不到的项留空，不中断。
 

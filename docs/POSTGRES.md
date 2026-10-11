@@ -13,44 +13,31 @@
 
 部署脚本会直接把数据库一起装好，三种方式任选：
 
-**方式一：交互式（最省事）** —— 直接运行脚本，它会问你选哪个：
+**方式一：用内置的 PostgreSQL 容器**
+
+在 `.env` 里加：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh | bash
+COMPOSE_PROFILES=postgres
+POSTGRES_PASSWORD=<随机密码>
+POSTGRES_DB=qingyu
 ```
 
-```text
-==> 请选择数据库
-    1) SQLite                  （推荐；零依赖，备份就是一个文件）
-    2) PostgreSQL · 内置容器    （脚本自动装好，多进程/高并发更稳）
-    3) PostgreSQL · 我有自己的库 （阿里云 RDS / 腾讯云 / Supabase…）
-  选择 [1]:
-```
+然后 `docker compose up -d`。
 
-一路回车就是 SQLite，输入 `2` 就是内置 PostgreSQL。
-
-**方式二：命令行参数**
+**方式二：接你自己的云数据库**
 
 ```bash
-./deploy/install.sh install --db sqlite      # 默认
-./deploy/install.sh install --db postgres    # 脚本内置的 PostgreSQL 容器
-./deploy/install.sh install --db postgres --domain blog.example.com
-```
-
-**方式三：接你自己的云数据库**
-
-```bash
-./deploy/install.sh install \
-  --database-url 'postgres://用户名:密码@主机:5432/库名'
+DATABASE_URL=postgres://用户名:密码@主机:5432/库名
 ```
 
 内置 PostgreSQL 的几点说明：
 
 - 端口只在容器网络内开放，**不占用宿主机 5432**，也不暴露到公网。
 - 数据放在独立的 `postgres-data` 卷里，和 SQLite 的 `qingyu-data` 互不干扰。
-- `./deploy/install.sh backup` / `restore` 对 PostgreSQL 走 `pg_dump` / `pg_restore`，与 SQLite 同一套命令。
-- `./deploy/install.sh info` 会显示当前用的是 SQLite、内置 PG 还是外部 PG。
+- 备份对 PostgreSQL 走 `pg_dump` / `pg_restore`，与 SQLite 是两条路径。
 
+不设置 `DATABASE_URL` 时默认用 SQLite（零依赖，备份就是一个文件）。
 已有 SQLite 站点想切到 PostgreSQL，见下方「迁移数据」。
 
 ## Schema

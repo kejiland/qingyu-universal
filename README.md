@@ -31,582 +31,80 @@
 
 ---
 
-## 一分钟部署（Linux VPS）
+## 部署（Linux VPS）
 
-**最简单**——不带任何参数，脚本自己决定怎么部署：
+需要 Docker 和 Docker Compose，按下面三步手动部署。
+一键安装脚本已移除，正在重新构建中。
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh | bash
-```
-
-有域名的话加上它，就能拿到自动 HTTPS（条件不满足时脚本会自动降级，不会失败）：
+**1. 准备配置**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh \
-  | bash -s -- --domain blog.example.com
-```
-
-脚本会自动：安装 Docker → 判断部署模式 → 检测本机防火墙并询问是否放行 → 生成 `.env` 与随机密钥 → 构建镜像 →
-启动容器 → 等待健康检查 → 输出**访问地址**与初始化密钥。
-
-### 国内服务器：网络卡就加 `--mirror`
-
-国内机房直连 GitHub、Docker Hub、npm 经常超时，加上 `--mirror` 会自动改走国内源：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh \
-  | bash -s -- --mirror
-```
-
-它只做三件事，任何一步失败都会自动回落官方源，**不会因为加速站挂了而装不上**：
-
-| 加速项 | 做法 |
-| --- | --- |
-| 代码下载 | GitHub 克隆 / 压缩包 / 版本查询先走加速前缀（`--github-proxy` 可换成你自己的） |
-| Docker 镜像 | 往 `/etc/docker/daemon.json` 写 `registry-mirrors`（已有配置一律不动） |
-| npm 依赖 | 构建镜像时把 registry 换成 `registry.npmmirror.com` |
-
-选择会写进 `.env`，以后 `upgrade` 不用重复加；想关掉用 `--no-mirror`。
-
-### 最省事的用法（推荐）
-
-```bash
-./deploy/install.sh
-```
-
-**不需要任何参数。** 脚本会自己判断该怎么部署：
-
-| 情况 | 脚本的行为 |
-| --- | --- |
-| 没给域名 | 自动探测公网 IP，挑一个空闲端口，用 `http://<IP>:<端口>` 访问 |
-| 给了域名，且 80/443 空闲、DNS 已指向本机 | 启动 Caddy，自动申请 Let's Encrypt 证书 |
-| 给了域名，但 80/443 被占用或 DNS 未生效 | **自动降级**为自定义端口 + 纯 HTTP，并说明原因 |
-| 服务器开着 ufw / firewalld | 问一句「要不要自动放行端口」，同意就代劳；`-y` 时只打印命令 |
-
-关键点是**它不会因为端口或 DNS 问题中止**。你不需要先搞清楚端口占用、
-DNS 解析这些事——脚本自己选好能跑通的配置，最后告诉你访问地址。
-
-### 数据库也一样：回车即默认，想要 PostgreSQL 说一声
-
-默认是 SQLite（备份就是一个文件）。想要 PostgreSQL，直接在命令里指定就行，
-不用先研究配置：
-
-```bash
-./deploy/install.sh install --db postgres          # 脚本自动装好内置 PostgreSQL
-./deploy/install.sh install \
-  --database-url 'postgres://用户名:密码@主机:5432/库名'   # 用你自己的云数据库
-```
-
-- **内置 PostgreSQL**：自动拉镜像、建库、写随机密码；端口只在容器网络内，不占用宿主机 5432。
-- **自己的云数据库**：填连接串即可，应用首次启动自动建表（阿里云 RDS / 腾讯云 / Supabase 都行）。
-- 已有 SQLite 站点想切过去，见 [PostgreSQL 迁移](docs/POSTGRES.md)。
-- 随时用 `./deploy/install.sh info` 查看当前用的是哪种数据库。
-
-### 新手向导：一次问答走完全流程
-
-**全新安装且没给任何参数时，脚本会先问你几个问题**——有终端才会问，
-`-y`、CI、`curl … | bash` 一律不打扰，直接用推荐值装：
-
-```
-  ┌──────────────────────────────────────────────────────────┐
-  │  轻语博客 · 安装向导                                      │
-  └──────────────────────────────────────────────────────────┘
-
-    这台机器：Debian GNU/Linux 12 / x86_64   可用磁盘 42133 MB
-    公网 IP ：203.0.113.7
-
-    接下来几个问题，每个都给好了推荐答案 —— 直接回车就是推荐方案。
-    输入 b 回到上一题，输入 q 放弃安装。
-
-  ── 第 1 问：别人怎么访问你的博客？
-    1) 域名 + 自动 HTTPS  【推荐】
-    2) IP + 端口
-  选 1 还是 2 [1]:
-```
-
-一共五问：**访问方式 → 域名 → 数据库 → 定时备份 → 邮件**，最后有一屏「确认一下」：
-
-| 操作 | 效果 |
-| --- | --- |
-| 回车 | 用推荐答案 / 确认开始安装 |
-| `b` | 回到上一题 |
-| `1` `2` `3` `4` | 在确认页跳回去改「访问方式 / 数据库 / 备份 / 邮件」 |
-| `q` | 放弃（什么都没装，随时可重来） |
-
-细节上替新手挡了几刀：域名会自动剥掉误粘的 `http://` 和路径，写成 `1.2.3.4`
-或明显不是域名时会提示重填（三次都错就自动改回 IP + 端口）；端口会自动挑一个空闲的；
-80/443 被占用时会先说明「证书验证固定走这两个端口」，再让你选。
-
-### 可配置项：配置档与演练模式
-
-| 用法 | 说明 |
-| --- | --- |
-| `install --dry-run` | **只打印将要做什么**，不装 Docker、不下载代码、不写 `.env`、不启容器 |
-| `install --save-config my.conf` | 把本次的选择写成配置档（含 SMTP 密码，权限 600） |
-| `install --config my.conf` | 照着配置档装；**命令行参数优先于配置档**，配置档只补你没给的项 |
-| `install --timezone Asia/Shanghai` | 设系统时区（定时备份按它执行） |
-| `install --smtp-host/-port/-user/-pass/-from …` | 邮件通知；留空 = 不配置，之后可在后台「设置 → 邮件」里补 |
-| `install --no-autobackup` / `--skip-preflight` / `--no-doctor` | 分别跳过定时备份、起飞前检查、安装后体检 |
-
-配置档就是 `KEY=VALUE`（`#` 开头是注释），可版本化管理、可复用：
-
-```ini
-# my.conf
-DOMAIN=blog.example.com
-DB=postgres
-TIMEZONE=Asia/Shanghai
-AUTOBACKUP=1
-AT=03:30
-KEEP=7
-```
-
-可选键：`DOMAIN` `PORT` `DB` `DATABASE_URL` `DIR` `REF` `REPO` `EMAIL` `IP` `TIMEZONE`
-`SMTP_HOST` `SMTP_PORT` `SMTP_USER` `SMTP_PASS` `SMTP_FROM` `MIRROR` `KEEP` `AT` `AUTOBACKUP`。
-
-### 断点续跑：装到一半失败不用从头再来
-
-安装被拆成 6 步，每做完一步就记一笔到安装目录：
-
-```
-┌─ 第 2/6 步  检查并准备系统环境（curl / git / Docker）
-==> 这一步上次已经完成，直接跳过（想从头执行请加 --reset）
-└─ 第 2/6 步完成
-```
-
-**原样再跑一次同一条命令即可**——最慢的两步（装 Docker、构建镜像）不会重复做。
-配置和数据全程保留，失败时脚本会直接告诉你「当前卡在第几步、下一步该跑什么」。
-
-- `install --reset` 清除进度记录，从头执行（`.env` 与数据仍然保留）
-- **已经装完的目录再跑 `install`，会自动转为 `upgrade`**，不会把线上配置顶掉
-- `upgrade` 会先把「从哪个版本升到哪个版本」列出来（含新增提交数），再备份、再重建
-
-### 安装后引导：装完告诉你「接下来三件事」
-
-安装成功会自动跑一遍 `doctor` 体检，并给出明确指引：
-
-```
-    1) 打开 https://blog.example.com      （首次打开要等十几秒做数据库迁移）
-    2) 打开 https://blog.example.com/admin 设置管理员密码
-       安装密钥：qy-xxxxxxxx
-    3) 确认 SITE_URL 是真实域名（现在若是 localhost / 内网 IP 就改 .env 后 restart）
-
-  出问题先跑： ./deploy/install.sh doctor
-
-不确定机器什么配置、或者怀疑「服务器本身慢」：先跑 `./deploy/install.sh sysinfo` 看家底，
-再跑 `./deploy/install.sh speedtest` 看网络。两条都是只读的，不改任何配置、不装任何东西。
-```
-
-### 有终端时会先检测、再让你选
-
-在真实终端里（不是 CI），脚本会先报告检测结果，然后用回车即默认的方式提问：
-
-```
-==> 环境检查
-    系统          Debian GNU/Linux 13 (trixie) / x86_64
-    公网 IP       203.0.113.5
-    curl          已安装
-    Docker        已就绪
-    可用磁盘      977271 MB
-    端口 80/443   空闲（可启用自动 HTTPS）
-
-==> 请选择部署方式
-    1) 域名 + 自动 HTTPS   （推荐；需要域名解析到 203.0.113.5）
-    2) IP + 端口           （无需域名，纯 HTTP）
-  选择 [1]: 
-```
-
-紧接着问数据库（同样回车即默认，想要 PostgreSQL 选 `2` 或 `3`）：
-
-```text
-==> 请选择数据库
-    1) SQLite                  （推荐；零依赖，备份就是一个文件）
-    2) PostgreSQL · 内置容器    （脚本自动装好，多进程/高并发更稳）
-    3) PostgreSQL · 我自己的库 （阿里云 RDS / 腾讯云 / Supabase…）
-  选择 [1]: 
-```
-
-**一路回车就能装完。** 80/443 被占用时，脚本会说明原因（HTTP-01 固定走 80、
-TLS-ALPN 固定走 443，属协议限制），再问你用哪个端口，留空自动选：
-
-```
-==> 80/443 已被占用，无法申请 Let's Encrypt 证书
-    （HTTP-01 验证固定走 80，TLS-ALPN 固定走 443 —— 这是协议限制，不是本项目的限制）
-    可选：腾出端口后重跑可启用 HTTPS；或继续用自定义端口（纯 HTTP）
-
-  自定义端口（留空自动选空闲端口）: 
-```
-
-不需要交互时加 `--yes`（或用 `curl | bash`、CI 等无终端环境，脚本会自动识别）：
-
-```bash
-curl -fsSL .../install.sh | bash -s -- --yes
-```
-
-> 实现细节：`curl … | bash` 时 stdin 是**脚本本身**，普通 `read` 会把脚本内容
-> 当成用户输入吃掉。所以交互一律从 `/dev/tty` 读，`/dev/tty` 不可用时自动退回
-> 非交互模式。
-
-降级后的输出长这样：
-
-```
-访问地址    http://blog.example.com:8080
-
-未能启用自动 HTTPS 的原因：端口 80/443 已被占用
-已自动改用端口 8080 继续部署，无需你处理。
-条件具备后可一条命令切换：
-  ./deploy/install.sh upgrade --domain blog.example.com
-
-⚠ 注意：此模式下管理后台的登录密码是明文传输的。
-```
-
-等 80/443 腾出来、或 DNS 生效之后，跑一次最后那条命令就会切回 HTTPS。
-
-### 为什么降级后拿不到证书
-
-这是个硬约束，不是本项目的限制：Let's Encrypt 的两种自动验证方式都绑死端口——
-HTTP-01 固定走 **80**，TLS-ALPN 固定走 **443**。换成别的端口就拿不到自动证书。
-
-想要「自定义端口 + 有效证书」，只能改用 DNS-01 验证（在 DNS 里加 TXT 记录），
-那需要带 DNS 插件的自定义 Caddy 镜像，不在当前范围内。
-另一条路是用反向隧道，见下一节。
-### 服务器不提供 80/443（云厂商限制、ISP 封禁、NAT 后）
-
-这和"端口被占用"是两回事：**占用**是别的程序在用（腾出来或反代即可），
-**不提供**是流量根本到不了这台机器（比如家用宽带、受限 VPS、多层 NAT）。
-
-这种情况下上面三个方案都不成立，本应用也无法自行解决 —— 需要一个
-**反向隧道**：由内往外建立连接，外部通过隧道服务商的域名访问，
-不需要任何入站端口。
-
-| 方案 | 说明 |
-| --- | --- |
-| **Cloudflare Tunnel**（`cloudflared`） | 免费、自带 HTTPS 与 CDN。代价是又依赖 Cloudflare |
-| **Tailscale Funnel** | 免费额度、不依赖 Cloudflare，但域名是 `*.ts.net` |
-| **其它隧道**（frp / ngrok / bore） | 需要自己有一台有公网端口的机器做中转 |
-
-以 Cloudflare Tunnel 为例（外部无需开放端口）：
-
-```bash
-./deploy/install.sh --port 8787          # 本应用监听 0.0.0.0:8787，纯 HTTP
-cloudflared tunnel --url http://localhost:8787
-```
-
-拿到隧道域名后，把 `.env` 的 `SITE_URL` 改成那个 `https://` 地址并重启 ——
-否则 RSS、Sitemap、分享卡片里的链接会指向 `127.0.0.1`：
-
-```bash
-sed -i 's|^SITE_URL=.*|SITE_URL=https://你的隧道域名|' .env
-docker compose up -d
-```
-
-隧道模式下 `TRUST_PROXY` 保持 `0` 即可（隧道本身会终止 TLS，
-但如果它不覆盖 `X-Forwarded-For`，设为 1 反而会信任伪造头）。
-
-### 与现有 Web 服务器共存（方案 3）
-
-如果服务器上已经跑着 nginx / Apache，让它继续对外，把请求转发给本应用即可。
-本应用的容器会监听宿主机的一个端口，你只需要在反代里指过去。
-
-部署时用**不带 `--domain`** 的方式，让脚本不启动 Caddy：
-
-```bash
-./deploy/install.sh --port 8787           # 应用监听 0.0.0.0:8787
-```
-
-然后在 nginx 里加：
-
-```nginx
-location / {
-    proxy_pass http://127.0.0.1:8787;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $remote_addr;   # 注意用 $remote_addr
-    proxy_set_header X-Forwarded-Proto $scheme;
-    client_max_body_size 64m;                         # 上传上限
-}
-```
-
-两点要特别注意：
-
-1. **`X-Forwarded-For` 必须由反代覆盖**（用 `$remote_addr`，不要用 `$proxy_add_x_forwarded_for`）。
-   否则客户端可以自带这个头，伪造 IP 绕过限流。
-2. 这种模式下 `.env` 里 `TRUST_PROXY=0`，应用的限流会以**反代的 IP** 为准
-   （所有人看起来是同一个 IP）。若要恢复按真实访客 IP 限流，
-   把 `.env` 的 `TRUST_PROXY` 改成 `1` 并重启 —— 前提是你已按第 1 点覆盖了该头。
-
-### 两种部署模式
-
-**域名不是必需的。** 不给 `--domain` 时走 IP + 端口模式：
-
-```bash
-# 无域名：直接用 http://<服务器IP>:8080 访问，普通 HTTP，不涉及证书
-curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh | bash -s -- --port 8080
-
-# 有域名：启用 Caddy + Let's Encrypt 自动 HTTPS
-curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh | bash -s -- --domain blog.example.com
-```
-
-| | 有域名 | 无域名 |
-| --- | --- | --- |
-| 访问方式 | `https://blog.example.com` | `http://<IP>:<端口>` |
-| 反向代理 | Caddy（自动申请并续期证书） | **不启动**，app 直接对外 |
-| 占用端口 | 80 / 443 | 仅 `--port`（默认 8080） |
-| 证书 | Let's Encrypt | 无（所以不会有任何证书警告） |
-| 脚本探测 | — | 自动探测公网 IP 写入 `SITE_URL` |
-| `TRUST_PROXY` | `1`（信任 Caddy 注入的客户端 IP） | `0`（没有反代时**不能**信任转发头，否则限流可被伪造绕过） |
-
-无域名模式刻意**不启动 Caddy**：Caddy 在没有域名时会用自签证书并强制 HTTPS，
-浏览器会报证书错误——对 IP 访问来说这是纯负担。
-
-以后有了域名，改一条命令即可切换，数据完全保留：
-
-```bash
-./deploy/install.sh upgrade --domain your.domain.com
-```
-
-可用选项：`--port <端口>`、`--ip <地址>`（不填自动探测公网 IP）、`--mirror`（国内网络加速）。
-
-从已克隆的仓库运行（推荐，可用本地最新代码）：
-
-```bash
-git clone https://github.com/kejiland/qingyu-universal
+git clone https://github.com/kejiland/qingyu-universal.git
 cd qingyu-universal
-./deploy/install.sh --domain blog.example.com
+cp .env.example .env
 ```
 
-Windows（Docker Desktop，需已启动 Docker Desktop）：
+编辑 `.env`，至少确认这几项：
 
-```powershell
-# 交互式安装：会问你「选 SQLite 还是 PostgreSQL」「没有域名用哪个端口」
-.\deploy\install.ps1
-
-# 无域名：IP + 端口（默认 8080，80/443 被占用也没关系）
-.\deploy\install.ps1 -Port 8080
-
-# 有域名：自动 HTTPS
-.\deploy\install.ps1 -Domain blog.example.com
-
-# 日常运维（和 Linux 版一样的子命令）
-.\deploy\install.ps1 info       # 访问地址、初始化密钥、版本、运行状态
-.\deploy\install.ps1 doctor     # 一键体检：Docker / 容器 / 端口 / 防火墙 / 数据库
-.\deploy\install.ps1 upgrade    # 拉新版本并重建（自动先备份）
-.\deploy\install.ps1 backup     # 生成数据库快照
-```
-
-> Windows 小提示：端口参数写 `-Port`；数据库参数必须写 `-Database sqlite|postgres`（`-Db` 在 PowerShell 里会和公共参数 `-Debug` 冲突，属于语言限制）。用「管理员 PowerShell」运行时，脚本会自动新增防火墙放行规则；不是管理员时会打印一条命令给你照抄。
-
-部署完成后打开 `https://blog.example.com/admin`，填入脚本输出的 **初始化密钥** 设置管理员密码。以后随时可用 `./deploy/install.sh info` 找回访问地址、初始化密钥、版本和运行状态。
-
-> Fly.io / Render / Railway / Kubernetes / Redis / 多架构镜像与签名见 [多云与生产部署](docs/DEPLOYMENT.md)。
-> PostgreSQL schema 与数据迁移见 [PostgreSQL 迁移](docs/POSTGRES.md)。
-
-WSL2（Docker Desktop）默认只把端口映射到 Windows 的 `localhost`。如果要在局域网或公网访问，运行 Windows 侧脚本（会请求管理员权限）：
-
-```powershell
-.\deploy\windows\expose-wsl.ps1 -Port 8080 -Distro Debian -TryUpnp
-```
-
-脚本会自动添加 Windows 端口转发、放行防火墙，并尝试通过 UPnP 配置路由器。若公网端口检测仍为关闭，需要在路由器把公网 TCP 8080 转发到本机局域网地址的 8080 端口；没有公网入站条件时，改用 README 前面的 Cloudflare Tunnel / Tailscale Funnel。WSL 重启后 IP 可能变化，重新运行此脚本即可。
-
-### 一个站点绑多个域名
-
-绑了主域名之后，还可以把别的域名指到同一个站点（比如同时要 `example.com` 和 `www.example.com`，或新旧域名并存）。它们共用同一份内容、同一套反代，各自签发 HTTPS 证书：
-
-```bash
-# 绑定别名（先把该域名的 A 记录指向本机 IP，再执行）
-./deploy/install.sh domain add www.example.com
-
-# 看当前主域名 + 所有别名 + 各自证书的到期时间
-./deploy/install.sh domain status
-
-# 解绑别名（只重建 Caddy，不会重新 build 应用镜像）
-./deploy/install.sh domain rm www.example.com
-```
-
-几个说明：
-
-- 别名存在 `.env` 的 `SITE_ALIASES`（空格分隔），Caddy 会把它写进同一个站点块的证书申请里。
-- 换主域名（`domain set`）时，如果新主域名恰好是旧别名，脚本会自动把它从别名里摘掉，不会出现重复。
-- 目前跑在「IP + 端口」模式下没有域名可加别名，先 `domain set` 切成域名模式。
-- `doctor` 会逐个检查别名是否解析到本机、证书是否有效（过期算失败，15 天内到期算警告）。
-- 只有主域名会被用于生成站点链接（`SITE_URL`）等，别名是「额外的访问入口」。
-### 更新到新版本
-
-**一条命令，永远有效**（从任何目录执行都行）：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kejiland/qingyu-universal/main/deploy/install.sh \
-  | bash -s -- upgrade
-```
-
-它先取最新的安装脚本、再取最新的代码，因此**不会出现「用旧脚本更新」的死循环**。
-升级前会自动备份数据库，`.env` 与 `data/` 不受影响。
-
-升级完成后验证：
-
-```bash
-curl -s http://localhost:8080/healthz   # 端口换成你的
-# → {"version":"0.3.0","revision":"374a49d", ...}
-```
-
-`revision` 是构建时的 commit 短 SHA —— 有它才能确认升级真的生效了。
-
-#### 开发时：直接同步本地代码
-
-如果你在本地改了代码、想立刻同步到测试环境，**不需要先提交或推送**，
-直接从源码目录执行 upgrade 即可 —— 脚本会把本地代码复制过去而不是下载：
-
-```bash
-cd ~/qingyu-universal          # 你的源码目录
-./deploy/install.sh upgrade    # 默认同步到 /opt/qingyu-universal
-# 或指定目标：./deploy/install.sh upgrade --dir /opt/qingyu-universal
-```
-
-三种取码路径由脚本自动判断：
-
-| 你的情况 | 脚本的行为 |
+| 变量 | 说明 |
 | --- | --- |
-| 从源码目录执行 | 复制本地代码（开发循环） |
-| 安装目录是 git 仓库 | `git pull --ff-only` |
-| 压缩包安装（curl 装出来的） | 下载 GitHub 最新代码包 |
+| `SITE_URL` | 站点对外地址，如 `https://blog.example.com` |
+| `BLOG_ADMIN_SETUP_KEY` | 管理员初始化密钥，装完用它设密码 |
+| `DATA_DIR` | 数据目录，默认 `./data` |
 
-### 常用运维命令
+数据库默认 SQLite（零依赖）。要用 PostgreSQL，把 `postgres` 加进 `COMPOSE_PROFILES`
+并填好 `POSTGRES_*`；要接云数据库则设 `DATABASE_URL`。详见
+[docs/POSTGRES.md](docs/POSTGRES.md)。
 
-> **懒得记命令？** 装好之后直接运行 `./deploy/install.sh`（不带任何参数），会弹出数字菜单：
-> 按 `1`-`13` 选升级 / 体检 / 备份 / 定时备份 / 打包迁移等，直接回车退出。
-> 加了 `-y` 或明确写了子命令（如 `doctor`）则不会弹，自动化脚本不受影响。
-
-```bash
-./deploy/install.sh upgrade          # 升级（升级前自动备份，数据保留）
-./deploy/install.sh rollback         # 回滚到上一个版本（回滚前自动备份，可再滚回来）
-./deploy/install.sh backup           # 数据库快照 → data/backups
-./deploy/install.sh restore <快照>    # 从快照恢复
-./deploy/install.sh start            # 启动服务
-./deploy/install.sh stop             # 停止服务（数据保留）
-./deploy/install.sh restart          # 重启应用（改完 .env 后用它生效）
-./deploy/install.sh logs             # 查看日志
-./deploy/install.sh status           # 容器与健康状态
-./deploy/install.sh info             # 查看访问地址、初始化密钥、版本、文章数等部署信息
-./deploy/install.sh sysinfo          # 服务器家底：CPU/内存/磁盘/负载/网卡流量/公网 IP 与归属地
-./deploy/install.sh speedtest        # 网络测速：到 Cloudflare/Google/百度 的延迟 + 上下行带宽
-./deploy/install.sh doctor           # 一键体检：网站打不开/传不了图先跑它，每项给 ✅⚠️❌ 和修复命令
-./deploy/install.sh uninstall        # 停止并删除容器（数据卷保留）
-./deploy/install.sh tune             # 服务器调优（可选，见下）
-./deploy/install.sh clean            # 清理 Docker 悬空镜像与构建缓存（可回收量见下）
-```
-
-Windows 版（Docker Desktop）同样支持 `sysinfo` 和 `speedtest`，其余子命令以 `install.ps1 -Command` 为准。
-
-### 以后怎么用：只敲 qingyu，然后选数字
-
-装完之后**不用记路径、不用 cd、不用敲子命令**。在任何目录（包括 ~）直接敲：
+**2. 构建并启动**
 
 ```bash
-qingyu
+docker compose up -d --build
 ```
 
-就会弹出运维菜单，然后**只输入数字回车**即可：
-
-```
-  1 更新到最新版      11 回滚到上一版
-  2 只检查更新        12 定时备份
-  3 一键体检          13 打包迁移
-  4 部署信息          14 改域名（自动申请 HTTPS）
-  5 运行状态          16 设置终端快捷键
-  6 备份数据          17 服务器家底
-  7 查看日志          18 电脑测速
-  8 重启服务          19 服务器调优
-  9 停止服务          20 清理磁盘
-  10 启动服务          0 退出
-```
-
-比如你现在是 IP + 端口模式，想换成域名 + 自动 HTTPS，就敲 qingyu → 输入 14 → 按提示填域名，
-剩下的证书签发、DNS 校验、重启 Caddy 都是自动的。
-
-qingyu 命令装在 /usr/local/bin/qingyu；终端提示「命令未找到」时执行一次 hash -r 即可。
-不想用了直接删掉这个文件，或者在菜单里选 16 输入 - 移除。
-
-> 想走命令行也行（脚本调试、写自动化时更方便）：bash /opt/qingyu-universal/deploy/install.sh <子命令>，
-> 例如 install.sh doctor。菜单和子命令走的是同一套逻辑，结果完全一致。
-### 更新只挑「跟博客有关」的
-
-远端每次提交本来就来自本仓库，所以不存在混进别的项目的问题。真正要判断的是另一件事：
-**有些提交只动了 README、tests、CI 配置 —— 它们对正在运行的站点没有任何影响。**
-
-所以 `qingyu` → 1 / 2 会先看这批改动到底碰了哪些文件：
-
-- 碰了 `app/`、`deploy/`、`compose.yaml`、`Dockerfile`、`package.json` 等 → 提示更新，正常备份 + 重建；
-- 只碰 `README`、`docs/`、`tests/`、`.github/`、`*.md` → 直接告诉你「与博客运行无关，已跳过」，**不备份、不拉代码、不重建、不重启**，站点全程无感；
-- 判断不出来（压缩包安装、没有 git 历史）→ 保守按「该更新」处理，绝不因为误判而漏掉真正的更新。
-
-确实想连文档一起拉（比如想让本地 README 跟上），加 `--all`：
+**3. 确认起来了**
 
 ```bash
-./deploy/install.sh update --all
+curl -fsS http://127.0.0.1:8787/healthz
 ```
-### 服务器调优（可选）
 
-海外 VPS 尤其从美国西海岸、日本走回国访问时，默认的拥塞控制在高延迟丢包链路上丢包一高就发懵。这个项目编译过一次 BBR 开销很低：
+然后浏览器打开 `SITE_URL/admin`，用 `BLOG_ADMIN_SETUP_KEY` 设置管理员密码。
+
+### 绑域名与 HTTPS
+
+`compose.yaml` 里的 Caddy 会为 `SITE_URL` 自动申请 Let's Encrypt 证书，
+前提是域名已解析到本机、且 80/443 可达。服务器不提供 80/443（云厂商限制、
+NAT 后）时，在 `.env` 里把 `CADDY_ENABLED` 关掉，直接用 `http://<IP>:<端口>`。
+
+详见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
+
+### 日常运维
 
 ```bash
-./deploy/install.sh tune            # 先看当前状态，再问你一句要不要调
-./deploy/install.sh tune --apply    # 不询问，直接调
-./deploy/install.sh tune --restore  # 撤销，把参数写回内核默认值
+docker compose ps                # 状态
+docker compose logs -f app       # 看日志
+docker compose restart app       # 改完 .env 后重启生效
+docker compose down              # 停止（数据保留）
 ```
 
-会调的项：拥塞控制 BBR（配 `fq` 队列才生效）、队列算法、TCP Fast Open 双向打开、`vm.swappiness` 降到 10（少用 swap，小内存机器更不容易 OOM）、连接队列上限。配置写在 `/etc/sysctl.d/99-qingyu-tune.conf`，随时可以整个删掉。
+**备份**：```bash
+docker compose exec app node dist/cli/backup.js /data/backups
+```
 
-几个边界说明，部署脚本不会越线：
+**更新**：`git pull && docker compose up -d --build`。
+升级前建议先备份；出问题了用 `git log` 找到上一个提交再 `git revert`。
 
-- **完全不碰 SSH 配置**（不改端口、不动 root 登录、不装 fail2ban）。部署脚本擅自改登录方式，最容易把自己锁在门外，这类操作请你自己按需处理。
-- **不改防火墙规则**。开放端口由安装时的预检查按需提示，不在调优里代劳。
-- **不是安装流程的一部分**。不显式执行 `tune` 就完全不会改动内核。
-- 内核不支持 BBR（低于 4.9）时自动跳过该项，其余照常。
+**回滚表结构**：迁移是幂等的，回退代码后已执行的迁移不会重复跑。
 
-### 清理磁盘（Docker 缓存越滚越大）
-
-小内存 / 小硬盘的 VPS 上跑久了，docker images 里全是悬空镜像和构建缓存，硬盘能吃掉好几 GB：
-
-`ash
-./deploy/install.sh clean            # 看能回收多少，问一句再删
-./deploy/install.sh clean --apply    # 不询问，直接清理
-`
-
-只删两类**重建即可再生**的东西：悬空镜像（dangling=true）和构建缓存（docker builder prune）。
-
-绝不用 docker system prune -a --volumes —— 那会把没用上的镜像连同数据卷一起清掉，文章和上传的图片一起没了。
-
-doctor 体检的「磁盘与内存」一节会直接算出这部分可回收量，并在不足时把 clean 作为修复建议给出来。
-### 备份与迁移（服务器坏了也不怕）
-
-**开定时备份（一条命令）**
+### 服务器调优与清理（可选）
 
 ```bash
-./deploy/install.sh autobackup                    # 每天 03:30 自动快照，保留最近 7 份
-systemctl list-timers | grep qingyu               # 看下次执行时间
-systemctl start qingyu-backup.service             # 立刻手动跑一次（等同 backup）
+docker image prune -f --filter "dangling=true"   # 清理悬空镜像
+docker builder prune -f                          # 清理构建缓存
 ```
 
-脚本会写一个 systemd 定时器（没有 systemd 的机器自动改用 crontab），失败不影响网站运行；
-`doctor` 体检里也会显示「定时备份是否已启用 + 下次执行时间 + 现有快照份数」。
-
-**换服务器 / 搬家（一条命令打包）**
-
-```bash
-./deploy/install.sh migrate          # 生成 ~/qingyu-migrate-<时间>.tar.gz
-```
-
-包里包含：站点配置 `.env`（域名、端口、密钥原样保留）+ 整个数据卷（文章、评论、上传的图片、历史快照），
-以及一份给新服务器用的恢复脚本。到新服务器后按包内 `README.txt` 三步走：
-
-```bash
-tar xzf qingyu-migrate-20261006-120000.tar.gz
-bash qingyu-migrate-20261006-120000/deploy/install.sh install -y   # 复用包里的 .env 装程序
-bash qingyu-migrate-20261006-120000/restore-here.sh --data-only   # 把数据装回去
-```
-
-> 打包文件里有管理员密钥和数据库密码，请当作敏感文件保管（脚本已自动设为仅 root 可读）。
-
-> 回滚对两种安装方式都有效：git 检出走本地历史（不联网），压缩包安装按版本号重新下载历史代码包。脚本会按需自动安装 git，装不上也不影响回滚。
+> `docker system prune -a --volumes` **不要用**：它会删掉没被容器引用的具名镜像
+> 和数据卷，备份和上传文件都可能被牵连。
 
 ---
 
@@ -1019,8 +517,7 @@ src/
   cli/                  migrate / seed / health / backup / restore / smoke
 tests/                  vitest 单元测试
 scripts/                 上游适配补丁 / 前端分包与压缩构建工具（.mjs）
-deploy/                 一键部署（install.sh + lib/ 模块）、Dockerfile / Caddyfile / install.ps1
-                        详见 [deploy/README.md](deploy/README.md)
+deploy/                 Dockerfile / Caddyfile / install.ps1 / helm / postgres / windows
 admin/                  新版后台（Vue + Vite + Tailwind）
 compose.yaml            app + Caddy 编排
 data/                   运行时数据（不入库）：qingyu.db、uploads/、backups/
@@ -1204,7 +701,9 @@ Cloudflare 版仍然是线上首选（边缘缓存、免费额度、零运维）
     比较的两端都拿到 SHA 才敢判「已是最新」、check-update 不装 git；
     另在 Linux 容器实测 9 条分支（含压缩包安装 / Atom feed 兜底 / 短 SHA 判等）
     与真实 GitHub 仓库冒烟
-- [x] **一键脚本模块化**：`deploy/install.sh` 从 5201 行 / 200 个函数按职责拆成
+- [x] **移除 bash 一键部署脚本**，改为手动 `docker compose up -d --build` 部署。
+  详见上方「部署」章节；后续重新构建。
+- [x] **一键脚本模块化**（已随上一条移除，仅存历史记录）：`deploy/install.sh` 从 5201 行 / 200 个函数按职责拆成
   15 个模块（`deploy/lib/*.sh`），入口只留全局变量、模块载入、参数解析和分发。
   功能与行为**未做任何改变**，拆分的目的是让改一处不用通读全文件、出问题能单独测。
   - 用能识别 heredoc 的解析器切分，逐字节验证 15 个模块按序拼回等于原文件、

@@ -69,7 +69,7 @@ command -v docker >/dev/null 2>&1 || { echo "未找到 docker 命令" >&2; exit 
 #   1) 基础镜像：缺失时先从国内镜像源拉取，再打上官方标签 —— 之后 FROM 直接命中本地镜像，
 #      BuildKit 不再需要连 Docker Hub 解析元数据（配合默认的 --pull=false）。
 #   2) npm / apk 源：构建容器内的 `npm ci` 与 `apk add` 也需要外网，一并换成国内源。
-# 只在显式传 --mirror（或 QINGYU_MIRROR=1）时换源，与 deploy/install.sh 的约定保持一致。
+# 只在显式传 --mirror（或 QINGYU_MIRROR=1）时换源。
 # ----------
 if [ "$MIRROR" = "1" ]; then
   [ -n "$NPM_REGISTRY" ] || NPM_REGISTRY="https://registry.npmmirror.com"

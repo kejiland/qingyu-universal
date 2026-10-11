@@ -5,7 +5,7 @@
 # 日志：docker compose logs -f app
 # 停止：docker compose down
 #
-# 全部配置来自同目录 .env（由 deploy/install.sh 生成，或从 .env.example 复制）。
+# 全部配置来自同目录 .env（部署时生成，或从 .env.example 复制）。
 # ============================================================
 name: qingyu-universal
 
@@ -15,7 +15,7 @@ services:
       context: .
       dockerfile: deploy/Dockerfile
       args:
-        # 由 install.sh 解析后注入；取不到则为空
+        # 由部署脚本解析后注入；取不到则为空
         BUILD_REVISION: ${BUILD_REVISION:-}
         # 国内加速（--mirror）时由 .env 提供 npmmirror 源；留空走官方源
         NPM_REGISTRY: ${NPM_REGISTRY:-}

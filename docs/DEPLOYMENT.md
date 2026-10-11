@@ -1,22 +1,21 @@
 # 多云与生产部署
 
-本文档覆盖一键部署的数据库选择，以及 Docker Compose 之外的生产部署方式。
+本文档覆盖数据库选择，以及 Docker Compose 之外的生产部署方式。
 
-## Compose 一键部署的数据库选择
+## 数据库选择
 
-VPS、NAS、以及「母鸡开出来的小鸡」用的是同一条脚本，数据库在安装时选：
+三种选择，靠 `.env` 里的配置决定：
 
-| 选择 | 命令 | 适用场景 |
+| 选择 | 配置 | 适用场景 |
 | --- | --- | --- |
-| SQLite（默认） | `./deploy/install.sh install` | 单机博客，备份就是一个文件 |
-| 内置 PostgreSQL | `./deploy/install.sh install --db postgres` | 多进程 / 高并发，脚本自动装好数据库容器 |
-| 自己的云数据库 | `./deploy/install.sh install --database-url 'postgres://用户:密码@主机:5432/库名'` | 阿里云 RDS / 腾讯云 / Supabase 等托管服务 |
+| SQLite（默认） | 不设置 `DATABASE_URL` | 单机博客，备份就是一个文件 |
+| 内置 PostgreSQL | `COMPOSE_PROFILES=postgres` + `POSTGRES_*` | 多进程 / 高并发 |
+| 自己的云数据库 | `DATABASE_URL=postgres://用户:密码@主机:5432/库名` | 阿里云 RDS / 腾讯云 / Supabase 等托管服务 |
 
-交互式安装时脚本会直接提问（一路回车即 SQLite，选 `2` 即内置 PostgreSQL）。
-内置 PostgreSQL 不占用宿主机 5432，也不暴露到公网；`./deploy/install.sh info`
-会显示当前用的是哪种数据库。SQLite → PostgreSQL 的数据迁移见 [PostgreSQL 迁移](POSTGRES.md)。
+内置 PostgreSQL 不占用宿主机 5432，也不暴露到公网。
+SQLite → PostgreSQL 的数据迁移见 [PostgreSQL 迁移](POSTGRES.md)。
 
-手动用 Compose 部署时，把 `postgres` 加进 `COMPOSE_PROFILES` 并填好
+用 Compose 部署时，把 `postgres` 加进 `COMPOSE_PROFILES` 并填好
 `DATABASE_URL`、`POSTGRES_*` 即可（`.env.example` 里有现成模板）：
 
 ```bash
@@ -120,12 +119,12 @@ Redis 用于限流、点赞去重、AI 额度和管理员会话。Redis 短暂�
 Compose：
 
 ```bash
-./deploy/install.sh backup
-./deploy/install.sh restore <快照文件>
-./deploy/install.sh rollback        # 升级后发现问题：退回上一个代码版本（表结构不变，先备份）
+# 先备份再重启；备份是 data/backups 下的快照文件
+docker compose exec app node dist/cli/backup.js /data/backups
 ```
 
-> rollback 说明：git 检出直接本地回退；压缩包安装会按历史版本重新下载。升级时脚本会尝试自动安装 git，并把压缩包安装升级成 git 检出。
+> 回滚版本需要靠 git 自行回退到上一个提交后重新 `docker compose up -d --build`。
+> 表结构迁移是幂等的，回退代码后旧迁移不会重复执行。
 
 Kubernetes：
 
