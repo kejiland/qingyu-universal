@@ -39,11 +39,11 @@ const itBash = canRunBash ? it : it.skip;
 const bashCwd = () => (process.platform === 'win32' ? path.resolve('.') : undefined);
 
 // 多行脚本用 bash -c 在这台机器上会被 WSL 转发层搞坏，写成文件再执行
-const runBash = (body: string, input?: string) => {
+const runBash = (body: string, input?: string, args: string[] = []) => {
   const rel = `.qy-test-${process.pid}-${Math.random().toString(36).slice(2)}.sh`;
   fs.writeFileSync(path.resolve(rel), body.replace(/\r\n/g, '\n'), 'utf8');
   try {
-    const r = spawnSync('bash', [rel], { cwd: bashCwd(), input, encoding: 'utf8' });
+    const r = spawnSync('bash', [rel, ...args], { cwd: bashCwd(), input, encoding: 'utf8' });
     return `${r.stdout ?? ''}${r.stderr ?? ''}`;
   } finally {
     fs.rmSync(path.resolve(rel), { force: true });
@@ -283,5 +283,63 @@ describe('预构建镜像（GHCR）默认路径', () => {
       expect(body).not.toMatch(/docker compose up -d --build/);
     }
     expect(funcBody(src(), 'do_update')).toMatch(/^\s+up\s*$/m);
+  });
+});
+describe('已安装检测与卸载', () => {
+  const qy = () => src();
+
+  it('主菜单里有第 10 项卸载，且读数上限放宽到 10', () => {
+    expect(funcBody(qy(), 'menu')).toContain('10) do_uninstall');
+    expect(funcBody(qy(), 'menu_read')).toContain('-le 10');
+  });
+
+  it('菜单顶部会显示是否已安装', () => {
+    const m = funcBody(qy(), 'menu');
+    expect(m).toMatch(/if installed; then[\s\S]{0,200}已安装/);
+  });
+
+  it('已安装时点 1 不会闷头重装，而是先问要不要重装', () => {
+    const body = funcBody(qy(), 'do_install');
+    expect(body).toContain('检测到已经安装过了');
+    expect(body).toContain('pick "已经装过了，还要再跑一遍安装吗？"');
+    // 卸载路径必须重新确认目录真的没了
+    expect(body).toContain('installed && { err "卸载后目录还在');
+  });
+
+  it('卸载分两档：保留数据 / 连数据一起删', () => {
+    const body = funcBody(qy(), 'do_uninstall');
+    expect(body).toContain('只卸载程序，保留数据');
+    expect(body).toContain('完全卸载，连数据一起删');
+    // 保留数据：不能带 --volumes
+    // 从 case 分支切，别从 pick 的选项文案切（那里也出现了同样的字样）
+    const branches = body.slice(body.indexOf('\n    1)', body.indexOf('要卸载到什么程度')));
+    const keep = branches.slice(0, branches.indexOf('\n    2)'));
+    const wipe = branches.slice(branches.indexOf('\n    2)'), branches.indexOf('\n    3)'));
+    expect(keep).not.toContain('--volumes');
+    expect(keep).toContain('rm -rf "$INSTALL_DIR"');
+    expect(wipe).toContain('down --volumes --remove-orphans');
+  });
+
+  it('彻底删数据必须手输「删除」两个字才继续', () => {
+    const body = funcBody(qy(), 'do_uninstall');
+    const wipe = body.slice(body.indexOf('\n    2)', body.indexOf('要卸载到什么程度')), body.indexOf('\n    3)'));
+    expect(wipe).toMatch(/\[ "\$word" = "删除" \] \|\| \{ ok "没对上，已取消/);
+    expect(wipe.indexOf('确认请输入')).toBeLessThan(wipe.indexOf('--volumes'));
+  });
+
+  it('还没装时卸载是安全的空操作', () => {
+    const body = funcBody(qy(), 'do_uninstall');
+    expect(body).toMatch(/if ! installed; then[\s\S]{0,200}没什么可卸载的/);
+  });
+
+  itBash('没安装过就跑卸载，不会误删东西', () => {
+    // 指定一个肯定没装过的目录，别被本机残留的 /tmp/qy-fake 干扰
+    const out = runBash('export QINGYU_DIR=' + FRESH + '\n' + qy(), '', ['uninstall']);
+    expect(out).toContain('还没安装过，没什么可卸载的');
+    expect(out).not.toContain('rm -rf');
+  });
+
+  it('uninstall 也能当子命令直接跑', () => {
+    expect(funcBody(qy(), 'main')).toContain('uninstall|remove) do_uninstall');
   });
 });

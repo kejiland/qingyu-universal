@@ -1,1 +1,0 @@
-QINGYU_DIR=/tmp/qy-not-installed bash deploy/qy.sh

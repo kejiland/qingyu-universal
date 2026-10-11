@@ -62,7 +62,7 @@ pick() {
   done
 }
 
-# 主菜单读法：没有选项列表，直接校验 0..9。
+# 主菜单读法：没有选项列表，直接校验 0..10（10 是卸载）。
 # 单独写一个函数而不是复用 pick —— pick 按「选项个数」校验，
 # 主菜单传不了选项，混用会变成死循环（出过一次）。
 # 输入流结束时（EOF，比如管道喂完）必须退出，否则会无限刷屏。
@@ -75,7 +75,7 @@ menu_read() {
     case "$ans" in
       *[!0-9]*) err "请输入数字" >&2; continue ;;
     esac
-    if [ "$ans" -le 9 ]; then printf '%s' "$ans"; return 0; fi
+    if [ "$ans" -le 10 ]; then printf '%s' "$ans"; return 0; fi
     err "没有 $ans 这个选项" >&2
   done
 }
@@ -239,7 +239,23 @@ print_access() {
 
 # ---------- 1. 安装 ----------
 do_install() {
-  installed && warn "已经装过了，继续跑只是重新生成 .env（数据不会丢）"
+  if installed; then
+    warn "检测到已经安装过了：$INSTALL_DIR（$(read_env SITE_URL)）"
+    echo
+    local rc
+    rc=$(pick "已经装过了，还要再跑一遍安装吗？" \
+      "不用了，我去看看状态（跳到第 6 项）" \
+      "重装：先卸载再全新安装（数据会没）" \
+      "取消")
+    case "$rc" in
+      1) do_status; return 0 ;;
+      2)
+        do_uninstall
+        installed && { err "卸载后目录还在，先手动处理 $INSTALL_DIR 再来"; return 1; }
+        ;;
+      3) ok "已取消"; return 0 ;;
+    esac
+  fi
   step "安装"
   check_docker
 
@@ -444,6 +460,60 @@ do_clean() {
   ok "清理完成"
 }
 
+# ---------- 10. 卸载 ----------
+do_uninstall() {
+  if ! installed; then
+    ok "还没安装过，没什么可卸载的"
+    [ -d "$INSTALL_DIR" ] && warn "$INSTALL_DIR 目录还在，可以直接删掉"
+    return 0
+  fi
+
+  echo "  当前安装"
+  echo
+  printf '    目录：%s\n' "$INSTALL_DIR"
+  printf '    地址：%s\n' "$(read_env SITE_URL)"
+  printf '    数据库：%s\n' "$( [ -n "$(read_env DATABASE_URL)" ] && echo "PostgreSQL / 云数据库" || echo "SQLite" )"
+  if dc ps --status running 2>/dev/null | grep -q qingyu-app; then
+    printf '    状态：%s容器在跑%s\n' "$C_G" "$C_0"
+  else
+    printf '    状态：%s容器没在跑%s\n' "$C_Y" "$C_0"
+  fi
+  echo
+
+  local c
+  c=$(pick "要卸载到什么程度？" \
+    "只卸载程序，保留数据（容器和代码删掉，数据库和上传的文件留着，以后能装回来）" \
+    "完全卸载，连数据一起删（不可恢复）" \
+    "取消")
+  case "$c" in
+    1)
+      need_root
+      check_docker
+      step "停止并删除容器"
+      dc --profile domain --profile postgres --profile redis down --remove-orphans \
+        || warn "有容器停不掉，先跑菜单第 5 项看看日志"
+      step "删除程序目录"
+      rm -rf "$INSTALL_DIR" && ok "已删除 $INSTALL_DIR"
+      warn "数据卷保留着。重新跑一次一键脚本就能装回来，数据会恢复原样"
+      ;;
+    2)
+      local word=""
+      warn "这一步会永久删除数据库和上传的文件，没有后悔药"
+      ask "确认请输入「删除」两个字" "" word
+      [ "$word" = "删除" ] || { ok "没对上，已取消，什么都没动"; return 0; }
+      need_root
+      check_docker
+      step "停止容器并删除数据卷"
+      dc --profile domain --profile postgres --profile redis down --volumes --remove-orphans \
+        || warn "有容器停不掉，先跑菜单第 5 项看看日志"
+      step "删除程序目录"
+      rm -rf "$INSTALL_DIR" && ok "已删除 $INSTALL_DIR"
+      ok "已完全卸载，镜像还留在本地，要彻底清掉就跑菜单第 9 项"
+      ;;
+    3) ok "已取消，什么都没动" ;;
+  esac
+}
+
 # ---------- 入口 ----------
 usage() {
   cat <<'EOF'
@@ -464,6 +534,7 @@ usage() {
   domain     配域名和 HTTPS
   doctor     体检（网站打不开先跑这个）
   clean      清理 Docker 缓存
+  uninstall  卸载（可选保留数据，或连数据一起删）
 EOF
 }
 
@@ -483,9 +554,14 @@ menu() {
   7) 域名与HTTPS  自动签证书，或改回 IP+端口
   8) 体检         网站打不开、传不了图，先跑这个
   9) 清理磁盘     清 Docker 缓存（不碰数据）
+  10) 卸载/重装   删程序，或连数据一起删
   0) 退出
 
 EOF
+  if installed; then
+    printf '  %s已安装%s：%s  %s(选 1 安装时会先问你要不要重装)%s\n\n' \
+      "$C_G" "$C_0" "$(read_env SITE_URL)" "$C_Y" "$C_0"
+  fi
     local c; c=$(menu_read)
     case "$c" in
       1) do_install ;;
@@ -497,6 +573,7 @@ EOF
       7) do_domain ;;
       8) do_doctor ;;
       9) do_clean ;;
+      10) do_uninstall ;;
       0) echo "再见，数据都留在 $INSTALL_DIR"; exit 0 ;;
     esac
     pause
@@ -519,6 +596,7 @@ main() {
     domain) do_domain ;;
     doctor) do_doctor ;;
     clean) do_clean ;;
+    uninstall|remove) do_uninstall ;;
     -h|--help|help) usage ;;
     *) usage; die "不认识「$1」这个命令" ;;
   esac
