@@ -497,3 +497,17 @@ html[data-theme='dark'] .ssr-theme-sun {
 @media (prefers-reduced-motion: reduce) {
   .comment-loading svg { animation: none; }
 }
+
+/* ---------- qingyu:thumb-placeholder 无封面占位缩略图 ---------- */
+.post-thumb.ph{display:flex;align-items:flex-end;position:relative;overflow:hidden;background:linear-gradient(140deg,var(--ph-a,#5b7cfa),var(--ph-b,#33407a))}
+.post-thumb-ph-orb{position:absolute;right:-16%;top:-26%;width:76%;padding-top:76%;border-radius:50%;background:rgba(255,255,255,.14);pointer-events:none}
+.post-thumb-ph-txt{position:relative;z-index:1;min-width:0;display:flex;flex-direction:column;gap:4px;padding:16px 18px}
+.post-thumb-ph-txt b{color:#fff;font-size:15.5px;font-weight:600;line-height:1.38;letter-spacing:.01em;text-shadow:0 1px 2px rgba(0,0,0,.2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.post-thumb-ph-txt i{color:rgba(255,255,255,.82);font-size:11.5px;font-style:normal;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+@media (max-width:768px){.post-thumb-ph-txt{padding:12px 14px}}
+
+/* ---------- qingyu:music-toggle 播放器开关按钮 ---------- */
+.mp-power{color:var(--muted)}
+.mp-power:hover{color:var(--accent)}
+.mp-power-off{color:var(--accent)}
+.mp-power-off .mp-power-ring{opacity:.35}

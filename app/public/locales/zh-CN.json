@@ -411,6 +411,8 @@
   "player.prev": "上一首",
   "player.next": "下一首",
   "player.seek": "播放进度",
+"player.enable": "开启播放器",
+"player.disable": "关闭播放器",
   "player.close": "关闭",
   "player.unknown": "未知曲目",
   "admin.music.chooseFile": "选择音频文件",

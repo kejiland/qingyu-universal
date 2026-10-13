@@ -411,6 +411,8 @@
   "player.prev": "前へ",
   "player.next": "次へ",
   "player.seek": "再生位置",
+"player.enable": "プレーヤーを有効にする",
+"player.disable": "プレーヤーを無効にする",
   "player.close": "閉じる",
   "player.unknown": "不明な曲",
   "admin.music.chooseFile": "音声ファイルを選択",

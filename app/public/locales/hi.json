@@ -411,6 +411,8 @@
   "player.prev": "पिछला",
   "player.next": "अगला",
   "player.seek": "सीक",
+"player.enable": "प्लेयर चालू करें",
+"player.disable": "प्लेयर बंद करें",
   "player.close": "बंद करें",
   "player.unknown": "अज्ञात ट्रैक",
   "admin.music.chooseFile": "ऑडियो फ़ाइल चुनें",

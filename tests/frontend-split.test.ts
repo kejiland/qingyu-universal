@@ -460,4 +460,11 @@ describe('后台存储配置页', () => {
     // 去掉圆点后靠间距分隔
     expect(read('polish.css')).toContain('.footer-nav { font-size: 13px; gap: 14px; }');
   });
+  it("无封面时的渐变占位缩略图 + 音乐播放器开关", () => {
+    expect(read("app.js")).toContain("function postThumbPlaceholder(");
+    expect(read("polish.css")).toContain("qingyu:thumb-placeholder");
+    expect(read("music-player.js")).toContain("qy.music.enabled");
+    expect(read("polish.css")).toContain("qingyu:music-toggle");
+  });
+
 });

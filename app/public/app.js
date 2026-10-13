@@ -6,7 +6,7 @@
  * ============================================================================ */
 'use strict';
 
-var BLOG_VERSION = 'bf71db36e';
+var BLOG_VERSION = 'b5ab52d7a';
 
 /* i18n 兜底：万一 i18n.js 没加载成功（网络抖动 / 缓存缺失 / 被拦截），
  * 也必须保证 t() 可用 —— 否则整页会在第一个 t(...) 处抛 “t is not defined” 而白屏。 */
@@ -2867,6 +2867,27 @@ function proxiedImg(u) {
   } catch (e) {}
   return '/api/img?url=' + encodeURIComponent(s);
 }
+/** 无封面时的占位缩略图：按文章 id 派生的双色渐变 + 标题 + 首标签/摘要。
+ *  与服务端 src/ssr/list.ts 的 postThumbPlaceholder() 同构，两侧必须同步。 */
+function postThumbPlaceholder(p) {
+  var title = String((p && p.title) || '');
+  var seed = String((p && (p.id || p.slug)) || title);
+  var h = 0, i;
+  for (i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
+  var h2 = (h + 34) % 360;
+  var sub = '', tags = p && p.tags;
+  if (Object.prototype.toString.call(tags) === '[object Array]' && tags.length) sub = String(tags[0] || '');
+  else if (typeof tags === 'string') sub = tags.split(',')[0] || '';
+  if (!sub) sub = String((p && p.excerpt) || '');
+  sub = sub.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+  if (sub.length > 40) sub = sub.slice(0, 40) + '\u2026';
+  var style = '--ph-a:hsl(' + h + ',58%,46%);--ph-b:hsl(' + h2 + ',54%,36%)';
+  return '<span class="post-thumb ph" style="' + style + '">' +
+    '<span class="post-thumb-ph-orb" aria-hidden="true"></span>' +
+    '<span class="post-thumb-ph-txt"><b>' + esc(title) + '</b>' +
+    (sub ? '<i>' + esc(sub) + '</i>' : '') +
+    '</span></span>';
+}
 function renderPostThumb(p, idx) {
   var url = proxiedImg(String((p && p.cover) || '').trim() || firstImageFrom(p && p.content));
   var title = (p && p.title) || '';
@@ -2875,7 +2896,7 @@ function renderPostThumb(p, idx) {
     var lazy = (idx !== undefined && idx < 2) ? 'eager' : 'lazy';
     return '<span class="post-thumb has-img"><img src="' + esc(url) + '" alt="' + esc(title || t('post.thumbnailAlt')) + '" loading="' + lazy + '" decoding="async" fetchpriority="' + pri + '" referrerpolicy="no-referrer" onload="this.classList.add(\'thumb-in\')" onerror="this.remove()"></span>';
   }
-  return '<span class="post-thumb ph"><span class="post-thumb-ph">' + svgIcon('image', 26) + '</span></span>';
+  return postThumbPlaceholder(p);
 }
 
 /** 从正文 Markdown 提取第一张图片 URL（![alt](url) 或 <img src="url">） */

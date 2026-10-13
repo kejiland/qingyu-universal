@@ -76,6 +76,27 @@ function firstImageFrom(content: unknown): string {
  *  · 外链封面改走本站反代（/api/img），首次加载省掉一次跨洋 DNS+TLS；
  *  · 前两张 eager + fetchpriority=high，其余 lazy；
  *  · onload 加 .thumb-in 走 CSS 淡入，onerror 兜底摘掉破图。 */
+/** 无封面时的占位缩略图：按文章 id 派生的双色渐变 + 标题 + 首标签/摘要。
+ *  与前端 app.js 的 postThumbPlaceholder() 同构，两侧必须同步修改。 */
+function postThumbPlaceholder(post: PostRow): string {
+  const title = String(post.title ?? '');
+  const seed = String(post.id || title);
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
+  const h2 = (h + 34) % 360;
+  const tags = parseTags(post.tags);
+  let sub = tags.length ? String(tags[0] ?? '') : String(post.excerpt ?? '');
+  sub = sub.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+  if (sub.length > 40) sub = sub.slice(0, 40) + '\u2026';
+  const style = `--ph-a:hsl(${h},58%,46%);--ph-b:hsl(${h2},54%,36%)`;
+  return (
+    `<span class="post-thumb ph" style="${style}">` +
+    '<span class="post-thumb-ph-orb" aria-hidden="true"></span>' +
+    '<span class="post-thumb-ph-txt"><b>' + escapeHtml(title) + '</b>' +
+    (sub ? '<i>' + escapeHtml(sub) + '</i>' : '') +
+    '</span></span>'
+  );
+}
 function renderPostThumb(post: PostRow, index: number): string {
   const raw = String(post.cover ?? '').trim() || firstImageFrom(post.content);
   const url = imageProxyUrl(raw);
@@ -90,7 +111,7 @@ function renderPostThumb(post: PostRow, index: number): string {
       ` onload="this.classList.add('thumb-in')" onerror="this.remove()"></span>`
     );
   }
-  return `<span class="post-thumb ph"><span class="post-thumb-ph">${svgIcon('image', 26)}</span></span>`;
+  return postThumbPlaceholder(post);
 }
 
 function renderCard(post: PostRow, index: number): string {

@@ -411,6 +411,8 @@
   "player.prev": "Previous",
   "player.next": "Next",
   "player.seek": "Seek",
+"player.enable": "Enable player",
+"player.disable": "Disable player",
   "player.close": "Close",
   "player.unknown": "Unknown track",
   "admin.music.chooseFile": "Choose audio file",

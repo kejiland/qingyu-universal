@@ -732,6 +732,8 @@ if (!fs.existsSync(path.join(PUB, 'boot.js'))) write('boot.js', BOOT_SOURCE);
 app = patchDisplayPolish(app);
 app = patchImageProxy(app);
 app = patchLegacyHtmlNormalization(app);
+app = patchThumbPlaceholder(app);
+patchThumbPlaceholderCss();
 write('app.js', app);
 normalizeIndexVersions();
 ensurePolishShell();
@@ -739,6 +741,8 @@ patchCriticalCss();
 patchReadingScalePreset();
 patchImageWatchdog();
 patchSwCacheStrategy();
+patchMusicPlayerToggle();
+patchMusicToggleCss();
 patchShellReferences();
 checkAdminIncrements();
 
@@ -752,6 +756,152 @@ console.log(report.join('\n'));
  * 「同步上游」这条标准流程直接失败，而丢功能本身也应先被看见、再决定怎么补。
  * 每个标记都对应一项功能，缺失时按提示重贴即可。
  * ------------------------------------------------------------ */
+/* 无封面时的占位缩略图：不再是一个灰色图片图标，而是一张「渐变 + 标题 + 摘要」的
+ * 彩色卡片（同一篇文章颜色固定，由 id 派生），卡片右侧不会留空白。
+ * ⚠️ 必须与 src/ssr/list.ts 的 postThumbPlaceholder() 保持同样的规则：
+ *    两边不一致会让 SSR 与接管后渲染出两个不同的缩略图。tests/frontend-split.test.ts 有断言。
+ * 幂等：已有 postThumbPlaceholder() 就跳过。 */
+function patchThumbPlaceholder(app) {
+  if (app.includes('function postThumbPlaceholder(')) {
+    report.push('[skip] 渐变文字缩略图已存在');
+    return app;
+  }
+
+  const nl = app.includes('\r\n') ? '\r\n' : '\n';
+  const helper = [
+    "/** 无封面时的占位缩略图：按文章 id 派生的双色渐变 + 标题 + 首标签/摘要。",
+    " *  与服务端 src/ssr/list.ts 的 postThumbPlaceholder() 同构，两侧必须同步。 */",
+    "function postThumbPlaceholder(p) {",
+    "  var title = String((p && p.title) || '');",
+    "  var seed = String((p && (p.id || p.slug)) || title);",
+    "  var h = 0, i;",
+    "  for (i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;",
+    "  var h2 = (h + 34) % 360;",
+    "  var sub = '', tags = p && p.tags;",
+    "  if (Object.prototype.toString.call(tags) === '[object Array]' && tags.length) sub = String(tags[0] || '');",
+    "  else if (typeof tags === 'string') sub = tags.split(',')[0] || '';",
+    "  if (!sub) sub = String((p && p.excerpt) || '');",
+    "  sub = sub.replace(/<[^>]*>/g, '').replace(/\\s+/g, ' ').trim();",
+    "  if (sub.length > 40) sub = sub.slice(0, 40) + '\\u2026';",
+    "  var style = '--ph-a:hsl(' + h + ',58%,46%);--ph-b:hsl(' + h2 + ',54%,36%)';",
+    "  return '<span class=\"post-thumb ph\" style=\"' + style + '\">' +",
+    "    '<span class=\"post-thumb-ph-orb\" aria-hidden=\"true\"></span>' +",
+    "    '<span class=\"post-thumb-ph-txt\"><b>' + esc(title) + '</b>' +",
+    "    (sub ? '<i>' + esc(sub) + '</i>' : '') +",
+    "    '</span></span>';",
+    "}",
+  ].join(nl) + nl;
+
+  const anchor = 'function renderPostThumb(p, idx) {';
+  if (!app.includes(anchor)) throw new Error('渐变文字缩略图：未找到 renderPostThumb()');
+  let out = app.replace(anchor, () => helper + anchor);
+
+  const oldPh = "return '<span class=\"post-thumb ph\"><span class=\"post-thumb-ph\">' + svgIcon('image', 26) + '</span></span>';";
+  if (!out.includes(oldPh)) throw new Error('渐变文字缩略图：未找到旧占位分支');
+  out = out.split(oldPh).join("return postThumbPlaceholder(p);");
+
+  report.push('[ok]   无封面时的渐变文字缩略图（标题 + 摘要，前后端同规则）');
+  return out;
+}
+
+/* polish.css 追加渐变缩略图样式（幂等：按标记注释整块替换） */
+function patchThumbPlaceholderCss() {
+  const marker = 'qingyu:thumb-placeholder';
+  let css = read('polish.css');
+  if (css.includes(marker)) {
+    report.push('[skip] 渐变缩略图样式已存在');
+    return;
+  }
+  const nl = css.includes('\r\n') ? '\r\n' : '\n';
+  const block = [
+    "/* ---------- qingyu:thumb-placeholder 无封面占位缩略图 ---------- */",
+    ".post-thumb.ph{display:flex;align-items:flex-end;position:relative;overflow:hidden;background:linear-gradient(140deg,var(--ph-a,#5b7cfa),var(--ph-b,#33407a))}",
+    ".post-thumb-ph-orb{position:absolute;right:-16%;top:-26%;width:76%;padding-top:76%;border-radius:50%;background:rgba(255,255,255,.14);pointer-events:none}",
+    ".post-thumb-ph-txt{position:relative;z-index:1;min-width:0;display:flex;flex-direction:column;gap:4px;padding:16px 18px}",
+    ".post-thumb-ph-txt b{color:#fff;font-size:15.5px;font-weight:600;line-height:1.38;letter-spacing:.01em;text-shadow:0 1px 2px rgba(0,0,0,.2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
+    ".post-thumb-ph-txt i{color:rgba(255,255,255,.82);font-size:11.5px;font-style:normal;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
+    "@media (max-width:768px){.post-thumb-ph-txt{padding:12px 14px}}",
+  ].join(nl);
+  write('polish.css', css.replace(/\s*$/, '') + nl + nl + block + nl);
+  report.push('polish.css -> 无封面占位缩略图样式');
+}
+
+/* 音乐播放器开关：读者可以在面板里一键关闭悬浮播放器（默认开启）。
+ * 偏好记在 localStorage（qy.music.enabled）；关掉后悬浮按钮不再出现、正在播放的
+ * 音频立即暂停，但播放列表与音量设置都保留，随时可以再打开。
+ * 幂等：已有 qy.music.enabled 就跳过。 */
+function patchMusicPlayerToggle() {
+  let mp = read('music-player.js');
+  if (mp.includes('qy.music.enabled')) {
+    report.push('[skip] 音乐播放器开关已存在');
+    return;
+  }
+
+  const nl = mp.includes('\r\n') ? '\r\n' : '\n';
+  const helper = [
+    "  var ENABLED_KEY = 'qy.music.enabled';",
+    "  function playerEnabled() {",
+    "    try { return localStorage.getItem(ENABLED_KEY) !== '0'; } catch (e) { return true; }",
+    "  }",
+    "  function setPlayerEnabled(on) {",
+    "    try { localStorage.setItem(ENABLED_KEY, on ? '1' : '0'); } catch (e) {}",
+    "    var btn = document.getElementById('mpPower');",
+    "    if (btn) {",
+    "      btn.classList.toggle('mp-power-off', !on);",
+    "      btn.setAttribute('aria-pressed', on ? 'true' : 'false');",
+    "      btn.title = on ? tt('player.disable') : tt('player.enable');",
+    "    }",
+    "    if (on) {",
+    "      show();",
+    "    } else {",
+    "      closePanel();",
+    "      try { audio.pause(); } catch (e) {}",
+    "      playing = false;",
+    "    }",
+    "  }",
+  ].join(nl);
+
+  const varAnchor = '  var retractTimer = null;';
+  if (!mp.includes(varAnchor)) throw new Error('音乐播放器开关：未找到 retractTimer 锚点');
+  mp = mp.replace(varAnchor, () => varAnchor + nl + helper);
+
+  const iconSvg = "<svg width=\"17\" height=\"17\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 4v8\"/><path d=\"M6.5 7.5a8 8 0 1 0 11 0\"/></svg>";
+  const btnAnchor = '<button type="button" class="mp-btn mp-close" id="mpPanelClose"';
+  if (!mp.includes(btnAnchor)) throw new Error('音乐播放器开关：未找到面板关闭按钮锚点');
+  const btnHtml = '<button type="button" class="mp-btn mp-power" id="mpPower" aria-pressed="true" title="\' + esc(tt("player.disable")) + \'">' + iconSvg + '</button>' + btnAnchor;
+  mp = mp.split(btnAnchor).join(btnHtml);
+
+  const bindAnchor = "document.getElementById('mpPanelClose').addEventListener('click', closePanel);";
+  if (!mp.includes(bindAnchor)) throw new Error('音乐播放器开关：未找到事件绑定锚点');
+  mp = mp.replace(bindAnchor, () => bindAnchor + nl + "document.getElementById('mpPower').addEventListener('click', function () { setPlayerEnabled(!playerEnabled()); });");
+
+  const showAnchor = "  function show() {" + nl + "    if (visible) return;";
+  if (!mp.includes(showAnchor)) throw new Error('音乐播放器开关：未找到 show() 锚点');
+  mp = mp.replace(showAnchor, () => showAnchor + nl + "    if (!playerEnabled()) return;");
+
+  write('music-player.js', mp);
+  report.push('[ok]   音乐播放器开关（面板内一键关闭，记忆到本地）');
+}
+/* polish.css 追加播放器开关按钮样式（幂等：按标记注释整块替换） */
+function patchMusicToggleCss() {
+  const marker = 'qingyu:music-toggle';
+  let css = read('polish.css');
+  if (css.includes(marker)) {
+    report.push('[skip] 播放器开关样式已存在');
+    return;
+  }
+  const nl = css.includes('\r\n') ? '\r\n' : '\n';
+  const block = [
+    "/* ---------- qingyu:music-toggle 播放器开关按钮 ---------- */",
+    ".mp-power{color:var(--muted)}",
+    ".mp-power:hover{color:var(--accent)}",
+    ".mp-power-off{color:var(--accent)}",
+    ".mp-power-off .mp-power-ring{opacity:.35}",
+  ].join(nl);
+  write('polish.css', css.replace(/\s*$/, '') + nl + nl + block + nl);
+  report.push('polish.css -> 播放器开关按钮样式');
+}
+
 function checkAdminIncrements() {
   const guards = [
     { file: 'admin.js', needle: 'WELCOME_DISMISS_KEY', what: '新站上手引导' },

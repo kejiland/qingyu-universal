@@ -13,6 +13,10 @@ import type { PostRow, SiteIdentity } from '../src/seo/meta.js';
 
 const site = {} as SiteIdentity;
 
+function phColor(html: string): string {
+  return /--ph-a:hsl\((\d+)/.exec(html)?.[1] ?? '';
+}
+
 function post(over: Partial<PostRow> = {}): PostRow {
   return {
     id: 'p1',
@@ -58,8 +62,10 @@ describe('首页卡片：与 app.js renderCard() 同构', () => {
 
   it('无封面：给主题渐变占位（post-thumb ph），不靠图片加载撑高度', () => {
     const html = renderHomeContent([post()], site, { pageSize: 0 });
-    expect(html).toContain('<span class="post-thumb ph">');
-    expect(html).toContain('post-thumb-ph');
+    expect(html).toContain('class="post-thumb ph"');
+    expect(html).toMatch(/--ph-a:hsl\(\d+,58%,46%\)/);
+    expect(html).toContain('post-thumb-ph-txt');
+    expect(html).toContain('<b>第一篇</b>');
   });
 
   it('正文首张图兜底当封面', () => {
@@ -168,4 +174,18 @@ describe('与 app.js 的一致性由源码层面守住', () => {
       expect(app, `app.js 里找不到 ${fn}`).toContain(fn);
     }
   });
+  it('渐变占位：同一篇文章颜色稳定，不同文章颜色不同', () => {
+    const a1 = renderHomeContent([post()], site, { pageSize: 0 });
+    const a2 = renderHomeContent([post()], site, { pageSize: 0 });
+    const b = renderHomeContent([post({ id: 'p2', title: '另一篇' })], site, { pageSize: 0 });
+    expect(phColor(a1)).not.toBe('');
+    expect(phColor(a1)).toBe(phColor(a2));
+    expect(phColor(a1)).not.toBe(phColor(b));
+  });
+
+  it('无标签时，渐变占位的副标题用摘要兜底', () => {
+    const html = renderHomeContent([post({ tags: '[]', excerpt: '一段摘要' })], site, { pageSize: 0 });
+    expect(html).toContain('<i>一段摘要</i>');
+  });
+
 });

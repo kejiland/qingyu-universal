@@ -411,6 +411,8 @@
   "player.prev": "이전 곡",
   "player.next": "다음 곡",
   "player.seek": "재생 위치",
+"player.enable": "플레이어 켜기",
+"player.disable": "플레이어 끄기",
   "player.close": "닫기",
   "player.unknown": "알 수 없는 곡",
   "admin.music.chooseFile": "오디오 파일 선택",

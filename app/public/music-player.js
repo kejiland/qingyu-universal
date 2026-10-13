@@ -42,6 +42,26 @@
   var LAST_KEY = 'qy.music.last';
   var visible = false;
   var retractTimer = null;
+  var ENABLED_KEY = 'qy.music.enabled';
+  function playerEnabled() {
+    try { return localStorage.getItem(ENABLED_KEY) !== '0'; } catch (e) { return true; }
+  }
+  function setPlayerEnabled(on) {
+    try { localStorage.setItem(ENABLED_KEY, on ? '1' : '0'); } catch (e) {}
+    var btn = document.getElementById('mpPower');
+    if (btn) {
+      btn.classList.toggle('mp-power-off', !on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.title = on ? tt('player.disable') : tt('player.enable');
+    }
+    if (on) {
+      show();
+    } else {
+      closePanel();
+      try { audio.pause(); } catch (e) {}
+      playing = false;
+    }
+  }
   function canHover() {
     try { return window.matchMedia && window.matchMedia('(hover: hover)').matches; } catch (e) { return false; }
   }
@@ -89,7 +109,7 @@
             '<div class="mp-title" id="mpTitle">' + esc(tt('player.none')) + '</div>' +
             '<div class="mp-artist" id="mpArtist">—</div>' +
           '</div>' +
-          '<button type="button" class="mp-btn mp-close" id="mpPanelClose" aria-label="' + esc(tt('player.close')) + '">' + icon('close') + '</button>' +
+          '<button type="button" class="mp-btn mp-power" id="mpPower" aria-pressed="true" title="' + esc(tt("player.disable")) + '"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v8"/><path d="M6.5 7.5a8 8 0 1 0 11 0"/></svg></button><button type="button" class="mp-btn mp-close" id="mpPanelClose" aria-label="' + esc(tt('player.close')) + '">' + icon('close') + '</button>' +
         '</div>' +
         '<div class="mp-progress">' +
           '<input type="range" class="mp-seek" id="mpSeek" min="0" max="1000" value="0" step="1" aria-label="' + esc(tt('player.seek')) + '">' +
@@ -129,6 +149,7 @@
     fabWrap.addEventListener('mouseenter', expandFab);
     fabWrap.addEventListener('mouseleave', function () { if (!panel.classList.contains('open')) scheduleRetract(); });
     document.getElementById('mpPanelClose').addEventListener('click', closePanel);
+document.getElementById('mpPower').addEventListener('click', function () { setPlayerEnabled(!playerEnabled()); });
     document.getElementById('mpPrev').addEventListener('click', function () { step(-1); });
     document.getElementById('mpNext').addEventListener('click', function () { step(1); });
     playBtn.addEventListener('click', toggle);
@@ -331,6 +352,7 @@
   /* ---------- 显示控制 ---------- */
   function show() {
     if (visible) return;
+    if (!playerEnabled()) return;
     visible = true;
     root.classList.add('mp-on');
     document.body.classList.add('mp-on');
