@@ -743,6 +743,7 @@ patchImageWatchdog();
 patchSwCacheStrategy();
 patchMusicPlayerToggle();
 patchMusicToggleCss();
+patchMusicAdminToggle();
 patchShellReferences();
 checkAdminIncrements();
 
@@ -896,11 +897,119 @@ function patchMusicToggleCss() {
     ".mp-power{color:var(--muted)}",
     ".mp-power:hover{color:var(--accent)}",
     ".mp-power-off{color:var(--accent)}",
-    ".mp-power-off .mp-power-ring{opacity:.35}",
+    ".mp-power無効に.mp-power-ring{opacity:.35}",
   ].join(nl);
   write('polish.css', css.replace(/\s*$/, '') + nl + nl + block + nl);
   report.push('polish.css -> 播放器开关按钮样式');
 }
+
+/* 后台「功能开关」里的音乐播放器总开关（features.musicPlayer === false 即整站关闭）。
+ *  与面板内那个「读者自己关一下」的按钮是两件事：
+ *    - 面板电源键：只影响当前访客，记在 localStorage（qy.music.enabled）；
+ *    - 本开关：站长在后台关掉后整站不再加载播放器，前端连悬浮球都不渲染。
+ *  幂等：已含 abFeatMusicPlayer 就跳过。*/
+function patchMusicAdminToggle() {
+  let admin = read('admin.js');
+  let touched = false;
+
+  if (!admin.includes('abFeatMusicPlayer')) {
+    // 1) 功能开关面板：新增一个「音乐播放器」分区（放在阅读工具栏之后）
+    const htmlAnchor = "'<div class=\"ab-field\"><label style=\"display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer\"><input type=\"checkbox\" id=\"abFeatFontSize\"> ' + t('admin.settings.featFontSize') + '</label><label class=\"ab-hint\">' + t('admin.settings.featFontSizeHint') + '</label></div>' +";
+    if (!admin.includes(htmlAnchor)) throw new Error('后台播放器开关：未找到功能开关面板锚点');
+    const section = [
+              "'<div class=\"ab-section-title\" style=\"margin-top:16px\">' + icon('music', 15) + ' ' + t('admin.settings.featMusic') + '</div>' +\r",
+              "'<div class=\"ab-field\"><label style=\"display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer\"><input type=\"checkbox\" id=\"abFeatMusicPlayer\"> ' + t('admin.settings.featMusicPlayer') + '</label><label class=\"ab-hint\">' + t('admin.settings.featMusicPlayerHint') + '</label></div>' +",
+    ].join('\n');
+    admin = admin.replace(htmlAnchor, () => htmlAnchor + '\n' + section);
+
+    // 2) 读取草稿 / 回填表单 / 保存，三处都要带上这个字段
+    const draftAnchor = "      fontSize: !(feat && feat.fontSize === false),";
+    if (!admin.includes(draftAnchor)) throw new Error('后台播放器开关：未找到 syncFeaturesDraft 锚点');
+    admin = admin.replace(draftAnchor, () => draftAnchor + '\n      musicPlayer: !(feat && feat.musicPlayer === false)\r');
+
+    const domAnchor = "        fontSize: content.querySelector('#abFeatFontSize') ? content.querySelector('#abFeatFontSize').checked : true";
+    if (!admin.includes(domAnchor)) throw new Error('后台播放器开关：未找到 saveTabToDraft 锚点');
+    admin = admin.replace(domAnchor, () => domAnchor + ",\n        musicPlayer: content.querySelector('#abFeatMusicPlayer') ? content.querySelector('#abFeatMusicPlayer').checked : true");
+
+    const fillAnchor = "    if (content.querySelector('#abFeatFontSize')) content.querySelector('#abFeatFontSize').checked = (feat.fontSize !== false);";
+    if (!admin.includes(fillAnchor)) throw new Error('后台播放器开关：未找到 fillSettings 锚点');
+    admin = admin.replace(fillAnchor, () => fillAnchor + "\n    if (content.querySelector('#abFeatMusicPlayer')) content.querySelector('#abFeatMusicPlayer').checked = (feat.musicPlayer !== false);");
+
+    const saveAnchor = "        fontSize: !(settingsDraft.features && settingsDraft.features.fontSize === false)";
+    if (!admin.includes(saveAnchor)) throw new Error('后台播放器开关：未找到保存 payload 锚点');
+    admin = admin.replace(saveAnchor, () => saveAnchor + ",\n        musicPlayer: !(settingsDraft.features && settingsDraft.features.musicPlayer === false)");
+
+    write('admin.js', admin);
+    touched = true;
+  }
+
+  // 3) i18n：五个语言各补两条文案
+  const i18n = {
+    'zh-CN.json': ['音乐播放器', '开启后，访客右下角出现悬浮音乐播放器；关闭后整站不再加载播放器（读者自己也可以在面板里单独关）'],
+    'en.json': ['Music player', 'When on, visitors get the floating music player in the corner; when off the player is not loaded site-wide (visitors can still switch it off in the panel)'],
+    'ja.json': ['音楽プレーヤー', 'オンにすると訪問者の右下に音楽プレーヤーが表示されます。オフにするとサイト全体で読み込まれません（訪問者はパネル内で個別に無効にできます）'],
+    'ko.json': ['음악 플레이어', '켜면 방문자 오른쪽 아래에 음악 플레이어가 나타납니다. 끄면 사이트 전체에서 불러오지 않습니다(방문자는 패널에서 개별적으로 끌 수 있음)'],
+    'hi.json': ['म्यूज़िक प्लेयर', 'चालू होने पर आगंतुकों को नीचे-दाएँ तैरता म्यूज़िक प्लेयर दिखेगा; बंद होने पर यह पूरी साइट पर लोड नहीं होगा'],
+  };
+  for (const [file, vals] of Object.entries(i18n)) {
+    const p = path.join(PUB, 'locales', file);
+    let txt = fs.readFileSync(p, 'utf8');
+    if (txt.includes('admin.settings.featMusicPlayer')) continue;
+    const lines = txt.split('\n');
+    let at = lines.findIndex((l) => l.includes('"admin.settings.featFontSizeHint"'));
+    if (at < 0) throw new Error('后台播放器开关：' + file + ' 未找到 i18n 锚点');
+    const indent = (lines[at].match(/^\s*/) || [''])[0];
+    lines.splice(at + 1, 0,
+      indent + JSON.stringify('admin.settings.featMusic') + ': ' + JSON.stringify(vals[0]) + ',',
+      indent + JSON.stringify('admin.settings.featMusicPlayer') + ': ' + JSON.stringify(vals[0]) + ',',
+      indent + JSON.stringify('admin.settings.featMusicPlayerHint') + ': ' + JSON.stringify(vals[1]) + ',');
+    fs.writeFileSync(p, lines.join('\n'), 'utf8');
+    touched = true;
+  }
+
+  // 4) 前端：整站关闭时干脆不构建播放器 DOM（省掉 /api/music 这一次请求）
+  let mp = read('music-player.js');
+  if (!mp.includes('qy.music.siteOff')) {
+    const initAnchor = '    if (!document.body) { document.addEventListener(\'DOMContentLoaded\', init); return; }';
+    if (!mp.includes(initAnchor)) throw new Error('后台播放器开关：未找到 init 锚点');
+    const gate = [
+      '    var feat = siteFeatures();',
+      '    if (feat && feat.musicPlayer === false) {',
+      '      try { localStorage.setItem(\'qy.music.siteOff\', \'1\'); } catch (e) {}',
+      '      return;',
+      '    }',
+    ].join('\n');
+    mp = mp.replace(initAnchor, () => initAnchor + '\n' + gate);
+
+    const helperAnchor = '  function setPlayerEnabled(on) {';
+    if (!mp.includes(helperAnchor)) throw new Error('后台播放器开关：未找到 setPlayerEnabled 锚点');
+    const helper = [
+      '  /* 后台「功能开关 → 音乐播放器」：优先读首屏内联的站点设置，取不到再拉一次公开设置接口。 */',
+      '  function siteFeatures() {',
+      '    var s = (typeof window !== \'undefined\' && window.__SSR_SETTINGS__ && window.__SSR_SETTINGS__.settings) || null;',
+      '    var raw = s ? s.features : null;',
+      '    if (raw == null) {',
+      '      try {',
+      '        var xhr = new XMLHttpRequest();',
+      '        xhr.open(\'GET\', \'/api/settings\', false);',
+      '        xhr.send(null);',
+      '        var j = JSON.parse(xhr.responseText || \'{}\');',
+      '        raw = j && j.settings ? j.settings.features : null;',
+      '      } catch (e) { raw = null; }',
+      '    }',
+      '    if (raw == null) return null;',
+      '    if (typeof raw === \'object\') return raw;',
+      '    try { return JSON.parse(raw); } catch (e) { return null; }',
+      '  }',
+    ].join('\n');
+    mp = mp.replace(helperAnchor, () => helper + '\n' + helperAnchor);
+    write('music-player.js', mp);
+    touched = true;
+  }
+
+  report.push(touched ? '[ok]   后台功能开关新增「音乐播放器」总开关' : '[skip] 后台音乐播放器开关已存在');
+}
+
 
 function checkAdminIncrements() {
   const guards = [

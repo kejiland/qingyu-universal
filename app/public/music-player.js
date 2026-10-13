@@ -46,6 +46,23 @@
   function playerEnabled() {
     try { return localStorage.getItem(ENABLED_KEY) !== '0'; } catch (e) { return true; }
   }
+  /* 后台「功能开关 → 音乐播放器」：优先读首屏内联的站点设置，取不到再拉一次公开设置接口。 */
+  function siteFeatures() {
+    var s = (typeof window !== 'undefined' && window.__SSR_SETTINGS__ && window.__SSR_SETTINGS__.settings) || null;
+    var raw = s ? s.features : null;
+    if (raw == null) {
+      try {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', '/api/settings', false);
+        xhr.send(null);
+        var j = JSON.parse(xhr.responseText || '{}');
+        raw = j && j.settings ? j.settings.features : null;
+      } catch (e) { raw = null; }
+    }
+    if (raw == null) return null;
+    if (typeof raw === 'object') return raw;
+    try { return JSON.parse(raw); } catch (e) { return null; }
+  }
   function setPlayerEnabled(on) {
     try { localStorage.setItem(ENABLED_KEY, on ? '1' : '0'); } catch (e) {}
     var btn = document.getElementById('mpPower');
@@ -366,6 +383,11 @@ document.getElementById('mpPower').addEventListener('click', function () { setPl
   /* ---------- 初始化 ---------- */
   async function init() {
     if (!document.body) { document.addEventListener('DOMContentLoaded', init); return; }
+    var feat = siteFeatures();
+    if (feat && feat.musicPlayer === false) {
+      try { localStorage.setItem('qy.music.siteOff', '1'); } catch (e) {}
+      return;
+    }
     buildDOM();
     bindAudio();
     var vol = 80;

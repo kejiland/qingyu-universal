@@ -467,4 +467,12 @@ describe('后台存储配置页', () => {
     expect(read("polish.css")).toContain("qingyu:music-toggle");
   });
 
+  it('后台功能开关里的「音乐播放器」总开关，关掉后整站不再加载播放器', () => {
+    const admin = read('admin.js');
+    expect(admin).toContain('id="abFeatMusicPlayer"');
+    expect(admin).toContain("musicPlayer: !(settingsDraft.features && settingsDraft.features.musicPlayer === false)");
+    expect(read('music-player.js')).toContain('feat.musicPlayer === false');
+    expect(read('locales/zh-CN.json')).toContain('admin.settings.featMusicPlayerHint');
+  });
+
 });
