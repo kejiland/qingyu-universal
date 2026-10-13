@@ -18,6 +18,7 @@
 import { marked } from 'marked';
 import { escapeHtml, escapeJsonForScript, stripMarkdown, type PostRow, type SiteIdentity } from '../seo/meta.js';
 import { proxyHtmlImgSources } from '../lib/image-url.js';
+import { normalizeLegacyHtml } from '../lib/legacy-html.js';
 import { formatDate } from './format.js';
 
 /** 与 public/index.html 里的启动动画元素匹配（app.js 不引用它，替换安全）。 */
@@ -45,14 +46,15 @@ function sanitizeRenderedHtml(html: string): string {
 }
 
 export function renderMarkdown(markdown: string): string {
-  const html = marked.parse(String(markdown ?? ''), {
+  const legacy = normalizeLegacyHtml(markdown);
+  const html = marked.parse(legacy.text, {
     async: false,
     gfm: true,
     breaks: false
   }) as string;
   // 正文配图常常也是外链图床，与封面一样改走本站反代（/api/img）。
   // 放在 sanitize 之后：先消毒、再改写，避免改写出来的地址绕过消毒规则。
-  return proxyHtmlImgSources(sanitizeRenderedHtml(html));
+  return proxyHtmlImgSources(sanitizeRenderedHtml(legacy.restore(html)));
 }
 
 export function injectAppContent(shell: string, content: string): string {

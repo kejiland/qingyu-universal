@@ -59,6 +59,8 @@
 | 上游新增的 3 个提交（2.10.60 → 2.10.63） | ✅ 已全部人工合并 |
 | 上游 2.10.63 → 2.10.93（约 26 个提交）的前台改动 | ✅ 已同步；首页 SSR（`src/ssr/list.ts`）同步重写为与 `app.js` 同构（标签行 / 翻页器 / 空态 / 置顶徽章 / 缩略图占位 / 筛选条 / 广告位） |
 | 同批次的后台改动（导航编辑器等） | ⚠️ **暂时落后**：`admin.js` / `admin.css` / `i18n.js` / `locales` 保留通用版旧版，以免丢掉上手引导、存储 / AI 配置页与约 138 个 i18n 键；需人工合并 |
+| 旧正文（WordPress 等导入）里的 &nbsp; / <!--more--> / 失效 Flash <embed> 在接管后被当字面文字显示 | ✅ 前后端同一套归一化（src/lib/legacy-html.ts + pp.js 内 
+ormalizeLegacyHtml()，由 scripts/apply-frontend-split.mjs 注入）；旧数据无需重跑导入 |
 
 ---
 

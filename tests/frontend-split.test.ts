@@ -70,7 +70,8 @@ describe('公开站前端拆分（v0.7-b）', () => {
 
   it('压缩产物已生成：主包瘦身，回退包独立按需下载', () => {
     // 旧主包约 184 KB；拆出旧后台后应明显小于这个值。
-    expect(size('app.min.js')).toBeLessThan(170 * 1024);
+    // 上限留了旧正文 HTML 归一化（normalizeLegacyHtml，约 +5 KB）的余量。
+    expect(size('app.min.js')).toBeLessThan(178 * 1024);
     expect(size('admin-legacy.min.js')).toBeGreaterThan(20 * 1024);
     expect(size('boot.min.js')).toBeLessThan(4 * 1024);
     expect(read('app.min.js')).toContain('admin-legacy.min.js');

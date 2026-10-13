@@ -563,6 +563,158 @@ function patchSwCacheStrategy() {
   write('sw.js', sw);
   report.push('sw.js 静态缓存改为按 ?v= 精确命中');
 }
+/* 旧正文 HTML 归一化：WordPress 等旧平台导入的老文章里混着原始 HTML
+ *（&nbsp; 实体、<!--more--> 注释、早已失效的 Flash <embed>/<object> 播放器）。
+ * app.js 的 inlineMd() 会对全文做 HTML 转义，这些标记会变成字面文字直接显示给读者；
+ * 服务端 SSR 用 marked 透传同一段内容，两边规则必须一致，否则首屏与接管后会分叉。
+ *
+ * ⚠️ 必须与 src/lib/legacy-html.ts 的 normalizeLegacyHtml() 保持同样的规则：
+ *    tests/legacy-html.test.ts 有交叉断言。
+ * 幂等：已有 normalizeLegacyHtml() 就跳过。 */
+function patchLegacyHtmlNormalization(app) {
+  if (app.includes('function normalizeLegacyHtml(')) {
+    report.push('[skip] 旧正文 HTML 归一化已存在');
+    return app;
+  }
+
+  const nl = app.includes('\r\n') ? '\r\n' : '\n';
+  const helper = [
+    '/* ---------- 旧正文 HTML 归一化（与服务端 src/lib/legacy-html.ts 同规则） ----------',
+    ' * WordPress 等旧平台导入的老文章，正文里混着原始 HTML：排版用的 &nbsp; 实体、',
+    ' * <!--more--> 摘要分隔注释、以及早就无法播放的 Flash <embed>/<object> 播放器。',
+    ' * app.js 的 inlineMd() 会先对全文做 HTML 转义，这些标记就会变成 "&nbsp;"、',
+    ' * "<!--more-->"、"<embed src=…>" 这样的字面文字直接显示给读者。',
+    ' * 这里在正文进渲染器之前先归一化一次，规则与服务端 src/lib/legacy-html.ts 完全一致，',
+    ' * 两侧必须同步修改，否则 SSR 与接管后渲染会分叉。',
+    ' *   1) 代码块与行内代码整体保护，其中的尖括号是正文，不当 HTML 处理；',
+    ' *   2) 去掉 HTML 注释（<!--more--> 等）；',
+    ' *   3) 去掉已死的 Flash / Applet 元素与无意义标签；',
+    ' *   4) 排版实体先还原（&nbsp; &hellip; …），正文里不再露出 "&nbsp;" 字样；',
+    ' *   5) 剩余标签抽成占位符，渲染完原样放回（属性已消毒）；',
+    ' *   6) 核心实体最后还原：此时文本里的 &lt;script&gt; 只会作为文字展示，',
+    ' *      不会被当成真标签处理（&amp;nbsp; 这种双重编码也因此保持字面量）。 */',
+    'var LEGACY_COMMENT = /<!--[\\s\\S]*?-->/g;',
+    'var LEGACY_DROP_BLOCK = /<\\s*(script|style|applet|object)\\b[\\s\\S]*?<\\s*\\/\\s*\\1\\s*>/gi;',
+    'var LEGACY_DROP_BLOCK_SELF = /<\\s*(script|style|applet|object)\\b[^>]*\\/>/gi;',
+    'var LEGACY_DROP_TAG = /<\\s*\\/?\\s*(embed|param|base|meta|link)\\b[^>]*>/gi;',
+    'var LEGACY_TAG = /<\\/?[a-zA-Z][a-zA-Z0-9-]*(?:\\s[^<>]*?)?\\/?>/g;',
+    'var LEGACY_UNCLOSED_DANGEROUS = /^<\\s*\\/?\\s*(script|style|applet|object)\\b/i;',
+    'var LEGACY_EVENT_ATTR = /\\son[a-z]+\\s*=\\s*(?:"[^"]*"|\'[^\']*\'|[^\\s>]+)/gi;',
+    'var LEGACY_SRCDOC_ATTR = /\\ssrcdoc\\s*=\\s*(?:"[^"]*"|\'[^\']*\'|[^\\s>]+)/gi;',
+    'var LEGACY_BAD_URL_ATTR =',
+    '  /((?:href|src|xlink:href|action|formaction|poster|background|data)\\s*=\\s*)(["\'])\\s*(?:javascript|vbscript|livescript|mocha|data\\s*:\\s*text\\/html)[^"\']*\\2/gi;',
+    'var LEGACY_ENTITY = /&(#[xX][0-9a-fA-F]+|#\\d+|[a-zA-Z][a-zA-Z0-9]{1,9});/g;',
+    'var LEGACY_ENTITIES = {',
+    '  quot: \'"\', amp: \'&\', apos: "\'", lt: \'<\', gt: \'>\', nbsp: \' \', ensp: \' \', emsp: \' \', thinsp: \' \', shy: \'\',',
+    '  zwnj: \'\', zwj: \'\', iexcl: \'!\', cent: \'¢\', pound: \'£\', curren: \'¤\', yen: \'¥\', brvbar: \'¦\', sect: \'§\',',
+    '  uml: \'¨\', copy: \'©\', ordf: \'ª\', laquo: \'«\', not: \'¬\', reg: \'®\', macr: \'¯\', deg: \'°\', plusmn: \'±\',',
+    '  sup2: \'²\', sup3: \'³\', acute: \'´\', micro: \'µ\', para: \'¶\', middot: \'·\', cedil: \'¸\', sup1: \'¹\',',
+    '  ordm: \'º\', raquo: \'»\', frac14: \'¼\', frac12: \'½\', frac34: \'¾\', iquest: \'¿\', times: \'×\', divide: \'÷\',',
+    '  ndash: \'–\', mdash: \'—\', lsquo: \'‘\', rsquo: \'’\', sbquo: \'‚\', ldquo: \'“\', rdquo: \'”\', bdquo: \'„\',',
+    '  dagger: \'†\', Dagger: \'‡\', bull: \'•\', hellip: \'…\', permil: \'‰\', prime: \'′\', Prime: \'″\',',
+    '  lsaquo: \'‹\', rsaquo: \'›\', oline: \'‾\', frasl: \'⁄\', euro: \'€\', trade: \'™\',',
+    '  larr: \'←\', uarr: \'↑\', rarr: \'→\', darr: \'↓\', harr: \'↔\', infin: \'∞\', ne: \'≠\', le: \'≤\', ge: \'≥\',',
+    '  asymp: \'≈\', equiv: \'≡\', sum: \'∑\', prod: \'∏\', part: \'∂\', nabla: \'∇\', isin: \'∈\', notin: \'∉\',',
+    '  cap: \'∩\', cup: \'∪\', int: \'∫\', cong: \'≅\', sim: \'∼\', sube: \'⊆\', supe: \'⊇\', sub: \'⊂\', sup: \'⊃\',',
+    '  oplus: \'⊕\', otimes: \'⊗\', perp: \'⊥\', sdot: \'⋅\', lceil: \'⌈\', rceil: \'⌉\', lfloor: \'⌊\', rfloor: \'⌋\',',
+    '  loz: \'◊\', spades: \'♠\', clubs: \'♣\', hearts: \'♥\', diams: \'♦\',',
+    '  alpha: \'α\', beta: \'β\', gamma: \'γ\', delta: \'δ\', epsilon: \'ε\', zeta: \'ζ\', eta: \'η\', theta: \'θ\',',
+    '  iota: \'ι\', kappa: \'κ\', lambda: \'λ\', mu: \'μ\', nu: \'ν\', xi: \'ξ\', omicron: \'ο\', pi: \'π\', rho: \'ρ\',',
+    '  sigma: \'σ\', tau: \'τ\', upsilon: \'υ\', phi: \'φ\', chi: \'χ\', psi: \'ψ\', omega: \'ω\',',
+    '  Alpha: \'Α\', Beta: \'Β\', Gamma: \'Γ\', Delta: \'Δ\', Epsilon: \'Ε\', Zeta: \'Ζ\', Eta: \'Η\', Theta: \'Θ\',',
+    '  Iota: \'Ι\', Kappa: \'Κ\', Lambda: \'Λ\', Mu: \'Μ\', Nu: \'Ν\', Xi: \'Ξ\', Omicron: \'Ο\', Pi: \'Π\', Rho: \'Ρ\',',
+    '  Sigma: \'Σ\', Tau: \'Τ\', Upsilon: \'Υ\', Phi: \'Φ\', Chi: \'Χ\', Psi: \'Ψ\', Omega: \'Ω\'',
+    '};',
+    'var LEGACY_CORE_ENTITY_NAMES = { lt: 1, gt: 1, amp: 1, quot: 1, apos: 1 };',
+    'var LEGACY_CORE_ENTITY_CODES = { 38: 1, 60: 1, 62: 1, 34: 1, 39: 1 };',
+    '',
+    '/** 标签属性消毒：事件处理器 / srcdoc / 可执行协议。 */',
+    'function sanitizeLegacyTag(tag) {',
+    '  return String(tag)',
+    '    .replace(LEGACY_EVENT_ATTR, \'\')',
+    '    .replace(LEGACY_SRCDOC_ATTR, \'\')',
+    '    .replace(LEGACY_BAD_URL_ATTR, \'$1$2$2\');',
+    '}',
+    '',
+    '/** 还原常见命名与数字实体；未知实体原样保留（最终由上层按文本转义）。',
+    ' *  includeCore=false 时跳过 &lt; &gt; &amp; &quot; &apos;（及对应数字实体）。 */',
+    'function decodeLegacyEntities(text, includeCore) {',
+    '  if (includeCore === undefined) includeCore = true;',
+    '  return String(text).replace(LEGACY_ENTITY, function (match, name) {',
+    '    if (name.charAt(0) === \'#\') {',
+    '      var code = (name.charAt(1) === \'x\' || name.charAt(1) === \'X\')',
+    '        ? parseInt(name.slice(2), 16)',
+    '        : parseInt(name.slice(1), 10);',
+    '      if (!isFinite(code) || code <= 0 || code > 0x10ffff) return match;',
+    '      if (!includeCore && LEGACY_CORE_ENTITY_CODES[code]) return match;',
+    '      try { return String.fromCodePoint(code); } catch (e) { return match; }',
+    '    }',
+    '    var lower = name.toLowerCase();',
+    '    if (!includeCore && LEGACY_CORE_ENTITY_NAMES[lower]) return match;',
+    '    var hit = Object.prototype.hasOwnProperty.call(LEGACY_ENTITIES, name)',
+    '      ? LEGACY_ENTITIES[name]',
+    '      : (Object.prototype.hasOwnProperty.call(LEGACY_ENTITIES, lower) ? LEGACY_ENTITIES[lower] : undefined);',
+    '    return hit === undefined ? match : hit;',
+    '  });',
+    '}',
+    '',
+    '/** 归一化旧正文的原始 HTML：返回 { text, restore }。 */',
+    'function normalizeLegacyHtml(markdown) {',
+    '  var stash = [];',
+    '  var text = String(markdown == null ? \'\' : markdown);',
+    '',
+    '  var protect = function (re, keep) {',
+    '    text = text.replace(re, function (m) {',
+    '      stash.push(keep ? keep(m) : m);',
+    '      return \'\\u0002\' + (stash.length - 1) + \'\\u0002\';',
+    '    });',
+    '  };',
+    '',
+    '  // 1) 代码块与行内代码：整段保护，渲染后原样放回',
+    '  protect(/```[\\s\\S]*?(?:```|$)/g);',
+    '  protect(/`[^`\\n]*`/g);',
+    '  // 2) 注释',
+    '  text = text.replace(LEGACY_COMMENT, \'\');',
+    '  // 3) 死元素',
+    '  text = text.replace(LEGACY_DROP_BLOCK, \'\')',
+    '    .replace(LEGACY_DROP_BLOCK_SELF, \'\')',
+    '    .replace(LEGACY_DROP_TAG, \'\');',
+    '  // 4) 排版实体先还原（&nbsp; &hellip; …）',
+    '  text = decodeLegacyEntities(text, false);',
+    '  // 5) 剩余标签抽成占位符（属性消毒后保存）',
+    '  protect(LEGACY_TAG, function (tag) {',
+    '    return LEGACY_UNCLOSED_DANGEROUS.test(tag) ? \'\' : sanitizeLegacyTag(tag);',
+    '  });',
+    '  // 6) 核心实体最后还原',
+    '  text = decodeLegacyEntities(text, true);',
+    '',
+    '  return {',
+    '    text: text,',
+    '    restore: function (html) {',
+    '      return String(html == null ? \'\' : html).replace(/\\u0002(\\d+)\\u0002/g, function (m, idx) {',
+    '        var hit = stash[Number(idx)];',
+    '        return hit === undefined ? \'\' : hit;',
+    '      });',
+    '    }',
+    '  };',
+    '}',
+  ].join(nl) + nl;
+
+  const head = 'function renderMarkdown(md) {' + nl + "  var src = String(md || '');";
+  const tail = '  return html;' + nl + '}' + nl + nl + 'function escSmoji(';
+  if (!app.includes(head)) throw new Error('旧正文 HTML 归一化：未找到 renderMarkdown() 头部锚点');
+  if (!app.includes(tail)) throw new Error('旧正文 HTML 归一化：未找到 renderMarkdown() 尾部锚点');
+
+  let out = app.replace(head, () => helper +
+    'function renderMarkdown(md) {' + nl +
+    '  var legacy = normalizeLegacyHtml(md);' + nl +
+    '  var src = legacy.text;');
+  out = out.replace(tail, () =>
+    '  return legacy.restore(html);' + nl + '}' + nl + nl + 'function escSmoji(');
+
+  report.push('[ok]   旧正文 HTML 归一化（&nbsp; 实体 / <!--more--> / 失效 Flash 播放器，前后端同规则）');
+  return out;
+}
 let app = read('app.js');
 if (app.includes('function ensureLegacyAdmin()')) {
   if (!fs.existsSync(path.join(PUB, 'admin-legacy.js'))) {
@@ -579,6 +731,7 @@ if (app.includes('function ensureLegacyAdmin()')) {
 if (!fs.existsSync(path.join(PUB, 'boot.js'))) write('boot.js', BOOT_SOURCE);
 app = patchDisplayPolish(app);
 app = patchImageProxy(app);
+app = patchLegacyHtmlNormalization(app);
 write('app.js', app);
 normalizeIndexVersions();
 ensurePolishShell();
