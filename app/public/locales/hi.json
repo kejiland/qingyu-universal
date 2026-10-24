@@ -479,7 +479,7 @@
   "admin.settings.saveFail": "सहेजना विफल",
   "admin.settings.newMenu": "नया मेन्यू",
   "admin.settings.subMenu": "सबमेन्यू",
-  "admin.settings.navDragHint": "बाएँ हैंडल को खींचकर क्रम बदलें। 「खोज · सब」 से चिह्नित आइटम साइट के 「खोज」 ड्रॉपडाउन में दिखेंगे; लेयर बटन से कस्टम आइटम जोड़ें या हटाएँ।",
+  "admin.settings.navDragHint": "बाएँ हैंडल को खींचकर क्रम बदलें। लेयर बटन से कस्टम आइटम जोड़ें या हटाएँ।",
   "admin.settings.linkDragHint": "क्रम बदलने के लिए बाएँ हैंडल को खींचें।",
   "admin.settings.aiTab": "AI सहायक",
   "admin.settings.aiTitle": "AI सहायक",
@@ -584,7 +584,6 @@
   "admin.settings.jsonItemObject": "सरणी का हर आइटम ऑब्जेक्ट होना चाहिए ({} में लपेटें)।",
   "admin.settings.jsonNeedObject": "JSON ऑब्जेक्ट होना चाहिए (शीर्ष स्तर को {} में लपेटें)।",
   "admin.settings.navDragHandle": "खींचकर क्रम बदलें",
-  "admin.settings.navDiscoverBadge": "खोज · सब",
   "admin.settings.navDiscoverToggle": "「खोज」 ड्रॉपडाउन में जोड़ें/हटाएँ",
   "admin.settings.navDiscoverRemove": "「खोज」 ड्रॉपडाउन से हटाएँ",
   "admin.settings.addMenuItem": "मेन्यू आइटम जोड़ें",
@@ -1153,3 +1152,4 @@
   "admin.settings.featHomeTagsEmpty": "अभी कोई टैग नहीं — पहले पोस्ट में टैग जोड़ें",
   "admin.settings.featHomeTagsLoading": "टैग गिने जा रहे हैं…"
 }
+

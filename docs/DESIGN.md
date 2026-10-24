@@ -1,6 +1,6 @@
 # 界面设计规范（配色与可读性）
 
-> 适用范围：前台博客（`app/public/`）与管理后台（`admin/src/`）。
+> 适用范围：前台博客（`app/public/`）。
 > 目的：新增页面或调整主题色时，颜色不会「看着好看但看不清」。
 
 ## 一、先跑检查
@@ -10,9 +10,9 @@ npm run check:contrast      # 不达标时退出码为 1，CI 会直接失败
 npm run check:contrast -- --warn-only   # 只看不失败
 ```
 
-这个脚本会自动读取两个样式表里的主题变量，逐项计算对比度，覆盖：
+这个脚本会自动读取前台样式表里的主题变量，逐项计算对比度，覆盖：
 
-- 前台 / 后台 × 明色 / 暗色两套主题
+- 前台明色 / 暗色两套主题
 - 前台 4 套主题配色（赭橙 terra / 靛蓝 indigo / 竹青 bamboo / 暮紫 dusk）× 明暗
 
 ## 二、对比度底线（WCAG 2.1 AA）
@@ -38,14 +38,6 @@ npm run check:contrast -- --warn-only   # 只看不失败
 | `--accent-fg` | **主色实心底上的文字色** |
 | `--danger` `--danger-soft` | 危险提示 |
 
-后台（`admin/src/style.css`）：
-
-| 变量 | 用途 |
-| ---- | ---- |
-| `--ink` `--ink-soft` `--ink-muted` | 文字三级层次 |
-| `--canvas` `--surface` `--surface-2` `--surface-3` | 画布 / 卡片 / 次级底 |
-| `--accent` `--accent-hover` `--accent-soft` `--accent-fg` | 主色体系 |
-| `--success` `--warning` `--danger` `--info`（各带 `-soft`） | 状态色 |
 
 写死 `#c25e3a` 这类字面量是禁止的：换主题时会漏改，也是对比度检查抓不到的地方。
 
@@ -58,7 +50,7 @@ npm run check:contrast -- --warn-only   # 只看不失败
 - 明色主题：`--accent-fg: #ffffff`（主色本身够深，白字够清晰）
 - 暗色主题：`--accent-fg: <深色>`（主色够亮，改用深色字）
 
-后台主按钮已遵循此约定：
+前台主按钮已遵循此约定：
 
 ```css
 .btn-primary {
@@ -80,4 +72,3 @@ npm run check:contrast -- --warn-only   # 只看不失败
 - [ ] 主色实心底上的文字是否用了 `var(--accent-fg)`
 - [ ] 明暗两套主题都看过（浏览器切换主题后目视一遍）
 - [ ] `npm run check:contrast` 通过
-- [ ] `npm --prefix admin run typecheck` 通过

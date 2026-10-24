@@ -6003,8 +6003,7 @@
         var inDiscover = isDiscoverNav(it);
         // 三态：'1' 明确放入 / '0' 明确移出（含内置入口）/ null 未设置（内置项保持默认在「发现」里）
         var state = it.discover === true ? '1' : (it.discover === false ? '0' : null);
-        var badge = (builtin && inDiscover) ? '<span class="ab-nav-badge">' + t('admin.settings.navDiscoverBadge') + '</span>' : '';
-        var toggle = badge + '<button class="ab-btn-icon' + (inDiscover ? ' is-on' : '') + '" data-toggle-discover="' + i + '"'
+        var toggle = '<button class="ab-btn-icon' + (inDiscover ? ' is-on' : '') + '" data-toggle-discover="' + i + '"'
           + ' title="' + t(inDiscover ? 'admin.settings.navDiscoverRemove' : 'admin.settings.navDiscoverToggle') + '">' + icon('layers', 14) + '</button>';
         return '<div class="ab-nav-group"><div class="ab-nav-row' + (inDiscover ? ' is-discover' : '') + '" data-idx="' + i + '"'
           + (state === null ? '' : ' data-discover="' + state + '"') + '>' +

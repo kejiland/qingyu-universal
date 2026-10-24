@@ -25,7 +25,6 @@ Node 服务
   ├─ 文件          本地磁盘 data/（可选 S3 兼容对象存储）
   └─ 缓存          内存 + 定时任务 src/scheduler.ts
 
-管理后台        admin/          Vue 3 + Vite + Tailwind v4
 ```
 
 关键约束：**`app/` 不改**。上游代码原样同步，靠 `src/bindings` 适配，所以升级上游只需跑
@@ -49,7 +48,6 @@ qingyu-universal/
 │  ├─ cli/         migrate / seed / backup / restore / health / smoke
 │  ├─ index.ts     HTTP 入口
 │  └─ config.ts    环境变量校验（启动即校验）
-├─ admin/          管理后台（Vue 3，独立构建）
 ├─ deploy/         部署物（见下）
 ├─ scripts/        构建与上游同步脚本
 ├─ tests/          vitest 测试（22 个文件）
@@ -143,7 +141,6 @@ npm run dev            # 本地开发（tsx watch）
 npm run migrate        # 应用数据库迁移
 npm test               # vitest 全量测试
 npm run typecheck      # 类型检查
-npm run build:all      # 服务端 + 管理后台
 npm run sync:upstream  # 同步上游 qingyu-blog 代码
 npm run db:migrate:postgres   # SQLite → PostgreSQL
 ```

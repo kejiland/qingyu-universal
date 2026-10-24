@@ -11,5 +11,3 @@ screenshots
 .env.*
 !.env.example
 README.md
-admin/node_modules
-admin/dist

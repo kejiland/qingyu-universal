@@ -479,7 +479,7 @@
   "admin.settings.saveFail": "저장 실패",
   "admin.settings.newMenu": "새 메뉴",
   "admin.settings.subMenu": "서브메뉴",
-  "admin.settings.navDragHint": "왼쪽 핸들을 드래그하면 자유롭게 순서를 바꿀 수 있습니다. 「탐색 · 서브」로 표시된 항목은 사이트의 「탐색」 드롭다운에 나타납니다. 레이어 버튼으로 사용자 항목을 넣거나 뺄 수 있습니다.",
+  "admin.settings.navDragHint": "왼쪽 핸들을 드래그하면 자유롭게 순서를 바꿀 수 있습니다. 레이어 버튼으로 사용자 항목을 넣거나 뺄 수 있습니다.",
   "admin.settings.linkDragHint": "왼쪽 핸들을 드래그하면 순서를 바꿀 수 있습니다.",
   "admin.settings.aiTab": "AI 어시스턴트",
   "admin.settings.aiTitle": "AI 어시스턴트",
@@ -584,7 +584,6 @@
   "admin.settings.jsonItemObject": "배열의 각 항목은 객체여야 합니다({}로 감싸기).",
   "admin.settings.jsonNeedObject": "JSON 객체여야 합니다(최상위를 {}로 감싸기).",
   "admin.settings.navDragHandle": "드래그하여 정렬",
-  "admin.settings.navDiscoverBadge": "탐색 · 서브",
   "admin.settings.navDiscoverToggle": "「탐색」 드롭다운에 넣기/빼기",
   "admin.settings.navDiscoverRemove": "「탐색」 드롭다운에서 빼기",
   "admin.settings.addMenuItem": "메뉴 항목 추가",
@@ -1153,3 +1152,4 @@
   "admin.settings.featHomeTagsEmpty": "아직 태그가 없습니다. 먼저 글에 태그를 추가하세요",
   "admin.settings.featHomeTagsLoading": "태그 집계 중…"
 }
+

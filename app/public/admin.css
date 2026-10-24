@@ -715,8 +715,7 @@ select.ab-select { cursor: pointer; padding-right: 30px; }
   gap: 6px;
 }
 .ab-nav-row .ab-nav-text, .ab-nav-row .ab-nav-url { min-width: 0; }
-.ab-nav-discover { position: relative; display: flex; align-items: center; justify-content: center; height: 38px; }
-.ab-nav-discover .ab-nav-badge { position: absolute; right: calc(100% + 4px); top: 50%; transform: translateY(-50%); white-space: nowrap; }
+.ab-nav-discover { display: flex; align-items: center; justify-content: center; height: 38px; }
 .ab-nav-slot { display: block; width: 38px; height: 38px; }
 /* 子级行不再左缩进，改用底色区分层级，保证输入框与一级行等宽 */
 .ab-nav-row.child { padding-left: 0; background: var(--ab-hover); border-radius: 8px; }
@@ -754,17 +753,6 @@ select.ab-select { cursor: pointer; padding-right: 30px; }
 .ab-nav-row.drop-into {
   background: var(--ab-primary-weak);
   border-radius: 8px;
-}
-.ab-nav-badge {
-  flex: none;
-  font-size: 11.5px;
-  line-height: 1;
-  padding: 5px 8px;
-  border-radius: 999px;
-  color: var(--ab-primary);
-  background: var(--ab-primary-weak);
-  white-space: nowrap;
-  user-select: none;
 }
 .ab-btn-icon.is-on {
   color: var(--ab-primary);
@@ -1038,7 +1026,7 @@ select.ab-select { cursor: pointer; padding-right: 30px; }
  *   会永远回退到近白 #f7f8fa——暗色模式下「近白底 + 近白字」完全不可读（实测 1.16:1）。
  * · 选中态弃用「主色实底 + 白字」：深色模式主色本身是浅色（terra=#e08a63），
  *   白字对比仅 2.63:1 且整块胶囊过亮。改用后台既有的「弱主色底 + 主色字 + 主色描边」
- *   组合（与 .ab-nav-badge / .ab-btn-icon.is-on 同一套语汇），✓ 前缀强化选中语义。 */
+ *   组合（与 .ab-btn-icon.is-on 同一套语汇），✓ 前缀强化选中语义。 */
 .ab-tagpick{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;min-height:34px;align-items:center}
 .ab-tagchip{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;
   border:1px solid var(--ab-border,#e2e5ea);background:var(--ab-hover,#f2ede4);color:var(--ab-text,#333);

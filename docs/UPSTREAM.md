@@ -125,7 +125,7 @@ BASE_URL=http://localhost:8787 SETUP_KEY=... npm run smoke
 上游覆盖回单文件形态时会幂等重新拆分，并在必要时递增补丁版本。
 
 原生后台的自有增量（**同步时最容易被冲掉，务必核对**）：`/admin` 默认使用上游原生后台
-（`app/public/admin.js` + `admin.css`），本项目在它内部补齐了 Vue 新版后台独有的能力。
+（`app/public/admin.js` + `admin.css`），本项目在它内部补齐了原后台的增量能力。
 `cp -a /tmp/upstream/public app/public` 会整文件覆盖这两个文件，因此
 `npm run sync:upstream` 结束时会跑一次自检并在报告中列出缺失项。增量清单与判定标记：
 
@@ -149,9 +149,8 @@ BASE_URL=http://localhost:8787 SETUP_KEY=... npm run smoke
 `worker-env.ts` 里 `env.AI` 与 `env.R2_*` / `env.LOCAL_STORAGE` 的动态 getter。
 `npm run sync:upstream` 的 `checkAdminIncrements()` 会逐项核对这些标记。
 
-> Vue 后台（`admin/`）**不再默认挂载**：`/admin` 交给上游原生后台，
-> 只有 `ADMIN_SPA=1` 时 `src/app.ts` 才重新挂载 Vue SPA。
-> 因此同步上游后要确认的是「原生后台的增量还在」，而不是「admin/dist 还在」。
+> `/admin` 只使用上游原生后台（`app/public/admin.js` + `admin.css`），
+> 不再保留或挂载 Vue 后台。同步上游后要确认的是「原生后台的增量还在」。
 
 视觉打磨（自有改动）：外观改进**不写进上游 `style.css`**，全部放在独立的 `app/public/polish.css`，
 由构建产出 `polish.min.css` 并在主样式后加载。同步脚本同样幂等补回 `index.html` 的样式引用、

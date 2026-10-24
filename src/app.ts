@@ -24,7 +24,6 @@ import type { MigrationReport } from './migrate.js';
 import type { WorkerEnv, WorkerModule } from './types.js';
 import { createHealthHandler } from './routes/health.js';
 import { createConfigJsHandler } from './routes/config-js.js';
-import { adminAppAvailable, createAdminAppHandler } from './routes/admin-app.js';
 import { createSeoHandlers, type SeoDeps } from './routes/seo.js';
 import { createStaticExportHandler } from './routes/static-export.js';
 import { createImageProxyHandler } from './routes/image-proxy.js';
@@ -171,18 +170,6 @@ export function createApp(deps: AppDeps): Hono {
     app.on(['GET', 'HEAD'], '/guestbook', seo.guestbook);
   }
 
-  /* ---------- 后台 ----------
-   * 默认 **不挂载** Vue SPA：/admin 落到下面的兜底，由上游 worker 返回 SPA 外壳，
-   * 再经 app.js 的 ensureAdminBundle() 加载 app/public/admin.min.js（上游原生后台），
-   * 于是 /admin 保持上游的 UI / 布局 / 样式。
-   *
-   * 只有显式配置 ADMIN_SPA=1 时才挂载 Vue 版（构建产物需存在），
-   * 它会重新遮住 /admin，仅用于对照与排障。 */
-  if (config.adminSpa && adminAppAvailable(config.adminDistDir)) {
-    const adminApp = createAdminAppHandler(config.adminDistDir);
-    app.on(['GET', 'HEAD'], '/admin', adminApp.index);
-    app.on(['GET', 'HEAD'], '/admin/*', adminApp.asset);
-  }
 
   /* ---------- 前端配置注入 ---------- */
   const configJs = createConfigJsHandler(config);

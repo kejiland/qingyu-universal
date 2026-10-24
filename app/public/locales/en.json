@@ -479,8 +479,7 @@
   "admin.settings.saveFail": "Save failed",
   "admin.settings.newMenu": "New Menu",
   "admin.settings.subMenu": "Submenu",
-  "admin.settings.navDragHint": "Drag the handle on the left to reorder. Items marked \"Discover · sub\" show up in the front-end Explore dropdown; use the layers button to move custom items in or out.",
-  "admin.settings.linkDragHint": "Drag the handle on the left to reorder.",
+  "admin.settings.navDragHint": "Drag the handle on the left to reorder. Use the layers button to move menu items into or out of the front-end Explore dropdown.",
   "admin.settings.aiTab": "AI Assistant",
   "admin.settings.aiTitle": "AI Assistant",
   "admin.settings.aiHint": "Connect any OpenAI-compatible service for summaries, title/tag suggestions, polishing and comment moderation.",
@@ -584,7 +583,6 @@
   "admin.settings.jsonItemObject": "Every array item must be an object (wrap it in {}).",
   "admin.settings.jsonNeedObject": "Must be a JSON object (wrap the top level in {}).",
   "admin.settings.navDragHandle": "Drag to reorder",
-  "admin.settings.navDiscoverBadge": "Discover · sub",
   "admin.settings.navDiscoverToggle": "Move in / out of the Explore dropdown",
   "admin.settings.navDiscoverRemove": "Remove from the Explore dropdown",
   "admin.settings.addMenuItem": "Add menu item",
@@ -1153,3 +1151,6 @@
   "admin.settings.featHomeTagsEmpty": "No tags yet — add some to your posts first",
   "admin.settings.featHomeTagsLoading": "Counting tags…"
 }
+
+
+

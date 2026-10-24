@@ -1,30 +1,10 @@
 # ============================================================
 # 轻语博客 · 自托管通用版 镜像（多阶段构建）
 # ------------------------------------------------------------
-#   1) admin-build  后台 SPA（Vue + Vite + Tailwind）
-#   2) server-build 服务端 TypeScript
-#   3) 运行阶段      只带编译产物与生产依赖
+#   1) server-build 服务端 TypeScript
+#   2) 运行阶段      只带编译产物与生产依赖
 # 构建：docker build -f deploy/Dockerfile -t qingyu-universal .
 # ============================================================
-FROM node:24-alpine AS admin-build
-# 国内加速（--mirror）时由 compose 注入 npmmirror 源；留空走官方源
-ARG NPM_REGISTRY=""
-WORKDIR /app/admin
-
-# 小内存机器（1G VPS）专用：压住 V8 堆上限，让 GC 提前发生，
-# 避免 vite / tsc 构建到一半被内核 OOM Killer 直接杀掉。
-# 常规机器留空即可（用 Node 默认堆大小）。
-ARG NODE_OPTIONS=""
-ENV NODE_OPTIONS=$NODE_OPTIONS
-
-COPY admin/package.json admin/package-lock.json ./
-RUN if [ -n "$NPM_REGISTRY" ]; then npm config set registry "$NPM_REGISTRY"; fi \
- && npm ci --no-audit --no-fund
-
-COPY admin/ ./
-# 后台的类型来自服务端契约（@api-types 别名指向 ../generated）
-COPY generated/ /app/generated/
-RUN npm run build
 
 # ------------------------------------------------------------
 FROM node:24-alpine AS server-build
@@ -69,12 +49,10 @@ ENV BUILD_REVISION=$BUILD_REVISION \
     NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8787 \
-    DATA_DIR=/data \
-    ADMIN_DIST_DIR=/app/admin/dist
+    DATA_DIR=/data
 
 COPY --from=server-build /app/node_modules ./node_modules
 COPY --from=server-build /app/dist ./dist
-COPY --from=admin-build /app/admin/dist ./admin/dist
 COPY package.json ./
 # 使用 server-build 阶段生成的 app（含 boot / legacy 分包的最新压缩产物）
 COPY --from=server-build /app/app ./app

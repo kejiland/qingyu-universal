@@ -12,7 +12,7 @@ name: qingyu-universal
 services:
   app:
     # 默认直接用 GHCR 上 CI 构建好的镜像：拉取约 1~2 分钟，
-    # 在服务器上现场 build 要跑 tsc + vue-tsc，1G 小机器实测 6~10 分钟还容易 OOM。
+    # 在服务器上现场 build 要跑 tsc，1G 小机器实测 6~10 分钟还容易 OOM。
     # 需要改代码/自建镜像时用 compose.build.yaml 覆盖（见文件末尾说明）。
     image: ${QINGYU_IMAGE:-ghcr.io/kejiland/qingyu-universal:latest}
     container_name: qingyu-app

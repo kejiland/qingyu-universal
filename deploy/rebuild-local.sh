@@ -117,16 +117,16 @@ if docker inspect "$NAME" >/dev/null 2>&1; then
   # 环境变量：只带回「部署时自定义」的变量，其余一律跳过。
   #
   # 跳过的是镜像自带的 ENV（见 deploy/Dockerfile：BUILD_REVISION / NODE_ENV / HOST / PORT /
-  # DATA_DIR / ADMIN_DIST_DIR，以及 alpine 的 PATH / NODE_VERSION / YARN_VERSION）：
+  # DATA_DIR，以及 alpine 的 PATH / NODE_VERSION / YARN_VERSION）：
   #   · BUILD_REVISION 由本次 --build-arg 决定，从旧容器读回（往往是空串）会以
   #     `-e BUILD_REVISION=` 覆盖新镜像的值，让 /healthz 永远看不到 revision。
-  #   · DATA_DIR / ADMIN_DIST_DIR 是容器内固定路径，且**最容易被 Git Bash 改写成
+  #   · DATA_DIR 是容器内固定路径，且**最容易被 Git Bash 改写成
   #     `D:/Program Files/Git/data` 这类 Windows 路径** —— 一旦写进容器，应用启动即崩。
   while IFS= read -r line; do
     case "$line" in
       PATH=*|NODE_VERSION=*|YARN_VERSION=*) continue ;;
       BUILD_REVISION=*|NODE_ENV=*|HOST=*|PORT=*) continue ;;
-      DATA_DIR=*|ADMIN_DIST_DIR=*) continue ;;
+      DATA_DIR=*) continue ;;
       MSYS_NO_PATHCONV=*|MSYS2_ARG_CONV_EXCL=*|"") continue ;;
     esac
     # 守卫：剩下的变量若值以 / 开头（Git Bash 会改写它）或已被改写成盘符路径 → 报错退出。
