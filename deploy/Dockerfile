@@ -62,9 +62,9 @@ COPY deploy/postgres/schema.sql ./deploy/postgres/schema.sql
 RUN if [ -n "$ALPINE_MIRROR" ]; then \
       sed -i "s#https://dl-cdn.alpinelinux.org/alpine#${ALPINE_MIRROR%/}#g" /etc/apk/repositories; \
     fi \
- && apk add --no-cache postgresql-client \
- && mkdir -p /data \
- && chown -R node:node /data
+ && apk add --no-cache postgresql-client docker-cli docker-cli-compose \
+ && mkdir -p /data /state \
+ && chown -R node:node /data /state
 
 USER node
 EXPOSE 8787

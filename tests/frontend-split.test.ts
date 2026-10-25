@@ -150,6 +150,28 @@ describe('公开站视觉打磨（v0.8）', () => {
   });
 });
 
+/* 原生后台「设置 → 域名与 HTTPS」：与普通设置不同，这条链路写 .env 并重建容器。 */
+describe('原生后台域名与 HTTPS 页面', () => {
+  const admin = read('admin.js');
+  const domainLocales = ['zh-CN', 'en', 'ja', 'ko', 'hi'];
+  it('设置页有域名 tab，且走独立接口', () => {
+    expect(admin).toContain('data-tab="domain"');
+    expect(admin).toContain("api('api/admin/domain')");
+    // 域名写入 .env 并重建容器，必须走独立接口；不能混入 saveSettings 的 JSON 草稿。
+    expect(admin).not.toMatch(/settingsDraft\.domain/);
+  });
+
+  it('五种语言都提供域名与 HTTPS 文案', () => {
+    for (const lang of domainLocales) {
+      const dict = JSON.parse(
+        fs.readFileSync(path.resolve(`app/public/locales/${lang}.json`), 'utf8')
+      ) as Record<string, string>;
+      expect(dict['admin.settings.domainTitle']).toBeTruthy();
+      expect(dict['admin.settings.domainApply']).toBeTruthy();
+    }
+  });
+});
+
 describe('后台操作日志（审计）', () => {
   /** 后台筛选下拉里登记的动作（app/public/admin.js 的 AUDIT_ACTIONS） */
   function uiActions(): string[] {
@@ -167,7 +189,8 @@ describe('后台操作日志（审计）', () => {
       'app/functions/_lib/api-core.js',
       'app/functions/_lib/backup.js',
       'src/api/routes/admin-ai.ts',
-      'src/api/routes/admin-storage.ts'
+      'src/api/routes/admin-storage.ts',
+      'src/api/routes/admin-domain.ts'
     ];
     const out = new Set<string>();
     for (const rel of files) {

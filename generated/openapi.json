@@ -33,6 +33,9 @@
       "name": "存储"
     },
     {
+      "name": "域名"
+    },
+    {
       "name": "认证"
     },
     {
@@ -1640,6 +1643,251 @@
             "maximum": 20000
           }
         },
+        "additionalProperties": false
+      },
+      "DomainStatusResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "agentOnline": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "primary": {
+            "type": "string"
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "publicIp": {
+            "type": "string"
+          },
+          "httpsReady": {
+            "type": "boolean"
+          },
+          "dns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DomainDnsRecord"
+            }
+          },
+          "activeJob": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DomainJob"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "available",
+          "agentOnline",
+          "enabled",
+          "primary",
+          "aliases",
+          "publicIp",
+          "httpsReady",
+          "dns",
+          "activeJob",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "DomainDnsRecord": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "matches": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "domain",
+          "addresses",
+          "matches"
+        ],
+        "additionalProperties": false
+      },
+      "DomainJob": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "verify",
+              "enable",
+              "disable",
+              "update",
+              "remove"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "progress": {
+            "type": "number"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          },
+          "publicIp": {
+            "type": "string"
+          },
+          "dns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DomainDnsRecord"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "message",
+          "progress",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "DomainActionResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "job": {
+            "$ref": "#/components/schemas/DomainJob"
+          }
+        },
+        "required": [
+          "ok",
+          "job"
+        ],
+        "additionalProperties": false
+      },
+      "DomainVerifyBody": {
+        "type": "object",
+        "properties": {
+          "primary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "aliases": {
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "primary"
+        ],
+        "additionalProperties": false
+      },
+      "DomainUpdateBody": {
+        "type": "object",
+        "properties": {
+          "primary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "aliases": {
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "enable",
+              "update"
+            ]
+          }
+        },
+        "required": [
+          "primary"
+        ],
+        "additionalProperties": false
+      },
+      "DomainRemoveBody": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "default": "remove",
+            "type": "string",
+            "enum": [
+              "disable",
+              "remove"
+            ]
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "DomainJobResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "job": {
+            "$ref": "#/components/schemas/DomainJob"
+          }
+        },
+        "required": [
+          "ok",
+          "job"
+        ],
         "additionalProperties": false
       },
       "LoginResponse": {
@@ -3941,6 +4189,388 @@
             }
           }
         }
+      }
+    },
+    "/api/admin/domain": {
+      "get": {
+        "tags": [
+          "域名"
+        ],
+        "summary": "读取域名与 HTTPS 状态",
+        "operationId": "getApiAdminDomain",
+        "responses": {
+          "200": {
+            "description": "当前域名状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或会话已过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "仍需修改初始密码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "返回当前主域名、别名、DNS、证书状态和进行中的任务。未配置 domain-agent 时 available=false。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "域名"
+        ],
+        "summary": "启用或更新域名与 HTTPS",
+        "operationId": "putApiAdminDomain",
+        "responses": {
+          "202": {
+            "description": "启用或更新任务已创建",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainActionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "域名或 DNS 参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或会话已过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "仍需修改初始密码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "已有任务在执行",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "域名 Agent 不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "先验证所有域名的 DNS，再原子更新 .env、重启 app/Caddy，并实测 HTTPS healthz；失败会回滚 .env。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DomainUpdateBody"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "域名"
+        ],
+        "summary": "关闭 HTTPS 或移除域名",
+        "operationId": "deleteApiAdminDomain",
+        "responses": {
+          "202": {
+            "description": "关闭或移除任务已创建",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainActionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或会话已过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "仍需修改初始密码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "已有任务在执行",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "域名 Agent 不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "mode=disable 关闭 HTTPS 但保留已保存域名；mode=remove 同时清空主域名与别名，并恢复 HTTP 直连。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DomainRemoveBody"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/domain/verify": {
+      "post": {
+        "tags": [
+          "域名"
+        ],
+        "summary": "验证 DNS 是否指向本机",
+        "operationId": "postApiAdminDomainVerify",
+        "responses": {
+          "202": {
+            "description": "验证任务已创建",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainActionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "域名或 DNS 参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或会话已过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "仍需修改初始密码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "已有任务在执行",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "域名 Agent 不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "只验证 DNS 并记录任务，不修改 .env，也不重启容器。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DomainVerifyBody"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/domain/jobs/{id}": {
+      "get": {
+        "tags": [
+          "域名"
+        ],
+        "summary": "读取域名任务状态",
+        "operationId": "getApiAdminDomainJobsById",
+        "responses": {
+          "200": {
+            "description": "任务状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainJobResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权或会话已过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "仍需修改初始密码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "任务不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "域名 Agent 不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "description": "轮询异步域名任务。任务保存在 Agent 状态卷中，重启后未完成任务会明确标记失败。",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
       }
     },
     "/api/admin/login": {

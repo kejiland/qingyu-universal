@@ -251,6 +251,10 @@ COMPOSE_PROFILES=$profiles
 BLOG_ADMIN_SETUP_KEY=$(rand)
 BLOG_PREVIEW_SECRET=$(rand)
 BLOG_WRITE_TOKEN=$(rand)
+# 原生后台域名管理的内部 Agent 凭证（不会进浏览器）
+DOMAIN_AGENT_TOKEN=$(rand)
+QINGYU_PUBLIC_IP=$(public_ip)
+QINGYU_HOST_PROJECT_DIR=$INSTALL_DIR
 
 DATABASE_URL=$dburl
 
@@ -260,6 +264,27 @@ EOF
 }
 
 read_env() { grep -E "^$1=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true; }
+
+# 旧版本 .env 没有内部 Agent Token。升级时补一项，否则新加入的
+# domain-agent 会因 Token 太短直接退出，后台域名页只能显示不可用。
+ensure_domain_agent_token() {
+  installed || return 0
+  if [ -z "$(read_env DOMAIN_AGENT_TOKEN)" ]; then
+    if grep -q '^DOMAIN_AGENT_TOKEN=' "$ENV_FILE"; then
+      sed -i "s|^DOMAIN_AGENT_TOKEN=.*|DOMAIN_AGENT_TOKEN=$(rand)|" "$ENV_FILE"
+    else
+      printf '\n# 原生后台域名管理的内部 Agent 凭证\nDOMAIN_AGENT_TOKEN=%s\n' "$(rand)" >>"$ENV_FILE"
+    fi
+    ok "已为域名管理补生成 DOMAIN_AGENT_TOKEN"
+  fi
+  if [ -z "$(read_env QINGYU_HOST_PROJECT_DIR)" ]; then
+    if grep -q '^QINGYU_HOST_PROJECT_DIR=' "$ENV_FILE"; then
+      sed -i "s|^QINGYU_HOST_PROJECT_DIR=.*|QINGYU_HOST_PROJECT_DIR=$INSTALL_DIR|" "$ENV_FILE"
+    else
+      printf '\n# 宿主机项目绝对路径（容器内调用 Compose 重建时使用）\nQINGYU_HOST_PROJECT_DIR=%s\n' "$INSTALL_DIR" >>"$ENV_FILE"
+    fi
+  fi
+}
 
 wait_healthy() {
   local i
@@ -346,6 +371,7 @@ do_update() {
   step "更新"
   do_backup quiet || warn "备份失败，仍继续（更新本身不动数据）"
   fetch_code
+  ensure_domain_agent_token
   step "更新容器"
   up
   wait_healthy || warn "健康检查没通过，跑一下菜单第 8 项体检"

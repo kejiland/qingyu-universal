@@ -28,6 +28,9 @@ services:
       # 否则客户端伪造 X-Forwarded-For 就能绕过登录失败锁定、评论频控、点赞去重。
       # 详见 README「部署」一节。
       TRUST_PROXY: "${TRUST_PROXY:-1}"
+      # 域名管理只通过 Compose 内网的 domain-agent 执行；主应用不持有 Docker socket。
+      DOMAIN_AGENT_URL: http://domain-agent:8790
+      DOMAIN_AGENT_TOKEN: "${DOMAIN_AGENT_TOKEN:-}"
     volumes:
       - qingyu-data:/data
     # 两种部署模式共用同一个服务：
@@ -39,6 +42,46 @@ services:
       - qingyu
     # 限制容器日志大小：Docker 默认不轮转，小 VPS 上日志会把磁盘写满。
     # 每容器最多 3×10MB，超出自动丢弃最旧的。
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # 域名与 HTTPS 管理 Agent：常驻运行（不能放在 domain profile 里，
+  # 否则首次从后台启用域名时它自己不存在）。它独占 Docker socket，
+  # 串行执行 .env 原子修改、Compose 重建、DNS 与 HTTPS 验证。
+  domain-agent:
+    image: ${QINGYU_IMAGE:-ghcr.io/kejiland/qingyu-universal:latest}
+    container_name: qingyu-domain-agent
+    restart: unless-stopped
+    user: "0:0"
+    command: ["node", "dist/domain-agent/index.js"]
+    environment:
+      QINGYU_PROJECT_DIR: /project
+      QINGYU_ENV_FILE: /project/.env
+      # 从容器内调用宿主机 Docker 时，bind mount 必须使用宿主机绝对路径。
+      # 留空时 Agent 会通过 docker inspect 反查 /project 的真实来源。
+      QINGYU_HOST_PROJECT_DIR: "${QINGYU_HOST_PROJECT_DIR:-}"
+      DOMAIN_AGENT_STATE_DIR: /state
+      DOMAIN_AGENT_PORT: "8790"
+      DOMAIN_AGENT_TOKEN: "${DOMAIN_AGENT_TOKEN:-}"
+      QINGYU_PUBLIC_IP: "${QINGYU_PUBLIC_IP:-}"
+      APP_PORT: "${PORT:-8787}"
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-qingyu-universal}
+      COMPOSE_PROFILES: "${COMPOSE_PROFILES:-}"
+    volumes:
+      - ${QINGYU_HOST_PROJECT_DIR:-.}:/project
+      - domain-agent-state:/state
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - qingyu
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8790/status',{headers:{Authorization:'Bearer '+process.env.DOMAIN_AGENT_TOKEN}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
     logging:
       driver: json-file
       options:
@@ -110,7 +153,7 @@ services:
       - "443:443"
       - "443:443/udp"
     volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${QINGYU_HOST_PROJECT_DIR:-.}/deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
@@ -130,6 +173,7 @@ volumes:
   redis-data:
   caddy-data:
   caddy-config:
+  domain-agent-state:
 
 networks:
   qingyu:

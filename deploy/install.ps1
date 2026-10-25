@@ -259,6 +259,10 @@ function New-EnvFile {
     "BLOG_ADMIN_SETUP_KEY=$setupKey",
     "# 脚本 / CI 长期写入令牌",
     "BLOG_WRITE_TOKEN=$writeToken",
+    "# 原生后台域名管理：app 与内部 domain-agent 的共享凭证",
+    "DOMAIN_AGENT_TOKEN=$(New-Secret)",
+    "# 从容器内调用宿主机 Docker 时使用的项目路径",
+    "QINGYU_HOST_PROJECT_DIR=$InstallDir",
     "",
     "# 对象存储（留空 = 本地磁盘）",
     "S3_ENDPOINT=",
@@ -297,6 +301,14 @@ function New-EnvFile {
 function Ensure-Env {
   if (Test-Path $EnvFile) {
     Write-Step ".env 已存在，保持不覆盖（如需重配请手动编辑）"
+    # 旧版本没有内部 Agent Token；升级时只补这一项，避免 domain-agent 启动即退出。
+    if (-not (Get-EnvValue 'DOMAIN_AGENT_TOKEN')) {
+      Set-EnvValue 'DOMAIN_AGENT_TOKEN' (New-Secret)
+      Write-Step "已为域名管理补生成 DOMAIN_AGENT_TOKEN"
+    }
+    if (-not (Get-EnvValue 'QINGYU_HOST_PROJECT_DIR')) {
+      Set-EnvValue 'QINGYU_HOST_PROJECT_DIR' $InstallDir
+    }
     return $null
   }
   if (-not (Test-Path (Join-Path $InstallDir 'compose.yaml'))) {

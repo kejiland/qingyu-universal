@@ -52,6 +52,11 @@ const EnvSchema = z.object({
   HOST: z.string().trim().default('127.0.0.1'),
   SITE_URL: z.string().trim().optional(),
   SITE_DOMAIN: z.string().trim().default(''),
+  SITE_ALIASES: z.string().trim().default(''),
+  QINGYU_PUBLIC_IP: z.string().trim().default(''),
+  QINGYU_PROJECT_DIR: z.string().trim().default(''),
+  DOMAIN_AGENT_URL: z.string().trim().default(''),
+  DOMAIN_AGENT_TOKEN: z.string().default(''),
   DATA_DIR: z.string().trim().default('./data'),
   DATABASE_URL: z.string().trim().default(''),
 
@@ -162,6 +167,10 @@ export interface AppConfig {
   readonly port: number;
   readonly siteUrl: string;
   readonly siteDomain: string;
+  readonly siteAliases: string;
+  readonly publicIp: string;
+  readonly projectDir: string;
+  readonly domainAgent: { readonly url: string; readonly token: string };
   readonly dataDir: string;
 
   readonly dbPath: string;
@@ -269,6 +278,10 @@ export function loadConfig(): AppConfig {
     port: env.PORT,
     siteUrl,
     siteDomain: env.SITE_DOMAIN,
+    siteAliases: env.SITE_ALIASES,
+    publicIp: env.QINGYU_PUBLIC_IP,
+    projectDir: path.resolve(ROOT, env.QINGYU_PROJECT_DIR || '.'),
+    domainAgent: { url: normalizeBaseUrl(env.DOMAIN_AGENT_URL), token: env.DOMAIN_AGENT_TOKEN },
     dataDir,
 
     dbPath: path.join(dataDir, 'qingyu.db'),

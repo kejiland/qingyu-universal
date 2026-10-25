@@ -8,6 +8,7 @@ import { VERSION } from '../config.js';
 import { buildOpenApiDocument } from './openapi.js';
 import { adminAiRoutes } from './routes/admin-ai.js';
 import { adminStorageRoutes } from './routes/admin-storage.js';
+import { adminDomainRoutes } from './routes/admin-domain.js';
 import { adminRoutes } from './routes/admin.js';
 import { postRoutes } from './routes/posts.js';
 import { miscRoutes } from './routes/misc.js';
@@ -16,7 +17,7 @@ export const API_TITLE = '轻语博客 API';
 
 export function createApiDocument(serverUrl: string): Record<string, unknown> {
   return buildOpenApiDocument(
-    [...postRoutes, ...adminAiRoutes, ...adminStorageRoutes, ...adminRoutes, ...miscRoutes],
+    [...postRoutes, ...adminAiRoutes, ...adminStorageRoutes, ...adminDomainRoutes, ...adminRoutes, ...miscRoutes],
     {
       title: API_TITLE,
       version: VERSION,

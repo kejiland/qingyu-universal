@@ -36,6 +36,7 @@ import {
 import { registerApiRoutes, type ResponseValidation } from './api/registry.js';
 import { adminAiRoutes } from './api/routes/admin-ai.js';
 import { adminStorageRoutes } from './api/routes/admin-storage.js';
+import { adminDomainRoutes } from './api/routes/admin-domain.js';
 import { adminRoutes } from './api/routes/admin.js';
 import { postRoutes } from './api/routes/posts.js';
 import { miscRoutes } from './api/routes/misc.js';
@@ -100,6 +101,7 @@ export function createApp(deps: AppDeps): Hono {
   registerApiRoutes(
     app,
     {
+      config,
       worker: deps.worker,
       env: deps.env,
       db: deps.db,
@@ -109,7 +111,7 @@ export function createApp(deps: AppDeps): Hono {
       validateResponses: deps.validateResponses ?? 'warn',
       logger
     },
-    [...postRoutes, ...adminAiRoutes, ...adminStorageRoutes, ...adminRoutes, ...miscRoutes]
+    [...postRoutes, ...adminAiRoutes, ...adminStorageRoutes, ...adminDomainRoutes, ...adminRoutes, ...miscRoutes]
   );
 
   /* ---------- OpenAPI 文档 ---------- */

@@ -4269,6 +4269,7 @@
     'tag.rename', 'tag.delete',
     'comment.bulk',
     'settings.update', 'ai.update', 'storage.update', 'storage.migrate',
+    'domain.verify', 'domain.enable', 'domain.disable', 'domain.update', 'domain.remove',
     'admin.login', 'admin.login.fail', 'admin.logout',
     'backup.create', 'backup.restore', 'backup.delete',
     'audit.clear'
@@ -4770,30 +4771,43 @@
 
   function pageSettings(content) {
     content.innerHTML = '<div class="ab-page-head"><div><h1 class="ab-page-title">' + t('admin.settings.title') + '</h1><p class="ab-page-sub">' + t('admin.settings.desc') + '</p></div>' +
-      (cloudOn() ? '<button class="ab-btn primary" id="abSaveSettings">' + icon('save', 15) + ' ' + t('admin.settings.save') + '</button>' : '<span class="ab-chip" style="background:var(--ab-primary-weak);color:var(--ab-primary)">' + t('admin.categories.staticHint') + '</span>') + '</div>' +
-      (cloudOn() ? '' : '<div class="ab-card"><div class="ab-empty"><div class="ab-empty-ico">⚙️</div><p>' + t('admin.settings.cloudOnly') + '</p></div></div>');
-    if (!cloudOn()) return;
-    content.innerHTML += '<div class="ab-tabs">' +
-      '<div class="ab-tab" data-tab="site">' + t('admin.settings.siteInfo') + '</div>' +
-      '<div class="ab-tab" data-tab="features">' + t('admin.settings.features') + '</div>' +
-      '<div class="ab-tab" data-tab="profile">' + t('admin.settings.profile') + '</div>' +
-      '<div class="ab-tab" data-tab="nav">' + t('admin.settings.navMenu') + '</div>' +
-      '<div class="ab-tab" data-tab="footerNav">' + t('admin.settings.footerNav') + '</div>' +
-      '<div class="ab-tab" data-tab="friends">' + t('admin.settings.friendLinks') + '</div>' +
-      '<div class="ab-tab" data-tab="ai">' + t('admin.settings.aiTab') + '</div>' +
-      '<div class="ab-tab" data-tab="storage">' + t('admin.settings.storageTab') + '</div>' +
+      (cloudOn() ? '<button class="ab-btn primary" id="abSaveSettings">' + icon('save', 15) + ' ' + t('admin.settings.save') + '</button>' : '') + '</div>';
+    if (!cloudOn()) {
+      content.innerHTML += '<div class="ab-card"><div class="ab-empty"><div class="ab-empty-ico">⚙️</div><p>' + t('admin.settings.cloudOnly') + '</p></div></div>';
+    }
+    content.innerHTML +=
+      '<div class="ab-tabs">' +
+        '<div class="ab-tab" data-tab="site">' + t('admin.settings.siteInfo') + '</div>' +
+        '<div class="ab-tab" data-tab="features">' + t('admin.settings.features') + '</div>' +
+        '<div class="ab-tab" data-tab="profile">' + t('admin.settings.profile') + '</div>' +
+        '<div class="ab-tab" data-tab="nav">' + t('admin.settings.navMenu') + '</div>' +
+        '<div class="ab-tab" data-tab="footerNav">' + t('admin.settings.footerNav') + '</div>' +
+        '<div class="ab-tab" data-tab="friends">' + t('admin.settings.friendLinks') + '</div>' +
+        '<div class="ab-tab" data-tab="ai">' + t('admin.settings.aiTab') + '</div>' +
+        '<div class="ab-tab" data-tab="storage">' + t('admin.settings.storageTab') + '</div>' +
+        '<div class="ab-tab" data-tab="domain">' + t('admin.settings.domainTab') + '</div>' +
       '</div><div id="abSettingsBody"></div>';
-    content.querySelectorAll('.ab-tab').forEach(function (t) { t.addEventListener('click', function () { saveTabToDraft(content); content.querySelectorAll('.ab-tab').forEach(function (x) { x.classList.remove('active'); }); t.classList.add('active'); var key = t.getAttribute('data-tab'); rememberSettingsTab(key); renderSettingsTab(content, key); }); });
-    // 恢复上次停留的标签页；记录里的标签已不存在（如后台改版增删了 tab）则回落到第一个
     var tabsEl = content.querySelectorAll('.ab-tab');
+    tabsEl.forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        saveTabToDraft(content);
+        tabsEl.forEach(function (x) { x.classList.remove('active'); });
+        tab.classList.add('active');
+        var key = tab.getAttribute('data-tab');
+        rememberSettingsTab(key);
+        renderSettingsTab(content, key);
+      });
+    });
+    // 恢复上次停留的标签页；记录里的标签已不存在（如后台改版增删了 tab）则回落到第一个
     var last = readSettingsTab();
     var restored = null;
     tabsEl.forEach(function (x) { if (x.getAttribute('data-tab') === last) restored = x; });
     if (!restored) restored = tabsEl[0];
     if (restored) restored.classList.add('active');
     renderSettingsTab(content, restored ? restored.getAttribute('data-tab') : 'site');
-    content.querySelector('#abSaveSettings').addEventListener('click', function () { saveSettings(content); });
-    loadSettings(content);
+    var saveBtn = content.querySelector('#abSaveSettings');
+    if (saveBtn) saveBtn.addEventListener('click', function () { saveSettings(content); });
+    if (cloudOn()) loadSettings(content);
   }
   var settingsCache = {};
   // 内存草稿：各 tab 未保存的输入在此暂存，切换 tab 不丢失数据
@@ -5360,6 +5374,9 @@
         '</div>' +
       '</div>';
       bindAiSettings(content);
+    } else if (tab === 'domain') {
+      body.innerHTML = '<div id="abDomainBody"><div class="ab-empty"><p>' + esc(t('admin.settings.domainLoading')) + '</p></div></div>';
+      loadDomain(content.querySelector('#abDomainBody'));
     } else if (tab === 'storage') {
       body.innerHTML = '<div class="ab-card" style="max-width:760px">' +
         '<div class="ab-section-title">' + icon('cloud', 15) + ' ' + t('admin.settings.storageTitle') + '</div>' +
@@ -5434,6 +5451,160 @@
     }
     bindSettingsJsonButtons(content);
     fillSettings(content);
+  }
+
+
+  /* ---------- 设置页：域名与 HTTPS ----------
+   * 独立于「保存设置」草稿：域名写的是 .env，需要 Agent 真正重建 Caddy。
+   * 所有动作都必须等服务端任务结束，不能在点击时就显示成功。 */
+  var domainState = { data: null, loading: false, busy: false, timer: null, job: null };
+  function domainReady(d) { return !!(d && d.available && d.agentOnline); }
+  function domainDnsLabel(rec) {
+    var addrs = (rec && rec.addresses && rec.addresses.length) ? rec.addresses.join(', ') : '—';
+    return '<div class="ab-client-row" style="align-items:flex-start"><div style="min-width:0"><strong>' + esc(rec.domain) + '</strong><div class="ab-hint">' + esc(addrs) + '</div></div>' +
+      '<span class="ab-chip" style="' + (rec.matches ? 'color:var(--ab-ok);background:rgba(46,158,107,.12)' : 'color:var(--ab-danger);background:rgba(192,57,43,.10)') + '">' +
+      esc(rec.matches ? t('admin.settings.domainDnsOk') : t('admin.settings.domainDnsFail')) + '</span></div>';
+  }
+  function domainJobHtml(job) {
+    if (!job) return '';
+    var pct = Math.max(0, Math.min(100, Number(job.progress) || 0));
+    var color = job.status === 'failed' ? 'var(--ab-danger)' : (job.status === 'succeeded' ? 'var(--ab-ok)' : 'var(--ab-primary)');
+    return '<div class="ab-card" style="margin-top:14px;max-width:760px" aria-live="polite">' +
+      '<div class="ab-row" style="justify-content:space-between;gap:12px;flex-wrap:wrap"><strong>' + esc(t('admin.settings.domainTask')) + '</strong>' +
+      '<span class="ab-chip" style="color:' + color + '">' + esc(t('admin.settings.domainTask_' + job.status)) + '</span></div>' +
+      '<div style="height:7px;border-radius:999px;background:var(--ab-hover);overflow:hidden;margin:10px 0"><div style="height:100%;width:' + pct + '%;background:' + color + ';transition:width .2s"></div></div>' +
+      '<div class="ab-hint" style="word-break:break-word">' + esc(job.message || '') + '</div></div>';
+  }
+  function renderDomain(host) {
+    var d = domainState.data;
+    if (!host) return;
+    if (!d) { host.innerHTML = '<div class="ab-empty"><p>' + esc(t('admin.settings.domainLoading')) + '</p></div>'; return; }
+    var offline = !domainReady(d);
+    var aliases = (d.aliases || []).join('\n');
+    var dns = (d.dns || []).map(domainDnsLabel).join('');
+    var statusText = !d.available ? t('admin.settings.domainUnavailable')
+      : (!d.enabled ? t('admin.settings.domainDisabled') : (d.httpsReady ? t('admin.settings.domainHttpsOk') : t('admin.settings.domainHttpsPending')));
+    var statusColor = !d.available ? 'var(--ab-danger)' : (!d.enabled ? 'var(--ab-warn)' : (d.httpsReady ? 'var(--ab-ok)' : 'var(--ab-warn)'));
+    host.innerHTML =
+      '<div class="ab-card" style="max-width:760px">' +
+        '<div class="ab-section-title">' + icon('globe', 15) + ' ' + esc(t('admin.settings.domainTitle')) + '</div>' +
+        '<label class="ab-hint" style="display:block;margin-bottom:4px">' + esc(t('admin.settings.domainHint')) + '</label>' +
+        '<label class="ab-hint" style="display:block;margin-bottom:12px">' + esc(t('admin.settings.domainIndependent')) + '</label>' +
+        '<div class="ab-row" style="gap:8px;flex-wrap:wrap">' +
+          '<span class="ab-chip" style="color:' + statusColor + '">' + esc(statusText) + '</span>' +
+          '<span class="ab-chip">' + esc(t('admin.settings.domainAgent')) + ': ' + esc(domainReady(d) ? t('admin.settings.domainOnline') : t('admin.settings.domainOffline')) + '</span>' +
+          '<span class="ab-chip">' + esc(t('admin.settings.domainPublicIp')) + ': ' + esc(d.publicIp || '—') + '</span>' +
+        '</div>' +
+        (d.message ? '<div class="ab-field" style="margin-top:12px"><label class="ab-hint" style="color:var(--ab-warn);word-break:break-word">' + esc(d.message) + '</label></div>' : '') +
+        '<div class="ab-section-title" style="margin-top:16px">' + icon('sliders', 15) + ' ' + esc(t('admin.settings.domainConfig')) + '</div>' +
+        '<div class="ab-field"><label class="ab-label">' + esc(t('admin.settings.domainPrimary')) + '</label><input class="ab-input" id="abDomPrimary" placeholder="blog.example.com" spellcheck="false" autocomplete="off" value="' + esc(d.primary || '') + '"></div>' +
+        '<div class="ab-field"><label class="ab-label">' + esc(t('admin.settings.domainAliases')) + '</label><textarea class="ab-textarea" id="abDomAliases" spellcheck="false" placeholder="www.example.com" style="min-height:72px">' + esc(aliases) + '</textarea><label class="ab-hint">' + esc(t('admin.settings.domainAliasesHint')) + '</label></div>' +
+        '<div class="ab-row" style="gap:8px;flex-wrap:wrap;margin-top:12px">' +
+          '<button type="button" class="ab-btn" id="abDomVerify" ' + (offline ? 'disabled' : '') + '>' + icon('check', 14) + ' ' + esc(t('admin.settings.domainVerify')) + '</button>' +
+          '<button type="button" class="ab-btn primary" id="abDomApply" ' + (offline ? 'disabled' : '') + '>' + icon('save', 14) + ' ' + esc(t('admin.settings.domainApply')) + '</button>' +
+          '<button type="button" class="ab-btn" id="abDomDisable" ' + (offline || !d.enabled ? 'disabled' : '') + '>' + esc(t('admin.settings.domainDisable')) + '</button>' +
+          '<button type="button" class="ab-btn danger" id="abDomRemove" ' + (offline || (!d.primary && !d.enabled) ? 'disabled' : '') + '>' + icon('trash', 14) + ' ' + esc(t('admin.settings.domainRemove')) + '</button>' +
+          '<button type="button" class="ab-btn" id="abDomRefresh">' + icon('refresh', 14) + ' ' + esc(t('admin.settings.domainRefresh')) + '</button>' +
+        '</div>' +
+        '<div class="ab-field" style="margin-top:14px"><label class="ab-label">' + esc(t('admin.settings.domainDns')) + '</label>' +
+          (dns ? dns : '<div class="ab-hint">' + esc(t('admin.settings.domainNoDns')) + '</div>') + '</div>' +
+        '<div class="ab-card" style="background:var(--ab-hover);box-shadow:none;margin-top:14px">' +
+          '<strong style="display:block;margin-bottom:6px">' + esc(t('admin.settings.domainGuideTitle')) + '</strong>' +
+          '<div class="ab-hint" style="line-height:1.8">' + esc(t('admin.settings.domainGuide')) + '</div>' +
+          '<div class="ab-hint" style="line-height:1.8;margin-top:6px">' + esc(t('admin.settings.domainGuideProxy')) + '</div>' +
+        '</div>' +
+      '</div>' + domainJobHtml(d.activeJob || domainState.job) +
+      '<div id="abDomMsg" class="ab-hint" aria-live="polite" style="max-width:760px;margin-top:10px"></div>';
+    bindDomain(host);
+  }
+  function domainMessage(text, kind) {
+    var msg = document.querySelector('#abDomMsg');
+    if (!msg) return;
+    msg.textContent = text || '';
+    msg.style.color = kind === 'err' ? 'var(--ab-danger)' : (kind === 'ok' ? 'var(--ab-ok)' : '');
+  }
+  function domainBusy(on) {
+    domainState.busy = on;
+    var host = document.querySelector('#abDomainBody');
+    if (!host) return;
+    ['abDomVerify', 'abDomApply', 'abDomDisable', 'abDomRemove'].forEach(function (id) {
+      var el = host.querySelector('#' + id);
+      if (!el) return;
+      if (on) { el.setAttribute('data-was-disabled', el.disabled ? '1' : '0'); el.disabled = true; }
+      else if (el.getAttribute('data-was-disabled') !== '1') el.disabled = false;
+    });
+  }
+  function domainBody() {
+    var primary = val(document.querySelector('#abDomainBody') || document, '#abDomPrimary').trim();
+    var aliases = val(document.querySelector('#abDomainBody') || document, '#abDomAliases').split(/[\s,]+/).map(function (x) { return x.trim(); }).filter(Boolean);
+    return { primary: primary, aliases: aliases };
+  }
+  async function loadDomain(host) {
+    if (!host) return;
+    domainState.loading = true;
+    try {
+      var d = await api('api/admin/domain');
+      domainState.data = d;
+      renderDomain(host);
+      if (d && d.activeJob) pollDomainJob(d.activeJob.id);
+    } catch (e) {
+      domainState.data = { ok: true, available: false, agentOnline: false, enabled: false, primary: '', aliases: [], publicIp: '', httpsReady: false, dns: [], activeJob: null, message: e.message || String(e) };
+      renderDomain(host);
+    } finally { domainState.loading = false; }
+  }
+  function pollDomainJob(id) {
+    if (!id) return;
+    if (domainState.timer) clearTimeout(domainState.timer);
+    var poll = async function () {
+      try {
+        var r = await api('api/admin/domain/jobs/' + encodeURIComponent(id));
+        domainState.job = r.job;
+        var host = document.querySelector('#abDomainBody');
+        if (host) renderDomain(host);
+        if (r.job.status === 'queued' || r.job.status === 'running') {
+          domainState.timer = setTimeout(poll, 2500);
+        } else {
+          domainState.timer = null;
+          domainState.busy = false;
+          await loadDomain(document.querySelector('#abDomainBody'));
+        }
+      } catch (e) {
+        domainState.timer = null;
+        domainState.busy = false;
+        domainMessage((t('admin.settings.domainTaskFail') || '') + (e.message || e), 'err');
+      }
+    };
+    poll();
+  }
+  async function startDomainAction(kind) {
+    if (domainState.busy) return;
+    var payload = kind === 'verify' ? domainBody() : domainBody();
+    var opts;
+    if (kind === 'verify') opts = { method: 'POST', body: JSON.stringify(payload) };
+    else if (kind === 'apply') opts = { method: 'PUT', body: JSON.stringify(Object.assign(payload, { kind: domainState.data && domainState.data.enabled ? 'update' : 'enable' })) };
+    else if (kind === 'disable') opts = { method: 'DELETE', body: JSON.stringify({ mode: 'disable' }) };
+    else opts = { method: 'DELETE', body: JSON.stringify({ mode: 'remove' }) };
+    domainBusy(true);
+    domainMessage(t('admin.settings.domainStarting'), '');
+    try {
+      var r = await api('api/admin/domain' + (kind === 'verify' ? '/verify' : ''), opts);
+      domainState.job = r.job;
+      domainMessage(t('admin.settings.domainTaskQueued'), 'ok');
+      pollDomainJob(r.job.id);
+    } catch (e) {
+      domainBusy(false);
+      domainMessage((t('admin.settings.domainTaskFail') || '') + (e.message || e), 'err');
+    }
+  }
+  function bindDomain(host) {
+    var v = host.querySelector('#abDomVerify'); if (v) v.addEventListener('click', function () { startDomainAction('verify'); });
+    var a = host.querySelector('#abDomApply'); if (a) a.addEventListener('click', function () { startDomainAction('apply'); });
+    var d = host.querySelector('#abDomDisable'); if (d) d.addEventListener('click', function () { startDomainAction('disable'); });
+    var r = host.querySelector('#abDomRemove'); if (r) r.addEventListener('click', function () {
+      if (!window.confirm(t('admin.settings.domainRemoveConfirm'))) return;
+      startDomainAction('remove');
+    });
+    var f = host.querySelector('#abDomRefresh'); if (f) f.addEventListener('click', function () { loadDomain(host); });
   }
 
   /* ---------- 设置页：存储（媒体 / 音乐） ----------

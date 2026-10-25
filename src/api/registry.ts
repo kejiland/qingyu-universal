@@ -16,6 +16,7 @@
 import type { Context, Hono } from 'hono';
 import { z, type ZodType } from 'zod';
 import type { AppDatabase, WorkerEnv, WorkerModule } from '../types.js';
+import type { AppConfig } from '../config.js';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 
@@ -32,6 +33,8 @@ export interface ApiRequestSpec {
 
 export interface ApiContext {
   c: Context;
+  /** 已加载且冻结的应用配置（域名 Agent 等自托管扩展需要）。 */
+  config: AppConfig;
   /** 自托管数据库：仅供「上游没有、自托管新增」的接口使用（如后台 AI 配置）。 */
   db: AppDatabase;
   /** 上游 worker 期望的绑定集合（含动态 AI 绑定）。 */
@@ -64,6 +67,7 @@ export const proxyToUpstream = (ctx: ApiContext): Promise<Response> => ctx.callU
 export type ResponseValidation = 'off' | 'warn' | 'strict';
 
 export interface ApiDeps {
+  config: AppConfig;
   worker: WorkerModule;
   env: WorkerEnv;
   /** 自托管数据库（自托管新增接口用）。 */
@@ -189,6 +193,7 @@ export function registerApiRoutes(app: Hono, deps: ApiDeps, routes: ApiRoute[]):
 
       const response = await route.handler({
         c,
+        config: deps.config,
         db: deps.db,
         env: deps.env,
         appDir: deps.appDir,

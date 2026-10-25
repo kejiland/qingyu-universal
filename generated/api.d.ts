@@ -292,6 +292,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/domain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 读取域名与 HTTPS 状态
+         * @description 返回当前主域名、别名、DNS、证书状态和进行中的任务。未配置 domain-agent 时 available=false。
+         */
+        get: operations["getApiAdminDomain"];
+        /**
+         * 启用或更新域名与 HTTPS
+         * @description 先验证所有域名的 DNS，再原子更新 .env、重启 app/Caddy，并实测 HTTPS healthz；失败会回滚 .env。
+         */
+        put: operations["putApiAdminDomain"];
+        post?: never;
+        /**
+         * 关闭 HTTPS 或移除域名
+         * @description mode=disable 关闭 HTTPS 但保留已保存域名；mode=remove 同时清空主域名与别名，并恢复 HTTP 直连。
+         */
+        delete: operations["deleteApiAdminDomain"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/domain/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 验证 DNS 是否指向本机
+         * @description 只验证 DNS 并记录任务，不修改 .env，也不重启容器。
+         */
+        post: operations["postApiAdminDomainVerify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/domain/jobs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 读取域名任务状态
+         * @description 轮询异步域名任务。任务保存在 Agent 状态卷中，重启后未完成任务会明确标记失败。
+         */
+        get: operations["getApiAdminDomainJobsById"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/login": {
         parameters: {
             query?: never;
@@ -1651,6 +1719,65 @@ export interface components {
             deleteLocal?: boolean;
             limit?: number;
         };
+        DomainStatusResponse: {
+            /** @constant */
+            ok: true;
+            available: boolean;
+            agentOnline: boolean;
+            enabled: boolean;
+            primary: string;
+            aliases: string[];
+            publicIp: string;
+            httpsReady: boolean;
+            dns: components["schemas"]["DomainDnsRecord"][];
+            activeJob: components["schemas"]["DomainJob"] | null;
+            message: string;
+        };
+        DomainDnsRecord: {
+            domain: string;
+            addresses: string[];
+            matches: boolean;
+        };
+        DomainJob: {
+            id: string;
+            /** @enum {string} */
+            kind: "verify" | "enable" | "disable" | "update" | "remove";
+            /** @enum {string} */
+            status: "queued" | "running" | "succeeded" | "failed";
+            message: string;
+            progress: number;
+            createdAt: number;
+            updatedAt: number;
+            publicIp?: string;
+            dns?: components["schemas"]["DomainDnsRecord"][];
+        };
+        DomainActionResponse: {
+            /** @constant */
+            ok: true;
+            job: components["schemas"]["DomainJob"];
+        };
+        DomainVerifyBody: {
+            primary: string;
+            aliases?: string[];
+        };
+        DomainUpdateBody: {
+            primary: string;
+            aliases?: string[];
+            /** @enum {string} */
+            kind?: "enable" | "update";
+        };
+        DomainRemoveBody: {
+            /**
+             * @default remove
+             * @enum {string}
+             */
+            mode: "disable" | "remove";
+        };
+        DomainJobResponse: {
+            /** @constant */
+            ok: true;
+            job: components["schemas"]["DomainJob"];
+        };
         /** @description 登录成功返回会话 token */
         LoginResponse: {
             /** @constant */
@@ -2740,6 +2867,309 @@ export interface operations {
             };
             /** @description 仍需修改初始密码 */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getApiAdminDomain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前域名状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DomainStatusResponse"];
+                };
+            };
+            /** @description 未授权或会话已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 仍需修改初始密码 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    putApiAdminDomain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DomainUpdateBody"];
+            };
+        };
+        responses: {
+            /** @description 启用或更新任务已创建 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DomainActionResponse"];
+                };
+            };
+            /** @description 域名或 DNS 参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未授权或会话已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 仍需修改初始密码 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 已有任务在执行 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 域名 Agent 不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteApiAdminDomain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DomainRemoveBody"];
+            };
+        };
+        responses: {
+            /** @description 关闭或移除任务已创建 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DomainActionResponse"];
+                };
+            };
+            /** @description 参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未授权或会话已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 仍需修改初始密码 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 已有任务在执行 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 域名 Agent 不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    postApiAdminDomainVerify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DomainVerifyBody"];
+            };
+        };
+        responses: {
+            /** @description 验证任务已创建 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DomainActionResponse"];
+                };
+            };
+            /** @description 域名或 DNS 参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未授权或会话已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 仍需修改初始密码 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 已有任务在执行 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 域名 Agent 不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getApiAdminDomainJobsById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 任务状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DomainJobResponse"];
+                };
+            };
+            /** @description 未授权或会话已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 仍需修改初始密码 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 任务不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 域名 Agent 不可用 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
